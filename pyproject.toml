@@ -1,0 +1,17 @@
+[project]
+name = "audiotree"
+authors = [
+  { name="David Braun", email="braun@ccrma.stanford.edu" },
+]
+description = "Audio data loading and augmentations in JAX"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/DBraun/audiotree"
+Issues = "https://github.com/DBraun/audiotree/issues"
