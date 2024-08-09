@@ -7,6 +7,7 @@ The source code is `here <https://github.com/DBraun/audiotree>`_.
 There are two requirements:
 
 .. code-block:: bash
+   pip install "git+https://github.com/DBraun/argbind.git@improve.subclasses"
    pip install "git+https://github.com/DBraun/dm_aux.git@DBraun-patch-1"
    pip install "git+https://github.com/DBraun/jaxloudnorm.git@feature/speed-optimize"
 
