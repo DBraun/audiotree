@@ -1,5 +1,6 @@
 [project]
 name = "audiotree"
+dynamic = ["version", "dependencies", "optional-dependencies"]
 authors = [
   { name="David Braun", email="braun@ccrma.stanford.edu" },
 ]
@@ -12,6 +13,14 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+keywords = [
+    "audio",
+    "machine learning",
+]
+
 [project.urls]
 Homepage = "https://github.com/DBraun/audiotree"
 Issues = "https://github.com/DBraun/audiotree/issues"
+
+[tool.setuptools.dynamic]
+version = {attr = "audiotree.__version__"}
