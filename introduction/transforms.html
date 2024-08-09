@@ -249,7 +249,7 @@
 Examples include:</p>
 <blockquote>
 <div><ul class="simple">
-<li><p>GPU-based <a class="reference external" href="https://github.com/boris-kuz/jaxloudnorm/pull/1">volume normalization</a> to a LUFs value in a configurable uniformly sampled range</p></li>
+<li><p>GPU-based <a class="reference external" href="https://github.com/boris-kuz/jaxloudnorm/pull/1">volume normalization</a> to a LUFS value in a configurable uniformly sampled range</p></li>
 <li><p>Encoding to <a class="reference external" href="https://github.com/DBraun/DAC-JAX">DAC</a> audio tokens</p></li>
 <li><p>Swapping stereo channels</p></li>
 <li><p>Randomly shifting or corrupting the phase(s) of a waveform</p></li>
@@ -261,7 +261,9 @@ For the examples directly below, some other setup is required, so consider this 
 Before transformations, your data source might provide a single <a class="reference internal" href="../audiotree_api/core.html#audiotree.core.AudioTree" title="audiotree.core.AudioTree"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioTree</span></code></a> or a “tree” of <a class="reference internal" href="../audiotree_api/core.html#audiotree.core.AudioTree" title="audiotree.core.AudioTree"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioTree</span></code></a>:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">jax</span> <span class="kn">import</span> <span class="n">numpy</span> <span class="k">as</span> <span class="n">jnp</span>
 <span class="kn">from</span> <span class="nn">audiotree</span> <span class="kn">import</span> <span class="n">AudioTree</span>
-<span class="n">audio_tree</span> <span class="o">=</span> <span class="n">AudioTree</span><span class="p">(</span><span class="n">jnp</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">16</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">441000</span><span class="p">)),</span> <span class="mi">44100</span><span class="p">)</span>  <span class="c1"># dummy placeholder shaped (B, C, T)</span>
+<span class="n">sample_rate</span> <span class="o">=</span> <span class="mi">44100</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">jnp</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">16</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">441000</span><span class="p">))</span>  <span class="c1"># dummy placeholder shaped (B, C, T)</span>
+<span class="n">audio_tree</span> <span class="o">=</span> <span class="n">AudioTree</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">sample_rate</span><span class="p">)</span>
 <span class="n">batch</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;src&quot;</span><span class="p">:</span> <span class="p">[</span><span class="n">audio_tree</span><span class="p">,</span> <span class="n">audio_tree</span><span class="p">],</span> <span class="s2">&quot;target&quot;</span><span class="p">:</span> <span class="n">audio_tree</span><span class="p">}</span>
 </pre></div>
 </div>
@@ -276,12 +278,12 @@ Before transformations, your data source might provide a single <a class="refere
 <span class="w">        </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span>
 </pre></div>
 </div>
-<p>By setting <code class="docutils literal notranslate"><span class="pre">split_seed</span></code> to False, you can apply the same augmentations to both the <code class="docutils literal notranslate"><span class="pre">src</span></code> and <code class="docutils literal notranslate"><span class="pre">target</span></code>.
-This would make the most sense if the waveforms in <code class="docutils literal notranslate"><span class="pre">src</span></code> and <code class="docutils literal notranslate"><span class="pre">target</span></code> have the same dimensions.
-For some transformations, having differently sized tensors would cause the augmentations to be different despite sharing the same <code class="docutils literal notranslate"><span class="pre">jax.random.PRNGKey</span></code>.</p>
+<p>By setting <code class="docutils literal notranslate"><span class="pre">split_seed</span></code> to False, you can apply the same augmentations to both the <code class="docutils literal notranslate"><span class="pre">src</span></code> and <code class="docutils literal notranslate"><span class="pre">target</span></code>.</p>
 <div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">VolumeChange.split_seed</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
 </pre></div>
 </div>
+<p>This would make the most sense if the waveforms in <code class="docutils literal notranslate"><span class="pre">src</span></code> and <code class="docutils literal notranslate"><span class="pre">target</span></code> have the same dimensions.
+For some transformations, having differently sized tensors would cause the augmentations to be different despite sharing the same <code class="docutils literal notranslate"><span class="pre">jax.random.PRNGKey</span></code>.</p>
 <p>You can specify an output key so that the result of the transformation is stored in a new sibling key:</p>
 <div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">VolumeChange.output_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;src_modified&quot;</span>
 <span class="nt">VolumeChange.scope</span><span class="p">:</span>
@@ -340,11 +342,11 @@ For some transformations, having differently sized tensors would cause the augme
 </div>
 <p>Note that the <code class="docutils literal notranslate"><span class="pre">max_db</span></code> is inherited by both <code class="docutils literal notranslate"><span class="pre">src</span></code> and <code class="docutils literal notranslate"><span class="pre">target</span></code>.
 This ability to inherit comes at the cost of potential name clashes between the keys of the config (e.g., <code class="docutils literal notranslate"><span class="pre">&quot;min_db&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;max_db&quot;</span></code>) and the keys in the AudioTree (<code class="docutils literal notranslate"><span class="pre">&quot;src&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;target&quot;</span></code>, etc.).
-The user is expected to create their AudioTrees in a way that avoids these clashes.</p>
+The user is expected to use a data source to create AudioTrees that avoid these clashes.</p>
 <section id="examples">
 <h2>Examples<a class="headerlink" href="#examples" title="Link to this heading">¶</a></h2>
 <p>For now, the <a class="reference external" href="https://github.com/DBraun/audiotree/blob/main/tests/transforms/test_core.py">tests/transforms/test_core.py</a> is somewhat useful for thinking through the expected outputs.
-AudioTree is also used in <a class="reference external" href="https://github.com/DBraun/DAC-JAX">DAC-JAX</a>, which shows how to use <a class="reference external" href="https://github.com/pseeth/argbind/">ArgBind</a> and data sources.</p>
+AudioTree is also used in <a class="reference external" href="https://github.com/DBraun/DAC-JAX">DAC-JAX</a>, which <a class="reference external" href="https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py">shows</a> how to use <a class="reference external" href="https://github.com/pseeth/argbind/">ArgBind</a> and data sources.</p>
 </section>
 </section>
 

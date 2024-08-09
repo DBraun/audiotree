@@ -248,6 +248,34 @@
 that are specially designed for audio. Grain is a new library for dataset operations in JAX with no TensorFlow dependency.</p>
 <p>For now, there are only two types of Data Sources, but they fit many needs.
 You can take a look at DAC-JAX’s <a class="reference external" href="https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py">input_pipeline.py</a> to see how they’re used.</p>
+<p>Both <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.AudioDataSimpleSource" title="audiotree.datasources.core.AudioDataSimpleSource"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioDataSimpleSource</span></code></a> and <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.AudioDataBalancedSource" title="audiotree.datasources.core.AudioDataBalancedSource"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioDataBalancedSource</span></code></a> are initialized with a dictionary of <code class="docutils literal notranslate"><span class="pre">sources</span></code>.
+For example, with ArgBind, the YAML might be this (adapted from <a class="reference external" href="https://github.com/descriptinc/descript-audio-codec/blob/main/conf/base.yml">DAC</a>):</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">train/AudioDataSimpleSource.sources</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">speech_fb</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/daps/train</span>
+<span class="w">    </span><span class="nt">speech_hq</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/vctk</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/vocalset</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/read_speech</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/french_speech</span>
+<span class="w">    </span><span class="nt">speech_uq</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/emotional_speech/</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/common_voice/</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/german_speech/</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/russian_speech/</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/spanish_speech/</span>
+<span class="w">    </span><span class="nt">music_hq</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/musdb/train</span>
+<span class="w">    </span><span class="nt">music_uq</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/jamendo</span>
+<span class="w">    </span><span class="nt">general</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/audioset/data/unbalanced_train_segments/</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/audioset/data/balanced_train_segments/</span>
+</pre></div>
+</div>
+<p>The second thing to know is that both <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.AudioDataSimpleSource" title="audiotree.datasources.core.AudioDataSimpleSource"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioDataSimpleSource</span></code></a> and <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.AudioDataBalancedSource" title="audiotree.datasources.core.AudioDataBalancedSource"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioDataBalancedSource</span></code></a>
+can be initialized with an instance of <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.SaliencyParams" title="audiotree.datasources.core.SaliencyParams"><code class="xref py py-class docutils literal notranslate"><span class="pre">SaliencyParams</span></code></a>. If <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.SaliencyParams" title="audiotree.datasources.core.SaliencyParams"><code class="xref py py-class docutils literal notranslate"><span class="pre">SaliencyParams</span></code></a> has <code class="docutils literal notranslate"><span class="pre">enabled</span></code>
+set to <code class="docutils literal notranslate"><span class="pre">True</span></code>, then a random section of an audio file will be selected until it meets a specified minimum loudness.</p>
 </section>
 
         </article>

@@ -27,10 +27,12 @@ For example, in the code below, we consider ``batch`` to be an ``AudioTree``.
 
     from jax import numpy as jnp
     from audiotree import AudioTree
-    audio_tree = AudioTree(jnp.zeros((16, 2, 441000)), 44100)  # dummy placeholder shaped (B, C, T)
+    sample_rate = 44100
+    data = jnp.zeros((16, 2, 441000)) # dummy placeholder shaped (B, C, T)
+    audio_tree = AudioTree(data, sample_rate)
     batch = {"src": [audio_tree, audio_tree], "target": audio_tree}
 
-The batch above can be used with `jax.tree.map <https://jax.readthedocs.io/en/latest/_autosummary/jax.tree.map.html#jax.tree.map>`_ to create a new batch. That's essentially what the Transform classes in :data:`~audiotree.transforms` do.
+The batch above can be used with `jax.tree.map <https://jax.readthedocs.io/en/latest/_autosummary/jax.tree.map.html#jax.tree.map>`_ to create a new batch. That's essentially what the Transform classes in :mod:`~audiotree.transforms` do.
 They perform GPU-based jit-compatible augmentations on arbitrarily shaped AudioTrees.
 They are also highly configurable from the command-line and YAML.
 
@@ -53,8 +55,21 @@ Content
    audiotree_api/datasources
    audiotree_api/transforms
 
-
 Acknowledgments
 ---------------
 
 AudioTree is inspired by `AudioTools <https://github.com/descriptinc/audiotools/>`_. Thank you!
+
+Citation
+---------------
+
+.. code-block::
+
+   @software{Braun_AudioTree_2024,
+      author = {Braun, David},
+      month = aug,
+      title = {{AudioTree}},
+      url = {https://github.com/DBraun/audiotree},
+      version = {0.0.5},
+      year = {2024}
+   }
