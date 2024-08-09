@@ -17,7 +17,7 @@ Transforms in ``audiotree.transforms`` are `Grain <https://github.com/google/gra
 `transformations <https://github.com/google/grain/blob/754636534bb16b5b2dd74970043d03e24ea44d3f/docs/transformations.md>`_ that operate on batches.
 Examples include:
 
-   * GPU-based `volume normalization <https://github.com/boris-kuz/jaxloudnorm/pull/1>`_ to a LUFs value in a configurable uniformly sampled range
+   * GPU-based `volume normalization <https://github.com/boris-kuz/jaxloudnorm/pull/1>`_ to a LUFS value in a configurable uniformly sampled range
    * Encoding to `DAC <https://github.com/DBraun/DAC-JAX>`_ audio tokens
    * Swapping stereo channels
    * Randomly shifting or corrupting the phase(s) of a waveform
@@ -31,7 +31,9 @@ Before transformations, your data source might provide a single :class:`~audiotr
 
     from jax import numpy as jnp
     from audiotree import AudioTree
-    audio_tree = AudioTree(jnp.zeros((16, 2, 441000)), 44100)  # dummy placeholder shaped (B, C, T)
+    sample_rate = 44100
+    data = jnp.zeros((16, 2, 441000))  # dummy placeholder shaped (B, C, T)
+    audio_tree = AudioTree(data, sample_rate)
     batch = {"src": [audio_tree, audio_tree], "target": audio_tree}
 
 Then from YAML you can write the following to get a 90% chance of a random volume change between -12 and 3 decibels on just the ``"src"`` :class:`~audiotree.core.AudioTree`:
@@ -48,12 +50,13 @@ Then from YAML you can write the following to get a 90% chance of a random volum
             scope: True
 
 By setting ``split_seed`` to False, you can apply the same augmentations to both the ``src`` and ``target``.
-This would make the most sense if the waveforms in ``src`` and ``target`` have the same dimensions.
-For some transformations, having differently sized tensors would cause the augmentations to be different despite sharing the same ``jax.random.PRNGKey``.
 
 .. code-block:: yaml
 
     VolumeChange.split_seed: 0
+
+This would make the most sense if the waveforms in ``src`` and ``target`` have the same dimensions.
+For some transformations, having differently sized tensors would cause the augmentations to be different despite sharing the same ``jax.random.PRNGKey``.
 
 You can specify an output key so that the result of the transformation is stored in a new sibling key:
 
@@ -125,10 +128,10 @@ You can also make more powerful (but complex) configs and scopes:
 
 Note that the ``max_db`` is inherited by both ``src`` and ``target``.
 This ability to inherit comes at the cost of potential name clashes between the keys of the config (e.g., ``"min_db"``, ``"max_db"``) and the keys in the AudioTree (``"src"``, ``"target"``, etc.).
-The user is expected to create their AudioTrees in a way that avoids these clashes.
+The user is expected to use a data source to create AudioTrees that avoid these clashes.
 
 Examples
 --------
 
 For now, the `tests/transforms/test_core.py <https://github.com/DBraun/audiotree/blob/main/tests/transforms/test_core.py>`_ is somewhat useful for thinking through the expected outputs.
-AudioTree is also used in `DAC-JAX <https://github.com/DBraun/DAC-JAX>`_, which shows how to use `ArgBind <https://github.com/pseeth/argbind/>`_ and data sources.
+AudioTree is also used in `DAC-JAX <https://github.com/DBraun/DAC-JAX>`_, which `shows <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_ how to use `ArgBind <https://github.com/pseeth/argbind/>`_ and data sources.
