@@ -32,6 +32,9 @@ jobs:
         sudo apt-get install libsndfile-dev
         python -m pip install --upgrade pip
         pip install ".[dev]"
+        pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
+        pip install git+https://github.com/DBraun/jaxloudnorm.git@feature/speed-optimize
+        pip install git+https://github.com/DBraun/dm_aux.git@DBraun-patch-1
 
     - name: Run tests
       run: |
@@ -56,6 +59,9 @@ jobs:
         sudo apt-get install libsndfile-dev
         python -m pip install --upgrade pip
         pip install ".[dev]"
+        pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
+        pip install git+https://github.com/DBraun/jaxloudnorm.git@feature/speed-optimize
+        pip install git+https://github.com/DBraun/dm_aux.git@DBraun-patch-1
         pip install furo
 
     - name: Build Docs
