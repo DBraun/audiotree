@@ -4,9 +4,10 @@ AudioTree documentation
 **AudioTree** is a `JAX <https://jax.readthedocs.io/en/latest/>`_ library for audio data loading and augmentations.
 The source code is `here <https://github.com/DBraun/audiotree>`_.
 
-There are two requirements:
+There are three requirements:
 
 .. code-block:: bash
+
    pip install "git+https://github.com/DBraun/argbind.git@improve.subclasses"
    pip install "git+https://github.com/DBraun/dm_aux.git@DBraun-patch-1"
    pip install "git+https://github.com/DBraun/jaxloudnorm.git@feature/speed-optimize"
