@@ -258,7 +258,7 @@ pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot
 </div>
 <p>The namesake class <a class="reference internal" href="audiotree_api/core.html#audiotree.core.AudioTree" title="audiotree.core.AudioTree"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioTree</span></code></a> is a <a class="reference external" href="https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass">flax.struct.dataclass</a>
 with properties for audio data, sample rate, on-demand data such as loudness, and optional metadata such as MIDI pitch, velocity, and duration.
-Although <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code> is a specific class, we loosely refer to any combination of dictionaries and lists of <code class="docutils literal notranslate"><span class="pre">AudioTrees</span></code> as also an <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code>.
+Although <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code> is a specific class, we loosely refer to any combination of dictionaries and lists of <code class="docutils literal notranslate"><span class="pre">AudioTrees</span></code> as also an <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code> (check out the <a class="reference external" href="https://jax.readthedocs.io/en/latest/pytrees.html">Pytree JAX docs</a>).
 For example, in the code below, we consider <code class="docutils literal notranslate"><span class="pre">batch</span></code> to be an <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code>.</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">jax</span> <span class="kn">import</span> <span class="n">numpy</span> <span class="k">as</span> <span class="n">jnp</span>
 <span class="kn">from</span> <span class="nn">audiotree</span> <span class="kn">import</span> <span class="n">AudioTree</span>
@@ -270,8 +270,8 @@ For example, in the code below, we consider <code class="docutils literal notran
 </div>
 <p>The batch above can be used with <a class="reference external" href="https://jax.readthedocs.io/en/latest/_autosummary/jax.tree.map.html#jax.tree.map">jax.tree.map</a> to create a new batch. That’s essentially what the Transform classes in <code class="xref py py-mod docutils literal notranslate"><span class="pre">transforms</span></code> do.
 They perform GPU-based jit-compatible augmentations on arbitrarily shaped AudioTrees.
-They are also highly configurable from the command-line and YAML.</p>
-<p>Whether you’re creating a data loader for training, validation, testing, or prompt generation, <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code> can help.</p>
+When used with <a class="reference external" href="https://github.com/pseeth/argbind/">ArgBind</a>, they are also highly configurable from the command-line and YAML.</p>
+<p>Whether you’re creating a data loader for training, validation, testing, or prompt generation, AudioTree can help.</p>
 <section id="content">
 <h2>Content<a class="headerlink" href="#content" title="Link to this heading">¶</a></h2>
 <div class="toctree-wrapper compound">
@@ -371,7 +371,7 @@ They are also highly configurable from the command-line and YAML.</p>
       
     </aside>
   </div>
-</div><script src="_static/documentation_options.js?v=d45e8c67"></script>
+</div><script src="_static/documentation_options.js?v=282f96c0"></script>
     <script src="_static/doctools.js?v=9a2dae69"></script>
     <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/scripts/furo.js?v=5fa4622c"></script>
