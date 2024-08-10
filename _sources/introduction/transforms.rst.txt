@@ -23,6 +23,9 @@ Examples include:
    * Randomly shifting or corrupting the phase(s) of a waveform
    * and more...
 
+Basics
+------
+
 AudioTree is compatible with `ArgBind <https://github.com/pseeth/argbind/>`_ but does not require it.
 For the examples directly below, some other setup is required, so consider this to be an overview.
 Before transformations, your data source might provide a single :class:`~audiotree.core.AudioTree` or a "tree" of :class:`~audiotree.core.AudioTree`:
@@ -57,6 +60,10 @@ By setting ``split_seed`` to False, you can apply the same augmentations to both
 
 This would make the most sense if the waveforms in ``src`` and ``target`` have the same dimensions.
 For some transformations, having differently sized tensors would cause the augmentations to be different despite sharing the same ``jax.random.PRNGKey``.
+
+
+Output Key
+----------
 
 You can specify an output key so that the result of the transformation is stored in a new sibling key:
 
@@ -115,6 +122,9 @@ We can produce this shape:
         }
     }
 
+Inheritance
+-----------
+
 You can also make more powerful (but complex) configs and scopes:
 
 .. code-block:: yaml
@@ -130,8 +140,27 @@ Note that the ``max_db`` is inherited by both ``src`` and ``target``.
 This ability to inherit comes at the cost of potential name clashes between the keys of the config (e.g., ``"min_db"``, ``"max_db"``) and the keys in the AudioTree (``"src"``, ``"target"``, etc.).
 The user is expected to use a data source to create AudioTrees that avoid these clashes.
 
-Examples
---------
+Without ArgBind
+---------------
+
+Above, we've been using ArgBind and YAML, but we can create transforms with just Python:
+
+
+.. code-block:: python
+
+    from audiotree.transforms import VolumeNorm
+
+    config = {
+        "max_db": -6,
+        "src": {"min_db": -20},
+        "target": {"min_db": -15},
+    }
+
+    transform = VolumeNorm(config=config, split_seed=True, prob=0.9, scope=None)
+    audio_tree = transform.random_map(audio_tree)
+
+Further examples
+----------------
 
 For now, the `tests/transforms/test_core.py <https://github.com/DBraun/audiotree/blob/main/tests/transforms/test_core.py>`_ is somewhat useful for thinking through the expected outputs.
 AudioTree is also used in `DAC-JAX <https://github.com/DBraun/DAC-JAX>`_, which `shows <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_ how to use `ArgBind <https://github.com/pseeth/argbind/>`_ and data sources.

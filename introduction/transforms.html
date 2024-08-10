@@ -6,7 +6,7 @@
 <link rel="index" title="Index" href="../genindex.html" /><link rel="search" title="Search" href="../search.html" /><link rel="next" title="audiotree" href="../audiotree_api/core.html" /><link rel="prev" title="Data Sources" href="datasources.html" />
 
     <!-- Generated with Sphinx 8.0.2 and Furo 2024.08.06 -->
-        <title>Transforms - AudioTree documentation</title>
+        <title>Transforms - AudioTree documentation, v0.1.0</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=354aac6f" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=302659d7" />
@@ -166,7 +166,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">AudioTree documentation</div></a>
+      <a href="../index.html"><div class="brand">AudioTree documentation, v0.1.0</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -190,7 +190,7 @@
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
   
-  <span class="sidebar-brand-text">AudioTree documentation</span>
+  <span class="sidebar-brand-text">AudioTree documentation, v0.1.0</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -256,6 +256,8 @@ Examples include:</p>
 <li><p>and more…</p></li>
 </ul>
 </div></blockquote>
+<section id="basics">
+<h2>Basics<a class="headerlink" href="#basics" title="Link to this heading">¶</a></h2>
 <p>AudioTree is compatible with <a class="reference external" href="https://github.com/pseeth/argbind/">ArgBind</a> but does not require it.
 For the examples directly below, some other setup is required, so consider this to be an overview.
 Before transformations, your data source might provide a single <a class="reference internal" href="../audiotree_api/core.html#audiotree.core.AudioTree" title="audiotree.core.AudioTree"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioTree</span></code></a> or a “tree” of <a class="reference internal" href="../audiotree_api/core.html#audiotree.core.AudioTree" title="audiotree.core.AudioTree"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioTree</span></code></a>:</p>
@@ -284,6 +286,9 @@ Before transformations, your data source might provide a single <a class="refere
 </div>
 <p>This would make the most sense if the waveforms in <code class="docutils literal notranslate"><span class="pre">src</span></code> and <code class="docutils literal notranslate"><span class="pre">target</span></code> have the same dimensions.
 For some transformations, having differently sized tensors would cause the augmentations to be different despite sharing the same <code class="docutils literal notranslate"><span class="pre">jax.random.PRNGKey</span></code>.</p>
+</section>
+<section id="output-key">
+<h2>Output Key<a class="headerlink" href="#output-key" title="Link to this heading">¶</a></h2>
 <p>You can specify an output key so that the result of the transformation is stored in a new sibling key:</p>
 <div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">VolumeChange.output_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;src_modified&quot;</span>
 <span class="nt">VolumeChange.scope</span><span class="p">:</span>
@@ -331,6 +336,9 @@ For some transformations, having differently sized tensors would cause the augme
 <span class="p">}</span>
 </pre></div>
 </div>
+</section>
+<section id="inheritance">
+<h2>Inheritance<a class="headerlink" href="#inheritance" title="Link to this heading">¶</a></h2>
 <p>You can also make more powerful (but complex) configs and scopes:</p>
 <div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">VolumeChange.config</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">max_db</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">3</span>
@@ -343,8 +351,25 @@ For some transformations, having differently sized tensors would cause the augme
 <p>Note that the <code class="docutils literal notranslate"><span class="pre">max_db</span></code> is inherited by both <code class="docutils literal notranslate"><span class="pre">src</span></code> and <code class="docutils literal notranslate"><span class="pre">target</span></code>.
 This ability to inherit comes at the cost of potential name clashes between the keys of the config (e.g., <code class="docutils literal notranslate"><span class="pre">&quot;min_db&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;max_db&quot;</span></code>) and the keys in the AudioTree (<code class="docutils literal notranslate"><span class="pre">&quot;src&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;target&quot;</span></code>, etc.).
 The user is expected to use a data source to create AudioTrees that avoid these clashes.</p>
-<section id="examples">
-<h2>Examples<a class="headerlink" href="#examples" title="Link to this heading">¶</a></h2>
+</section>
+<section id="without-argbind">
+<h2>Without ArgBind<a class="headerlink" href="#without-argbind" title="Link to this heading">¶</a></h2>
+<p>Above, we’ve been using ArgBind and YAML, but we can create transforms with just Python:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">audiotree.transforms</span> <span class="kn">import</span> <span class="n">VolumeNorm</span>
+
+<span class="n">config</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;max_db&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">6</span><span class="p">,</span>
+    <span class="s2">&quot;src&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;min_db&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">20</span><span class="p">},</span>
+    <span class="s2">&quot;target&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;min_db&quot;</span><span class="p">:</span> <span class="o">-</span><span class="mi">15</span><span class="p">},</span>
+<span class="p">}</span>
+
+<span class="n">transform</span> <span class="o">=</span> <span class="n">VolumeNorm</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">split_seed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">prob</span><span class="o">=</span><span class="mf">0.9</span><span class="p">,</span> <span class="n">scope</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+<span class="n">audio_tree</span> <span class="o">=</span> <span class="n">transform</span><span class="o">.</span><span class="n">random_map</span><span class="p">(</span><span class="n">audio_tree</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="further-examples">
+<h2>Further examples<a class="headerlink" href="#further-examples" title="Link to this heading">¶</a></h2>
 <p>For now, the <a class="reference external" href="https://github.com/DBraun/audiotree/blob/main/tests/transforms/test_core.py">tests/transforms/test_core.py</a> is somewhat useful for thinking through the expected outputs.
 AudioTree is also used in <a class="reference external" href="https://github.com/DBraun/DAC-JAX">DAC-JAX</a>, which <a class="reference external" href="https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py">shows</a> how to use <a class="reference external" href="https://github.com/pseeth/argbind/">ArgBind</a> and data sources.</p>
 </section>
@@ -406,7 +431,11 @@ AudioTree is also used in <a class="reference external" href="https://github.com
           <div class="toc-tree">
             <ul>
 <li><a class="reference internal" href="#">Transforms</a><ul>
-<li><a class="reference internal" href="#examples">Examples</a></li>
+<li><a class="reference internal" href="#basics">Basics</a></li>
+<li><a class="reference internal" href="#output-key">Output Key</a></li>
+<li><a class="reference internal" href="#inheritance">Inheritance</a></li>
+<li><a class="reference internal" href="#without-argbind">Without ArgBind</a></li>
+<li><a class="reference internal" href="#further-examples">Further examples</a></li>
 </ul>
 </li>
 </ul>
@@ -418,7 +447,7 @@ AudioTree is also used in <a class="reference external" href="https://github.com
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=282f96c0"></script>
+</div><script src="../_static/documentation_options.js?v=01f34227"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/scripts/furo.js?v=5fa4622c"></script>
