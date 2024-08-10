@@ -52,6 +52,7 @@ class AudioTree:
         offset: float = 0,
         duration: float = None,
         mono: bool = False,
+        cpu: bool = False,
     ):
         """Create an AudioTree from an audio file path.
 
@@ -68,7 +69,6 @@ class AudioTree:
             audio_path, sr=sample_rate, offset=offset, duration=duration, mono=mono
         )
         assert sr == sample_rate
-        data = jnp.array(data, dtype=jnp.float32)
         if data.ndim == 1:
             data = data[None, None, :]  # Add batch and channel dimension
         elif data.ndim == 2:
@@ -76,7 +76,10 @@ class AudioTree:
 
         if duration is not None and data.shape[-1] < round(duration * sample_rate):
             pad_right = round(duration * sample_rate) - data.shape[-1]
-            data = jnp.pad(data, ((0, 0), (0, 0), (0, pad_right)))
+            data = np.pad(data, ((0, 0), (0, 0), (0, pad_right)))
+
+        if not cpu:
+            data = jnp.array(data, dtype=jnp.float32)
 
         return cls(
             audio_data=data,

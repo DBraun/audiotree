@@ -329,7 +329,7 @@ class ReduceBatchTransform(grain.MapTransform):
                 if leaf.ndim > 1:
                     shape = leaf.shape
                     shape = (shape[0] * shape[1],) + shape[2:]
-                    return jnp.reshape(leaf, shape=shape)
+                    return leaf.reshape(shape)
             return leaf
 
         audio_signal = jax.tree_util.tree_map(f, audio_signal)

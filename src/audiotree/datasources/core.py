@@ -83,6 +83,7 @@ class AudioDataSourceMixin:
                 sample_rate=self.sample_rate,
                 duration=self.duration,
                 mono=self.mono,
+                cpu=self.cpu,
             )
 
         return AudioTree.from_file(
@@ -91,6 +92,7 @@ class AudioDataSourceMixin:
             offset=0,
             duration=self.duration,
             mono=self.mono,
+            cpu=self.cpu,
         )
 
 
@@ -105,6 +107,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         extensions: List[str] = None,
         num_steps: int = None,
         saliency_params: SaliencyParams = None,
+        cpu: bool = False,
     ):
 
         self.sample_rate = sample_rate
@@ -113,6 +116,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         if extensions is None:
             extensions = _default_extensions
         self.saliency_params = saliency_params
+        self.cpu = cpu
 
         filepaths = []
         for group_name, folders in sources.items():
@@ -163,6 +167,7 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         duration: float = 1.0,
         extensions: List[str] = None,
         saliency_params: SaliencyParams = None,
+        cpu: bool = False,
     ):
 
         self.sample_rate = sample_rate
@@ -171,6 +176,7 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         if extensions is None:
             extensions = _default_extensions
         self.saliency_params = saliency_params
+        self.cpu = cpu
 
         groups = []
 
@@ -216,3 +222,37 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         file_path = file_paths_in_group[x]
 
         return self.load_audio(file_path, record_key)
+
+
+class BatchDataIterator:
+
+    def __init__(
+        self,
+        dataloader: grain.DataLoader,
+        operations: List[grain.Transformation],
+        seed: int,
+    ):
+        self.dataloader = iter(dataloader)
+        self.operations = operations
+        self.seed = seed
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        try:
+            batch = next(self.dataloader)
+        except StopIteration:
+            raise StopIteration
+        for transform in self.operations:
+            if isinstance(transform, grain.RandomMapTransform):
+                self.seed += 1
+                batch = transform.random_map(batch, np.random.default_rng(self.seed))
+            elif isinstance(transform, grain.MapTransform):
+                batch = transform.map(batch)
+            elif hasattr(transform, "np_random_map"):  # TfRandomMapTransform
+                self.seed += 1
+                batch = transform.np_random_map(batch, np.random.default_rng(self.seed))
+            else:
+                raise ValueError(f"Unknown operation type: {type(transform)}")
+        return batch
