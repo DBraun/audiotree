@@ -22,6 +22,7 @@ class SaliencyParams:
         num_tries (int): Maximum number of attempts to find a salient section of audio (default 8).
         loudness_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
     """
+
     enabled: bool = field(default=False)
     num_tries: int = 8
     loudness_cutoff: float = -40

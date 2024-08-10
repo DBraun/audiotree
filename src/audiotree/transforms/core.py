@@ -29,6 +29,7 @@ class Identity(BaseMapTransform):
         def get_default_config() -> Dict[str, Any]:
             return {}
     """
+
     @staticmethod
     def get_default_config() -> Dict[str, Any]:
         return {}
@@ -69,7 +70,7 @@ class VolumeChange(BaseRandomTransform):
 
 
 class VolumeNorm(BaseRandomTransform):
-    """Normalize the volume to a randomly selected loudness value specified in LUFs.
+    """Normalize the volume to a randomly selected loudness value specified in LUFS.
 
     .. code-block:: python
 
@@ -80,6 +81,7 @@ class VolumeNorm(BaseRandomTransform):
                 "max_db": 0,
             }
     """
+
     @staticmethod
     def get_default_config() -> Dict[str, Any]:
         return {
@@ -98,8 +100,8 @@ class VolumeNorm(BaseRandomTransform):
 
 class RescaleAudio(BaseMapTransform):
     """
-    Rescale the audio so that the largest absolute value is 1.0. If none of the values are outside the range [-1., 1.],
-    then no transformation is applied.
+    Rescale the audio so that the largest absolute value is 1.0. If none of the values are outside the range
+    ``[-1., 1.]``, then no transformation is applied.
 
     .. code-block:: python
 
@@ -107,6 +109,7 @@ class RescaleAudio(BaseMapTransform):
         def get_default_config() -> Dict[str, Any]:
             return {}
     """
+
     @staticmethod
     def get_default_config() -> Dict[str, Any]:
         return {}
@@ -118,7 +121,7 @@ class RescaleAudio(BaseMapTransform):
 
 class InvertPhase(BaseMapTransform):
     """
-    Invert the phase of both channels of audio.
+    Invert the phase of all channels of audio.
 
     .. code-block:: python
 
@@ -126,6 +129,7 @@ class InvertPhase(BaseMapTransform):
         def get_default_config() -> Dict[str, Any]:
             return {}
     """
+
     @staticmethod
     def get_default_config() -> Dict[str, Any]:
         return {}
@@ -223,7 +227,7 @@ class ShiftPhase(BaseRandomTransform):
 
 class Choose(grain.RandomMapTransform):
     """
-    With probability ``prob``, choose a ``c`` transform(s) among ``transforms`` with optional probability weights
+    With probability ``prob``, choose ``c`` transform(s) among ``transforms`` with optional probability weights
     ``weights``.
     """
 
@@ -269,9 +273,9 @@ class Choose(grain.RandomMapTransform):
 
 
 class NeuralAudioCodecEncodeTransform(grain.MapTransform):
-
     """
-    Use a neural audio codec such as Descript Audio Codec (DAC) to encode audio into tokens.
+    Use a neural audio codec such as `Descript Audio Codec (DAC) <https://github.com/DBraun/DAC-JAX>`_ to encode audio
+    into tokens.
 
     Args:
         encode_audio_fn (Callable): A jitted function that takes audio shaped ``(B, C, T)`` and returns tokens

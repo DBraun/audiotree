@@ -9,7 +9,7 @@
 project = 'AudioTree'
 copyright = '2024, David Braun'
 author = 'David Braun'
-release = '0.0.1'
+release = '0.0.5'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
