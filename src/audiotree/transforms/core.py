@@ -328,7 +328,7 @@ class ReduceBatchTransform(grain.MapTransform):
     def map(self, audio_signal: AudioTree) -> AudioTree:
 
         def f(leaf):
-            if isinstance(leaf, np.ndarray):
+            if isinstance(leaf, np.ndarray) or isinstance(leaf, jnp.ndarray):
                 if leaf.ndim > 1:
                     shape = leaf.shape
                     shape = (shape[0] * shape[1],) + shape[2:]
