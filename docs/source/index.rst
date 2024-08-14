@@ -18,9 +18,11 @@ Then AudioTree can be installed with pip:
 
    pip install audiotree
 
-The namesake class :class:`~audiotree.core.AudioTree` is a `flax.struct.dataclass <https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass>`_
-with properties for audio data, sample rate, on-demand data such as loudness, and optional metadata such as MIDI pitch, velocity, and duration.
-Although ``AudioTree`` is a specific class, we loosely refer to any combination of dictionaries and lists of ``AudioTrees`` as also an ``AudioTree`` (check out the `Pytree JAX docs <https://jax.readthedocs.io/en/latest/pytrees.html>`_).
+The namesake class :class:`~audiotree.core.AudioTree` is a `flax.struct.dataclass`_ with properties for audio data,
+sample rate, on-demand data such as loudness, and optional metadata such as MIDI pitch, velocity, and duration.
+
+Although ``AudioTree`` is a specific class, we loosely refer to any combination of dictionaries and lists of
+``AudioTrees`` as also an ``AudioTree`` (check out the `Pytree`_ JAX docs).
 For example, in the code below, we consider ``batch`` to be an ``AudioTree``.
 
 .. code-block:: python
@@ -32,9 +34,10 @@ For example, in the code below, we consider ``batch`` to be an ``AudioTree``.
     audio_tree = AudioTree(data, sample_rate)
     batch = {"src": [audio_tree, audio_tree], "target": audio_tree}
 
-The batch above can be used with `jax.tree.map <https://jax.readthedocs.io/en/latest/_autosummary/jax.tree.map.html#jax.tree.map>`_ to create a new batch. That's essentially what the Transform classes in :mod:`~audiotree.transforms` do.
-They perform GPU-based jit-compatible augmentations on arbitrarily shaped AudioTrees.
-When used with `ArgBind <https://github.com/pseeth/argbind/>`_, they are also highly configurable from the command-line and YAML.
+The batch above can be used with `jax.tree.map`_ to create a new batch. That's essentially what the Transform classes in
+:mod:`~audiotree.transforms` do.
+They perform GPU-based `jax.jit`_-compatible augmentations on arbitrarily shaped AudioTrees.
+When used with `ArgBind`_, they are also highly configurable from the command-line and YAML.
 
 Whether you're creating a data loader for training, validation, testing, or prompt generation, AudioTree can help.
 
@@ -58,7 +61,7 @@ Content
 Acknowledgments
 ---------------
 
-AudioTree is inspired by `AudioTools <https://github.com/descriptinc/audiotools/>`_. Thank you!
+AudioTree is inspired by `AudioTools`_. Thank you!
 
 Citation
 ---------------
@@ -70,6 +73,13 @@ Citation
       month = aug,
       title = {{AudioTree}},
       url = {https://github.com/DBraun/audiotree},
-      version = {0.0.5},
+      version = {0.1.0},
       year = {2024}
    }
+
+.. _flax.struct.dataclass: https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass
+.. _Pytree: https://jax.readthedocs.io/en/latest/pytrees.html
+.. _jax.tree.map: https://jax.readthedocs.io/en/latest/_autosummary/jax.tree.map.html#jax.tree.map
+.. _jax.jit: https://jax.readthedocs.io/en/latest/_autosummary/jax.jit.html
+.. _ArgBind: https://github.com/pseeth/argbind/
+.. _AudioTools: https://github.com/descriptinc/audiotools/

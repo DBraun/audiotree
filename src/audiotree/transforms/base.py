@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Union
 import warnings
 
 from grain.python import MapTransform, RandomMapTransform
@@ -91,13 +91,24 @@ class BaseTransformMixIn:
         raise NotImplementedError("Must be implemented in subclass")
 
     @staticmethod
+    def _pre_transform(element):
+        """
+        Apply a transform that will occur regardless of ``prob``.
+        """
+        return element
+
+    @staticmethod
     def _apply_transform(element, rng: jax.Array, **kwargs):
         """
         Apply the transformation to the given element.
 
-        :param element: Input element to transform
-        :param rng: Random number generator key
-        :param kwargs: Additional type-annotated keyword arguments for the transformation.
+        Args:
+            element (Any): Element to be transformed.
+            rng (jax.Array): jax.random.PRNGKey
+            **kwargs: Additional type-annotated keyword arguments for the transformation.
+
+        Returns:
+            Any: The transformed element.
         """
         raise NotImplementedError("Must be implemented in subclass")
 
@@ -144,18 +155,19 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         split_seed: bool = True,
         prob: float = 1.0,
         scope: Dict[str, Any] = None,
-        output_key: Callable[[List[str]], str] = None,
+        output_key: Union[str, Callable[[List[str]], str]] = None,
     ):
         """
         Initialize the base transform with a configuration, a flag for seed splitting, a probability, a scope, and an
         output key.
 
-        :param config: Configuration dictionary for the transform
-        :param split_seed: Whether to split the seed for each leaf
-        :param prob: Probability of applying the transform
-        :param scope: Dictionary indicating which modalities to apply the transform to
-        :param output_key: Key under which to store the transformed value. By default, the values will be transformed
-            in-place.
+        Args:
+            config (Dict[str, Any]): Configuration dictionary for the transform
+            split_seed (bool, optional): Whether to split the seed for each leaf. Defaults to True.
+            prob (float, optional): Probability of applying the transform. Defaults to 1.0.
+            scope (Dict[str, Any], optional): Dictionary indicating which modalities to apply the transform to
+            output_key (Union[str, Callable[[List[str]], str]], optional): Key under which to store the transformed
+                value. By default, the values will be transformed in-place.
         """
         assert 0 <= prob <= 1
         self.default_config = self.get_default_config()
@@ -173,25 +185,31 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
                 "You have set a custom `output_key`, but `prob` is less than one. This may result in missing leaves."
             )
 
-    def random_map(self, element: Any, rng: np.random.Generator) -> Any:
+    def random_map(
+        self, element: Any, rng: Union[np.random.Generator, jax.Array]
+    ) -> Any:
         """
         Apply the random mapping to the given element using the provided seed.
 
-        :param element: Input element to transform
-        :param rng: numpy random generator
-        :return: Transformed element
+        Args:
+            element (Any): Input element to transform
+            rng (jax.Array): jax.random.PRNGKey or numpy random generator
+        Returns:
+            Any: transformed element
         """
 
-        # todo: is there a better way to seed jax.random from this numpy random Generator?
-        seed = rng.integers(2**63)
-        key = random.PRNGKey(seed)
+        if isinstance(rng, jax.Array):
+            key = rng
+        else:
+            # todo: is there a better way to seed jax.random from this numpy random Generator?
+            seed = rng.integers(2**63)
+            key = random.PRNGKey(seed)
 
-        # Determine if we should apply the transform
-        apply_rng, key = random.split(key)
-        apply_transform = random.uniform(apply_rng) < self.prob
-
-        if not apply_transform:
-            return element
+        def pre_transform_map_func(path: list[DictKey], leaf):
+            if _is_in_scope(self.scope, path):
+                transformed_leaf = self._pre_transform(leaf)
+                return transformed_leaf
+            return leaf
 
         def map_func(path: list[DictKey], leaf, rng: jax.Array, *config):
             if _is_in_scope(self.scope, path):
@@ -214,6 +232,8 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         def is_leaf(leaf):
             return isinstance(leaf, AudioTree)  # todo: ask JAX experts about this
 
+        element = tree_map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
+
         treedef = jax.tree.flatten(element, is_leaf=is_leaf)[1]
         length = treedef.num_leaves
         subkeys = random.split(key, length) if self.split_seed else [key] * length
@@ -226,7 +246,17 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         new_tree = tree_map_with_path(
             map_func, element, subkeys, config, is_leaf=is_leaf
         )
-        return self._post_process(element, new_tree)
+        new_tree = self._post_process(element, new_tree)
+
+        # Determine if we should apply the transform
+        key, subkey = random.split(key)
+        if self.prob == 1:
+            return new_tree
+        mask_new = random.uniform(subkey) < self.prob
+        selected = jax.tree.map(
+            (lambda x, y: jax.numpy.where(mask_new, x, y)), new_tree, element
+        )
+        return selected
 
 
 class BaseMapTransform(BaseTransformMixIn, MapTransform):
@@ -235,16 +265,17 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
         self,
         config: Dict[str, Dict[str, Any]] = None,
         scope: Dict[str, Dict[str, Any]] = None,
-        output_key: Callable[[List[str]], str] = None,
+        output_key: Union[str, Callable[[List[str]], str]] = None,
     ):
         """
         Initialize the base transform with a configuration, a flag for seed splitting, a probability, a scope, and an
         output key.
 
-        :param config: Configuration dictionary for the transform
-        :param scope: Dictionary indicating which modalities to apply the transform to
-        :param output_key: Key under which to store the transformed value. By default, the values will be transformed
-            in-place.
+        Args:
+            config (Dict[str, Dict[str, Any]]): Configuration dictionary for the transform
+            scope (Dict[str, Dict[str, Any]]): Dictionary indicating which modalities to apply the transform to
+            output_key (Union[str, Callable[[List[str]], str]], optional): Key under which to store the transformed
+                value. By default, the values will be transformed in-place.
         """
         self.default_config = self.get_default_config()
         self.config = jax.tree_util.tree_flatten_with_path(config or {})[0]
@@ -259,9 +290,18 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
         """
         Apply the random mapping to the given element.
 
-        :param element: Input element to transform
-        :return: Transformed element
+        Args:
+            element (Any): Input element to transform
+
+        Returns:
+            Any: transformed element
         """
+
+        def pre_transform_map_func(path: list[DictKey], leaf):
+            if _is_in_scope(self.scope, path):
+                transformed_leaf = self._pre_transform(leaf)
+                return transformed_leaf
+            return leaf
 
         def map_func(path: list[DictKey], leaf, *config):
             if _is_in_scope(self.scope, path):
@@ -283,6 +323,8 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
 
         def is_leaf(leaf):
             return isinstance(leaf, AudioTree)  # todo: ask JAX experts about this
+
+        element = tree_map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
 
         config = tree_map_with_path(
             map_use_default_config_val, element, is_leaf=is_leaf

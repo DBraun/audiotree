@@ -90,11 +90,14 @@ class VolumeNorm(BaseRandomTransform):
         }
 
     @staticmethod
+    def _pre_transform(audio_tree: AudioTree) -> AudioTree:
+        audio_tree = audio_tree.replace_loudness()
+        return audio_tree
+
+    @staticmethod
     def _apply_transform(
         audio_tree: AudioTree, rng: jax.Array, min_db: float, max_db: float
     ) -> AudioTree:
-        if audio_tree.loudness is None:
-            audio_tree = audio_tree.replace_loudness()
         return _volume_norm_transform(audio_tree, rng, min_db, max_db)
 
 

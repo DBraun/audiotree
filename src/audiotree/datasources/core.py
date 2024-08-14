@@ -35,14 +35,14 @@ def _find_files_with_extensions(
     Searches for files with specified extensions up to a maximum depth in the directory,
     without modifying dirs while iterating.
 
-    Parameters:
-    - directory (str): The path to the directory to search.
-    - extensions (list): A list of file extensions to search for. Each extension should include a period.
-    - max_depth (int): The maximum depth to search for files.
-    - follow_symlinks (bool): Whether to follow symbolic links during the search.
+    Args:
+        directory (str): The path to the directory to search.
+        extensions (list): A list of file extensions to search for. Each extension should include a period.
+        max_depth (int): The maximum depth to search for files.
+        follow_symlinks (bool): Whether to follow symbolic links during the search.
 
     Returns:
-    - list: A list of paths to files that match the extensions within the maximum depth.
+        list (list[AnyStr]): A list of paths to files that match the extensions within the maximum depth.
     """
     matching_files = []
     extensions_set = {
@@ -222,37 +222,3 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         file_path = file_paths_in_group[x]
 
         return self.load_audio(file_path, record_key)
-
-
-class BatchDataIterator:
-
-    def __init__(
-        self,
-        dataloader: grain.DataLoader,
-        operations: List[grain.Transformation],
-        seed: int,
-    ):
-        self.dataloader = iter(dataloader)
-        self.operations = operations
-        self.seed = seed
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        try:
-            batch = next(self.dataloader)
-        except StopIteration:
-            raise StopIteration
-        for transform in self.operations:
-            if isinstance(transform, grain.RandomMapTransform):
-                self.seed += 1
-                batch = transform.random_map(batch, np.random.default_rng(self.seed))
-            elif isinstance(transform, grain.MapTransform):
-                batch = transform.map(batch)
-            elif hasattr(transform, "np_random_map"):  # TfRandomMapTransform
-                self.seed += 1
-                batch = transform.np_random_map(batch, np.random.default_rng(self.seed))
-            else:
-                raise ValueError(f"Unknown operation type: {type(transform)}")
-        return batch

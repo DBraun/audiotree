@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Union
+from typing_extensions import Self
 
 from flax import struct
 from jax import numpy as jnp
@@ -13,14 +14,16 @@ from .resample import resample
 
 @struct.dataclass
 class AudioTree:
-    """A ``flax.struct.dataclass`` for holding audio information including a waveform, sample rate, and metadata.
+    """
+    A `flax.struct.dataclass`_ for holding audio information including a waveform, sample rate, and metadata.
 
     The ``AudioTree`` class is inspired by Descript AudioTools's `AudioSignal`_.
         .. _AudioSignal: https://github.com/descriptinc/audiotools/blob/master/audiotools/core/audio_signal.py
+        .. _flax.struct.dataclass: https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass
 
     Args:
-        audio_data (jnp.ndarray): Audio waveform data in JAX numpy tensor shaped (Batch, Channels, Time)
-        sample_rate (int): Sample rate of audio_data, such as 44100 Hz.
+        audio_data (jnp.ndarray): Audio waveform data in JAX numpy tensor shaped ``(Batch, Channels, Samples)``
+        sample_rate (int): Sample rate of ``audio_data``, such as 44100 Hz.
         loudness (float, optional): Loudness of the audio waveform in LUFs. Don't set this when initializing. Instead,
             use ``replace_loudness()`` to create a new AudioTree with ``loudness`` calculated.
         pitch (float, optional): The MIDI pitch where 60 is middle C.
@@ -39,7 +42,7 @@ class AudioTree:
     codes: jnp.ndarray = None
     metadata: dict = struct.field(pytree_node=True, default_factory=dict)
 
-    def replace_loudness(self):
+    def replace_loudness(self) -> Self:
         """Replace ``loudness`` property with a JAX scalar."""
         loudness = jit_integrated_loudness(self.audio_data, self.sample_rate, zeros=512)
         return self.replace(loudness=loudness)
@@ -64,6 +67,9 @@ class AudioTree:
             duration (float, optional): Duration in seconds of audio data. The audio data will be trimmed or extended as
                 necessary.
             mono (bool, optional): Whether to force the audio data to be single-channel.
+
+        Returns:
+            AudioTree: An instance of ``AudioTree``.
         """
         data, sr = librosa.load(
             audio_path, sr=sample_rate, offset=offset, duration=duration, mono=mono
@@ -88,12 +94,15 @@ class AudioTree:
         )
 
     @classmethod
-    def from_array(cls, audio_data: np.ndarray, sample_rate: int):
+    def from_array(cls, audio_data: np.ndarray, sample_rate: int) -> Self:
         """Create an AudioTree from an audio array and a sample rate.
 
         Args:
-            audio_data (jnp.ndarray): Audio data shaped (Batch, Channels, Time)
+            audio_data (jnp.ndarray): Audio data shaped ``(Batch, Channels, Samples)``
             sample_rate (int): Sample rate of audio data, such as 44100 Hz.
+
+        Returns:
+            AudioTree: An instance of ``AudioTree``.
         """
         audio_data = jnp.array(audio_data, dtype=jnp.float32)
         if audio_data.ndim == 1:
@@ -110,7 +119,20 @@ class AudioTree:
         offset: float = None,
         duration: float = None,
         **kwargs,
-    ):
+    ) -> Self:
+        """Create an AudioTree from a random section of audio from a file path.
+
+        Args:
+            audio_path (str): Path to audio file.
+            rng (np.random.RandomState): Random number generator.
+            offset (float, optional): Offset in seconds to audio data.
+            duration (float, optional): Duration in seconds of audio data. The audio data will be trimmed or lengthened
+                as necessary.
+            **kwargs: Keyword arguments passed to ``AudioTree.__init__``.
+
+        Returns:
+            AudioTree: An instance of ``AudioTree``.
+        """
         assert duration is not None and duration > 0
         info = soundfile.info(audio_path)
         total_duration = info.duration  # seconds
@@ -133,7 +155,19 @@ class AudioTree:
         loudness_cutoff: float = None,
         num_tries: int = 8,
         **kwargs,
-    ):
+    ) -> Self:
+        """Create an AudioTree from a salient section of audio from a file path.
+
+        Args:
+            audio_path (str): Path to audio file.
+            rng (np.random.RandomState): Random number generator.
+            loudness_cutoff (float): Minimum loudness cutoff in decibels for determining saliency.
+            num_tries (int, optional): Number of times to attempt to find a salient section.
+            **kwargs: Keyword arguments passed to ``AudioTree.__init__``.
+
+        Returns:
+            AudioTree: An instance of ``AudioTree``.
+        """
         assert (
             "offset" not in kwargs
         ), "``salient_excerpt`` cannot be used with kwarg ``offset``."
@@ -157,9 +191,11 @@ class AudioTree:
                     break
         return excerpt
 
-    def to_mono(self):
-        """
-        Reduce the ``audio_data`` to mono.
+    def to_mono(self) -> Self:
+        """Reduce the ``audio_data`` to mono.
+
+        Returns:
+            AudioTree: An instance of ``AudioTree``.
         """
         audio_data = jnp.mean(self.audio_data, axis=1, keepdims=True)
         return self.replace(audio_data=audio_data, loudness=None)
@@ -171,7 +207,7 @@ class AudioTree:
         rolloff: float = 0.945,
         output_length: int = None,
         full: bool = False,
-    ):
+    ) -> Self:
         """
         Resample the AudioTree's ``audio_data`` to a new sample rate. The algorithm is a JAX port of ``ResampleFrac``
         from the PyTorch library `Julius`_.
@@ -186,12 +222,15 @@ class AudioTree:
                 Lowering this value will reduce antialiasing, but will reduce some of the
                 highest frequencies.
             output_length (None or int): This can be set to the desired output length (last dimension).
-                Allowed values are between 0 and ``ceil(length * sample_rate / old_sr)``. When None (default) is
+                Allowed values are between 0 and ``ceil(length * sample_rate / old_sr)``. When ``None`` (default) is
                 specified, the floored output length will be used. In order to select the largest possible
                 size, use the `full` argument.
             full (bool): return the longest possible output from the input. This can be useful
                 if you chain resampling operations, and want to give the ``output_length`` only
                 for the last one, while passing ``full=True`` to all the other ones.
+
+        Returns:
+            AudioTree: An instance of ``AudioTree``.
         """
         if sample_rate == self.sample_rate:
             return self

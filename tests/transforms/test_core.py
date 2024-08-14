@@ -7,7 +7,16 @@ import pytest
 
 from audiotree import AudioTree
 from audiotree.transforms.base import BaseRandomTransform, BaseMapTransform
-from audiotree.transforms import VolumeChange
+from audiotree.transforms import (
+    Identity,
+    VolumeChange,
+    VolumeNorm,
+    ShiftPhase,
+    CorruptPhase,
+    RescaleAudio,
+    InvertPhase,
+    SwapStereo,
+)
 
 
 class ReturnConfigTransform(BaseRandomTransform):
@@ -269,3 +278,17 @@ def test_volume_change():
     )
 
     assert jnp.allclose(audio_tree.audio_data * 10, transformed_audio_tree.audio_data)
+
+
+def test_transforms():
+    audio_tree = AudioTree(audio_data=jnp.ones(shape=(1, 1, 44100)), sample_rate=44100)
+    prob = 0.5
+    rng = np.random.default_rng(0)
+    VolumeChange(prob=prob).random_map(audio_tree, rng=rng)
+    VolumeNorm(prob=prob).random_map(audio_tree, rng=rng)
+    ShiftPhase(prob=prob).random_map(audio_tree, rng=rng)
+    CorruptPhase(prob=prob).random_map(audio_tree, rng=rng)
+    SwapStereo().map(audio_tree)
+    RescaleAudio().map(audio_tree)
+    InvertPhase().map(audio_tree)
+    Identity().map(audio_tree)
