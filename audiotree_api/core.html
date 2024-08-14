@@ -247,15 +247,15 @@
 <dl class="py class" id="module-audiotree.core">
 <dt class="sig sig-object py" id="audiotree.core.AudioTree">
 <em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">AudioTree</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">audio_data:</span> <span class="pre">~jax.Array</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sample_rate:</span> <span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">loudness:</span> <span class="pre">float</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pitch:</span> <span class="pre">float</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">velocity:</span> <span class="pre">float</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">duration:</span> <span class="pre">float</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">codes:</span> <span class="pre">~jax.Array</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">metadata:</span> <span class="pre">dict</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#audiotree.core.AudioTree" title="Link to this definition">¶</a></dt>
-<dd><p>A <code class="docutils literal notranslate"><span class="pre">flax.struct.dataclass</span></code> for holding audio information including a waveform, sample rate, and metadata.</p>
+<dd><p>A <a class="reference external" href="https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass">flax.struct.dataclass</a> for holding audio information including a waveform, sample rate, and metadata.</p>
 <dl class="simple">
 <dt>The <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code> class is inspired by Descript AudioTools’s <a class="reference external" href="https://github.com/descriptinc/audiotools/blob/master/audiotools/core/audio_signal.py">AudioSignal</a>.</dt><dd></dd>
 </dl>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>audio_data</strong> (<em>jnp.ndarray</em>) – Audio waveform data in JAX numpy tensor shaped (Batch, Channels, Time)</p></li>
-<li><p><strong>sample_rate</strong> (<em>int</em>) – Sample rate of audio_data, such as 44100 Hz.</p></li>
+<li><p><strong>audio_data</strong> (<em>jnp.ndarray</em>) – Audio waveform data in JAX numpy tensor shaped <code class="docutils literal notranslate"><span class="pre">(Batch,</span> <span class="pre">Channels,</span> <span class="pre">Samples)</span></code></p></li>
+<li><p><strong>sample_rate</strong> (<em>int</em>) – Sample rate of <code class="docutils literal notranslate"><span class="pre">audio_data</span></code>, such as 44100 Hz.</p></li>
 <li><p><strong>loudness</strong> (<em>float</em><em>, </em><em>optional</em>) – Loudness of the audio waveform in LUFs. Don’t set this when initializing. Instead,
 use <code class="docutils literal notranslate"><span class="pre">replace_loudness()</span></code> to create a new AudioTree with <code class="docutils literal notranslate"><span class="pre">loudness</span></code> calculated.</p></li>
 <li><p><strong>pitch</strong> (<em>float</em><em>, </em><em>optional</em>) – The MIDI pitch where 60 is middle C.</p></li>
@@ -267,15 +267,45 @@ use <code class="docutils literal notranslate"><span class="pre">replace_loudnes
 </dd>
 </dl>
 <dl class="py method">
+<dt class="sig sig-object py" id="audiotree.core.AudioTree.excerpt">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">excerpt</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">audio_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rng</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">RandomState</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">offset</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">duration</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="headerlink" href="#audiotree.core.AudioTree.excerpt" title="Link to this definition">¶</a></dt>
+<dd><p>Create an AudioTree from a random section of audio from a file path.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>audio_path</strong> (<em>str</em>) – Path to audio file.</p></li>
+<li><p><strong>rng</strong> (<em>np.random.RandomState</em>) – Random number generator.</p></li>
+<li><p><strong>offset</strong> (<em>float</em><em>, </em><em>optional</em>) – Offset in seconds to audio data.</p></li>
+<li><p><strong>duration</strong> (<em>float</em><em>, </em><em>optional</em>) – Duration in seconds of audio data. The audio data will be trimmed or lengthened
+as necessary.</p></li>
+<li><p><strong>**kwargs</strong> – Keyword arguments passed to <code class="docutils literal notranslate"><span class="pre">AudioTree.__init__</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>An instance of <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#audiotree.core.AudioTree" title="audiotree.core.AudioTree">AudioTree</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="audiotree.core.AudioTree.from_array">
-<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_array</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">audio_data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sample_rate</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#audiotree.core.AudioTree.from_array" title="Link to this definition">¶</a></dt>
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">from_array</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">audio_data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">ndarray</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sample_rate</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="headerlink" href="#audiotree.core.AudioTree.from_array" title="Link to this definition">¶</a></dt>
 <dd><p>Create an AudioTree from an audio array and a sample rate.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>audio_data</strong> (<em>jnp.ndarray</em>) – Audio data shaped (Batch, Channels, Time)</p></li>
+<li><p><strong>audio_data</strong> (<em>jnp.ndarray</em>) – Audio data shaped <code class="docutils literal notranslate"><span class="pre">(Batch,</span> <span class="pre">Channels,</span> <span class="pre">Samples)</span></code></p></li>
 <li><p><strong>sample_rate</strong> (<em>int</em>) – Sample rate of audio data, such as 44100 Hz.</p></li>
 </ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>An instance of <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#audiotree.core.AudioTree" title="audiotree.core.AudioTree">AudioTree</a></p>
 </dd>
 </dl>
 </dd></dl>
@@ -296,6 +326,12 @@ necessary.</p></li>
 <li><p><strong>mono</strong> (<em>bool</em><em>, </em><em>optional</em>) – Whether to force the audio data to be single-channel.</p></li>
 </ul>
 </dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>An instance of <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#audiotree.core.AudioTree" title="audiotree.core.AudioTree">AudioTree</a></p>
+</dd>
 </dl>
 </dd></dl>
 
@@ -307,13 +343,13 @@ necessary.</p></li>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="audiotree.core.AudioTree.replace_loudness">
-<span class="sig-name descname"><span class="pre">replace_loudness</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#audiotree.core.AudioTree.replace_loudness" title="Link to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">replace_loudness</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="headerlink" href="#audiotree.core.AudioTree.replace_loudness" title="Link to this definition">¶</a></dt>
 <dd><p>Replace <code class="docutils literal notranslate"><span class="pre">loudness</span></code> property with a JAX scalar.</p>
 </dd></dl>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="audiotree.core.AudioTree.resample">
-<span class="sig-name descname"><span class="pre">resample</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sample_rate</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zeros</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">24</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rolloff</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.945</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_length</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">full</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#audiotree.core.AudioTree.resample" title="Link to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">resample</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">sample_rate</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">zeros</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">24</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rolloff</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0.945</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">output_length</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">full</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="headerlink" href="#audiotree.core.AudioTree.resample" title="Link to this definition">¶</a></dt>
 <dd><p>Resample the AudioTree’s <code class="docutils literal notranslate"><span class="pre">audio_data</span></code> to a new sample rate. The algorithm is a JAX port of <code class="docutils literal notranslate"><span class="pre">ResampleFrac</span></code>
 from the PyTorch library <a class="reference external" href="https://github.com/adefossez/julius/blob/main/julius/resample.py">Julius</a>.</p>
 <dl class="field-list simple">
@@ -326,7 +362,7 @@ to ensure sufficient margin due to the imperfection of the FIR filter used.
 Lowering this value will reduce antialiasing, but will reduce some of the
 highest frequencies.</p></li>
 <li><p><strong>output_length</strong> (<em>None</em><em> or </em><em>int</em>) – This can be set to the desired output length (last dimension).
-Allowed values are between 0 and <code class="docutils literal notranslate"><span class="pre">ceil(length</span> <span class="pre">*</span> <span class="pre">sample_rate</span> <span class="pre">/</span> <span class="pre">old_sr)</span></code>. When None (default) is
+Allowed values are between 0 and <code class="docutils literal notranslate"><span class="pre">ceil(length</span> <span class="pre">*</span> <span class="pre">sample_rate</span> <span class="pre">/</span> <span class="pre">old_sr)</span></code>. When <code class="docutils literal notranslate"><span class="pre">None</span></code> (default) is
 specified, the floored output length will be used. In order to select the largest possible
 size, use the <cite>full</cite> argument.</p></li>
 <li><p><strong>full</strong> (<em>bool</em>) – return the longest possible output from the input. This can be useful
@@ -334,13 +370,50 @@ if you chain resampling operations, and want to give the <code class="docutils l
 for the last one, while passing <code class="docutils literal notranslate"><span class="pre">full=True</span></code> to all the other ones.</p></li>
 </ul>
 </dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>An instance of <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#audiotree.core.AudioTree" title="audiotree.core.AudioTree">AudioTree</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="audiotree.core.AudioTree.salient_excerpt">
+<em class="property"><span class="pre">classmethod</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">salient_excerpt</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">audio_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Path</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rng</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">RandomState</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">loudness_cutoff</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_tries</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">8</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="headerlink" href="#audiotree.core.AudioTree.salient_excerpt" title="Link to this definition">¶</a></dt>
+<dd><p>Create an AudioTree from a salient section of audio from a file path.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>audio_path</strong> (<em>str</em>) – Path to audio file.</p></li>
+<li><p><strong>rng</strong> (<em>np.random.RandomState</em>) – Random number generator.</p></li>
+<li><p><strong>loudness_cutoff</strong> (<em>float</em>) – Minimum loudness cutoff in decibels for determining saliency.</p></li>
+<li><p><strong>num_tries</strong> (<em>int</em><em>, </em><em>optional</em>) – Number of times to attempt to find a salient section.</p></li>
+<li><p><strong>**kwargs</strong> – Keyword arguments passed to <code class="docutils literal notranslate"><span class="pre">AudioTree.__init__</span></code>.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>An instance of <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="#audiotree.core.AudioTree" title="audiotree.core.AudioTree">AudioTree</a></p>
+</dd>
 </dl>
 </dd></dl>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="audiotree.core.AudioTree.to_mono">
-<span class="sig-name descname"><span class="pre">to_mono</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#audiotree.core.AudioTree.to_mono" title="Link to this definition">¶</a></dt>
+<span class="sig-name descname"><span class="pre">to_mono</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Self</span></span></span><a class="headerlink" href="#audiotree.core.AudioTree.to_mono" title="Link to this definition">¶</a></dt>
 <dd><p>Reduce the <code class="docutils literal notranslate"><span class="pre">audio_data</span></code> to mono.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>An instance of <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code>.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference internal" href="#audiotree.core.AudioTree" title="audiotree.core.AudioTree">AudioTree</a></p>
+</dd>
+</dl>
 </dd></dl>
 
 </dd></dl>
@@ -404,11 +477,13 @@ for the last one, while passing <code class="docutils literal notranslate"><span
             <ul>
 <li><a class="reference internal" href="#">audiotree</a><ul>
 <li><a class="reference internal" href="#audiotree.core.AudioTree"><code class="docutils literal notranslate"><span class="pre">AudioTree</span></code></a><ul>
+<li><a class="reference internal" href="#audiotree.core.AudioTree.excerpt"><code class="docutils literal notranslate"><span class="pre">AudioTree.excerpt()</span></code></a></li>
 <li><a class="reference internal" href="#audiotree.core.AudioTree.from_array"><code class="docutils literal notranslate"><span class="pre">AudioTree.from_array()</span></code></a></li>
 <li><a class="reference internal" href="#audiotree.core.AudioTree.from_file"><code class="docutils literal notranslate"><span class="pre">AudioTree.from_file()</span></code></a></li>
 <li><a class="reference internal" href="#audiotree.core.AudioTree.replace"><code class="docutils literal notranslate"><span class="pre">AudioTree.replace()</span></code></a></li>
 <li><a class="reference internal" href="#audiotree.core.AudioTree.replace_loudness"><code class="docutils literal notranslate"><span class="pre">AudioTree.replace_loudness()</span></code></a></li>
 <li><a class="reference internal" href="#audiotree.core.AudioTree.resample"><code class="docutils literal notranslate"><span class="pre">AudioTree.resample()</span></code></a></li>
+<li><a class="reference internal" href="#audiotree.core.AudioTree.salient_excerpt"><code class="docutils literal notranslate"><span class="pre">AudioTree.salient_excerpt()</span></code></a></li>
 <li><a class="reference internal" href="#audiotree.core.AudioTree.to_mono"><code class="docutils literal notranslate"><span class="pre">AudioTree.to_mono()</span></code></a></li>
 </ul>
 </li>

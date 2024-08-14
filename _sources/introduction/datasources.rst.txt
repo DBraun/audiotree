@@ -13,7 +13,7 @@ Data Sources
 
 .. ---------------------------
 
-Data Sources in ``audiotree.datasources`` are `Grain <https://github.com/google/grain>`_ `data sources <https://github.com/google/grain/blob/main/docs/data_sources.md>`_
+Data Sources in ``audiotree.datasources`` are `Grain`_ `data sources <https://github.com/google/grain/blob/main/docs/data_sources.md>`_
 that are specially designed for audio. Grain is a new library for dataset operations in JAX with no TensorFlow dependency.
 
 For now, there are only two types of Data Sources, but they fit many needs.
@@ -49,3 +49,7 @@ For example, with ArgBind, the YAML might be this (adapted from `DAC <https://gi
 The second thing to know is that both :class:`~audiotree.datasources.core.AudioDataSimpleSource` and :class:`~audiotree.datasources.core.AudioDataBalancedSource`
 can be initialized with an instance of :class:`~audiotree.datasources.core.SaliencyParams`. If :class:`~audiotree.datasources.core.SaliencyParams` has ``enabled``
 set to ``True``, then a random section of an audio file will be selected until it meets a specified minimum loudness.
+
+.. _ArgBind: https://github.com/pseeth/argbind/
+.. _DAC-JAX: https://github.com/DBraun/DAC-JAX
+.. _Grain: https://github.com/google/grain

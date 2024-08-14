@@ -250,14 +250,14 @@ Examples include:</p>
 <blockquote>
 <div><ul class="simple">
 <li><p>GPU-based <a class="reference external" href="https://github.com/boris-kuz/jaxloudnorm/pull/1">volume normalization</a> to a LUFS value in a configurable uniformly sampled range</p></li>
-<li><p>Encoding to <a class="reference external" href="https://github.com/DBraun/DAC-JAX">DAC</a> audio tokens</p></li>
+<li><p>Encoding to <a class="reference external" href="https://github.com/DBraun/DAC-JAX">DAC-JAX</a> audio tokens</p></li>
 <li><p>Swapping stereo channels</p></li>
 <li><p>Randomly shifting or corrupting the phase(s) of a waveform</p></li>
 <li><p>and more…</p></li>
 </ul>
 </div></blockquote>
-<section id="basics">
-<h2>Basics<a class="headerlink" href="#basics" title="Link to this heading">¶</a></h2>
+<section id="config">
+<h2>Config<a class="headerlink" href="#config" title="Link to this heading">¶</a></h2>
 <p>AudioTree is compatible with <a class="reference external" href="https://github.com/pseeth/argbind/">ArgBind</a> but does not require it.
 For the examples directly below, some other setup is required, so consider this to be an overview.
 Before transformations, your data source might provide a single <a class="reference internal" href="../audiotree_api/core.html#audiotree.core.AudioTree" title="audiotree.core.AudioTree"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioTree</span></code></a> or a “tree” of <a class="reference internal" href="../audiotree_api/core.html#audiotree.core.AudioTree" title="audiotree.core.AudioTree"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioTree</span></code></a>:</p>
@@ -280,6 +280,9 @@ Before transformations, your data source might provide a single <a class="refere
 <span class="w">        </span><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">True</span>
 </pre></div>
 </div>
+</section>
+<section id="split-seed">
+<h2>Split Seed<a class="headerlink" href="#split-seed" title="Link to this heading">¶</a></h2>
 <p>By setting <code class="docutils literal notranslate"><span class="pre">split_seed</span></code> to False, you can apply the same augmentations to both the <code class="docutils literal notranslate"><span class="pre">src</span></code> and <code class="docutils literal notranslate"><span class="pre">target</span></code>.</p>
 <div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">VolumeChange.split_seed</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
 </pre></div>
@@ -304,6 +307,9 @@ For some transformations, having differently sized tensors would cause the augme
 <span class="p">}</span>
 </pre></div>
 </div>
+</section>
+<section id="scope">
+<h2>Scope<a class="headerlink" href="#scope" title="Link to this heading">¶</a></h2>
 <p>Depending on the scope, we can end up with <em>multiple</em> new output leaves. Let’s start with this batch:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">batch</span> <span class="o">=</span> <span class="p">{</span>
     <span class="s2">&quot;src&quot;</span><span class="p">:</span>
@@ -431,8 +437,10 @@ AudioTree is also used in <a class="reference external" href="https://github.com
           <div class="toc-tree">
             <ul>
 <li><a class="reference internal" href="#">Transforms</a><ul>
-<li><a class="reference internal" href="#basics">Basics</a></li>
+<li><a class="reference internal" href="#config">Config</a></li>
+<li><a class="reference internal" href="#split-seed">Split Seed</a></li>
 <li><a class="reference internal" href="#output-key">Output Key</a></li>
+<li><a class="reference internal" href="#scope">Scope</a></li>
 <li><a class="reference internal" href="#inheritance">Inheritance</a></li>
 <li><a class="reference internal" href="#without-argbind">Without ArgBind</a></li>
 <li><a class="reference internal" href="#further-examples">Further examples</a></li>

@@ -13,20 +13,20 @@ Transforms
 
 .. ---------------------------
 
-Transforms in ``audiotree.transforms`` are `Grain <https://github.com/google/grain>`_ 
+Transforms in ``audiotree.transforms`` are `Grain`_
 `transformations <https://github.com/google/grain/blob/754636534bb16b5b2dd74970043d03e24ea44d3f/docs/transformations.md>`_ that operate on batches.
 Examples include:
 
    * GPU-based `volume normalization <https://github.com/boris-kuz/jaxloudnorm/pull/1>`_ to a LUFS value in a configurable uniformly sampled range
-   * Encoding to `DAC <https://github.com/DBraun/DAC-JAX>`_ audio tokens
+   * Encoding to `DAC-JAX`_ audio tokens
    * Swapping stereo channels
    * Randomly shifting or corrupting the phase(s) of a waveform
    * and more...
 
-Basics
+Config
 ------
 
-AudioTree is compatible with `ArgBind <https://github.com/pseeth/argbind/>`_ but does not require it.
+AudioTree is compatible with `ArgBind`_ but does not require it.
 For the examples directly below, some other setup is required, so consider this to be an overview.
 Before transformations, your data source might provide a single :class:`~audiotree.core.AudioTree` or a "tree" of :class:`~audiotree.core.AudioTree`:
 
@@ -51,6 +51,9 @@ Then from YAML you can write the following to get a 90% chance of a random volum
     VolumeChange.scope:
         src:
             scope: True
+
+Split Seed
+----------
 
 By setting ``split_seed`` to False, you can apply the same augmentations to both the ``src`` and ``target``.
 
@@ -83,6 +86,9 @@ The above will produce a batch *shaped* like this:
         "src_modified": [audio_tree, audio_tree],
         "target": audio_tree,
     }
+
+Scope
+-----
 
 Depending on the scope, we can end up with *multiple* new output leaves. Let's start with this batch:
 
@@ -163,4 +169,8 @@ Further examples
 ----------------
 
 For now, the `tests/transforms/test_core.py <https://github.com/DBraun/audiotree/blob/main/tests/transforms/test_core.py>`_ is somewhat useful for thinking through the expected outputs.
-AudioTree is also used in `DAC-JAX <https://github.com/DBraun/DAC-JAX>`_, which `shows <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_ how to use `ArgBind <https://github.com/pseeth/argbind/>`_ and data sources.
+AudioTree is also used in `DAC-JAX`_, which `shows <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_ how to use `ArgBind`_ and data sources.
+
+.. _ArgBind: https://github.com/pseeth/argbind/
+.. _DAC-JAX: https://github.com/DBraun/DAC-JAX
+.. _Grain: https://github.com/google/grain
