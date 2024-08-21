@@ -9,7 +9,7 @@ There are three requirements:
 .. code-block:: bash
 
    pip install "git+https://github.com/DBraun/argbind.git@improve.subclasses"
-   pip install "git+https://github.com/DBraun/dm_aux.git@DBraun-patch-1"
+   pip install "git+https://github.com/DBraun/dm_aux.git@DBraun-patch-2"
    pip install "git+https://github.com/DBraun/jaxloudnorm.git@feature/speed-optimize"
 
 Then AudioTree can be installed with pip:

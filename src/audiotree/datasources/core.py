@@ -1,31 +1,14 @@
-from dataclasses import field
 import os
 from random import Random
 from typing import AnyStr, List, Mapping, SupportsIndex
 
-from flax import struct
 from grain import python as grain
 import numpy as np
 
 from audiotree import AudioTree
+from audiotree.core import SaliencyParams
 
 _default_extensions = [".wav", ".flac"]
-
-
-@struct.dataclass
-class SaliencyParams:
-    """
-    The parameters for saliency detection.
-
-    Args:
-        enabled (bool): Whether to enable saliency detection.
-        num_tries (int): Maximum number of attempts to find a salient section of audio (default 8).
-        loudness_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
-    """
-
-    enabled: bool = field(default=False)
-    num_tries: int = 8
-    loudness_cutoff: float = -40
 
 
 def _find_files_with_extensions(
@@ -77,9 +60,8 @@ class AudioDataSourceMixin:
             saliency_params = self.saliency_params
             return AudioTree.salient_excerpt(
                 file_path,
-                np.random.RandomState(int(record_key)),
-                loudness_cutoff=saliency_params.loudness_cutoff,
-                num_tries=saliency_params.num_tries,
+                np.random.default_rng(int(record_key)),
+                saliency_params=saliency_params,
                 sample_rate=self.sample_rate,
                 duration=self.duration,
                 mono=self.mono,
@@ -97,15 +79,27 @@ class AudioDataSourceMixin:
 
 
 class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
+    """A Data Source that aggregates all source files and weights them equally.
+
+    Args:
+        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories.
+        num_steps (int): The requested length of the data source.
+        sample_rate (int): The requested sample rate of the audio.
+        mono (bool): Whether to force the audio to be mono.
+        duration (float): The requested duration of the audio.
+        extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
+        saliency_params (SaliencyParams): Saliency parameters to use.
+        cpu (bool): Whether to load the audio data on the CPU.
+    """
 
     def __init__(
         self,
         sources: Mapping[str, List[str]],
+        num_steps: int = None,
         sample_rate: int = 44100,
         mono: int = 1,
         duration: float = 1.0,
         extensions: List[str] = None,
-        num_steps: int = None,
         saliency_params: SaliencyParams = None,
         cpu: bool = False,
     ):
@@ -152,6 +146,18 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
 
 
 class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
+    """A Data Source that equally weights multiple sources, where each source is a list of directories.
+
+    Args:
+        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories.
+        num_steps (int): The requested length of the data source.
+        sample_rate (int): The requested sample rate of the audio.
+        mono (bool): Whether to force the audio to be mono.
+        duration (float): The requested duration of the audio.
+        extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
+        saliency_params (SaliencyParams): Saliency parameters to use.
+        cpu (bool): Whether to load the audio data on the CPU.
+    """
 
     # todo: make this algorithm work if the user specifies weights for the groups.
     #  Right now the groups are balanced uniformly.

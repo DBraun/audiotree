@@ -1,5 +1,7 @@
+from dataclasses import field
+from functools import partial
 from pathlib import Path
-from typing import Union
+from typing import Callable, List, Union
 from typing_extensions import Self
 
 from flax import struct
@@ -10,6 +12,59 @@ import soundfile
 
 from .loudness import jit_integrated_loudness
 from .resample import resample
+
+
+@struct.dataclass
+class SaliencyParams:
+    """
+    The parameters for saliency detection.
+
+    Args:
+        enabled (bool): Whether to enable saliency detection.
+        num_tries (int): Maximum number of attempts to find a salient section of audio (default 8).
+        loudness_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
+        search_function (Callable): The search function for determining the random offset. The default is
+            ``SaliencyParams.search_uniform``. Another option is ``SaliencyParams.search_bias_early`` which gradually
+            searches earlier in the file as more attempts are made.
+    """
+
+    enabled: bool = field(default=False)
+    num_tries: int = 8
+    loudness_cutoff: float = -40
+    search_function: Union[Callable, str] = None
+
+    @staticmethod
+    def search_uniform(
+        rng: np.random.Generator,
+        offset: float,
+        duration: float,
+        total_duration: float,
+        attempt: int,
+        max_attempts: int,
+    ):
+        lower_bound = max(0.0, offset)
+        upper_bound = max(total_duration - duration, lower_bound)
+        return rng.uniform(lower_bound, upper_bound)
+
+    @staticmethod
+    def search_bias_early(
+        rng: np.random.Generator,
+        offset: float,
+        duration: float,
+        total_duration: float,
+        attempt: int,
+        max_attempts: int,
+    ):
+        lower_bound = max(0.0, offset)
+        upper_bound1 = max(total_duration - duration, lower_bound)
+        # linearly interpolate the upper bound based on number of attempts so far
+        alpha = attempt / (max_attempts - 1) if max_attempts > 1 else 0
+        upper_bound2 = min(upper_bound1, lower_bound + duration)
+        upper_bound = upper_bound1 * (1 - alpha) + upper_bound2 * alpha
+        return rng.uniform(lower_bound, upper_bound)
+
+
+_str_max_length = 256
 
 
 @struct.dataclass
@@ -47,12 +102,29 @@ class AudioTree:
         loudness = jit_integrated_loudness(self.audio_data, self.sample_rate, zeros=512)
         return self.replace(loudness=loudness)
 
+    @staticmethod
+    def _encode_string(s: str):
+        # Convert string to list of ASCII values and pad with 0
+        encoded = [ord(char) for char in s] + [0] * (_str_max_length - len(s))
+        return jnp.array([encoded])  # [1, _str_max_length]
+
+    @staticmethod
+    def _decode_string(encoded_array: jnp.ndarray):
+        # Convert list of integers to characters and join them into a string
+        decoded = "".join([chr(val) for val in encoded_array if val != 0])
+        return decoded
+
+    @property
+    def filepath(self) -> List[str]:
+        """Return a list of filepaths assuming information exists in ``metadata['filepath']]``"""
+        return [self._decode_string(data) for data in self.metadata["filepath"]]
+
     @classmethod
     def from_file(
         cls,
         audio_path: str,
         sample_rate: int = None,
-        offset: float = 0,
+        offset: float = 0.0,
         duration: float = None,
         mono: bool = False,
         cpu: bool = False,
@@ -90,7 +162,11 @@ class AudioTree:
         return cls(
             audio_data=data,
             sample_rate=sr,
-            metadata={"offset": offset, "duration": duration},
+            metadata={
+                "filepath": cls._encode_string(audio_path),
+                "offset": offset,
+                "duration": duration,
+            },
         )
 
     @classmethod
@@ -115,19 +191,21 @@ class AudioTree:
     def excerpt(
         cls,
         audio_path: str,
-        rng: np.random.RandomState,
-        offset: float = None,
+        rng: np.random.Generator,
+        offset: float = 0.0,
         duration: float = None,
+        search_function: Callable = None,
         **kwargs,
     ) -> Self:
         """Create an AudioTree from a random section of audio from a file path.
 
         Args:
             audio_path (str): Path to audio file.
-            rng (np.random.RandomState): Random number generator.
+            rng (np.random.Generator): Random number generator.
             offset (float, optional): Offset in seconds to audio data.
             duration (float, optional): Duration in seconds of audio data. The audio data will be trimmed or lengthened
                 as necessary.
+            search_function (Callable, optional): A function that determines the random offset.
             **kwargs: Keyword arguments passed to ``AudioTree.__init__``.
 
         Returns:
@@ -137,12 +215,15 @@ class AudioTree:
         info = soundfile.info(audio_path)
         total_duration = info.duration  # seconds
 
-        lower_bound = 0 if offset is None else offset
-        upper_bound = max(total_duration - duration, 0)
-        offset = rng.uniform(lower_bound, upper_bound)
+        if search_function is None:
+            search_function = partial(
+                SaliencyParams.search_uniform, attempts=0, max_attempts=1
+            )
+
+        random_offset = search_function(rng, offset, duration, total_duration)
 
         audio_signal = cls.from_file(
-            audio_path=audio_path, offset=offset, duration=duration, **kwargs
+            audio_path=audio_path, offset=random_offset, duration=duration, **kwargs
         )
 
         return audio_signal
@@ -151,18 +232,16 @@ class AudioTree:
     def salient_excerpt(
         cls,
         audio_path: Union[str, Path],
-        rng: np.random.RandomState,
-        loudness_cutoff: float = None,
-        num_tries: int = 8,
+        rng: np.random.Generator,
+        saliency_params: SaliencyParams,
         **kwargs,
     ) -> Self:
         """Create an AudioTree from a salient section of audio from a file path.
 
         Args:
             audio_path (str): Path to audio file.
-            rng (np.random.RandomState): Random number generator.
-            loudness_cutoff (float): Minimum loudness cutoff in decibels for determining saliency.
-            num_tries (int, optional): Number of times to attempt to find a salient section.
+            rng (np.random.Generator): Random number generator such as ``np.random.default_rng(42)``.
+            saliency_params (SaliencyParams): Saliency parameters to use to find a salient section.
             **kwargs: Keyword arguments passed to ``AudioTree.__init__``.
 
         Returns:
@@ -174,19 +253,33 @@ class AudioTree:
         assert (
             "duration" in kwargs
         ), "``salient_excerpt`` must be used with kwarg ``duration``."
-        if loudness_cutoff is None:
+        if (
+            not saliency_params.enabled
+            or saliency_params.loudness_cutoff is None
+            or np.isnan(saliency_params.loudness_cutoff)
+        ):
             excerpt = cls.excerpt(audio_path, rng=rng, **kwargs)
         else:
             loudness = -np.inf
             current_try = 0
-            while loudness <= loudness_cutoff:
-                current_try += 1
+            num_tries = saliency_params.num_tries
+            if isinstance(saliency_params.search_function, str):
+                _search_function = eval(saliency_params.search_function)
+            else:
+                _search_function = saliency_params.search_function
+            while loudness <= saliency_params.loudness_cutoff:
+                search_function = partial(
+                    _search_function,
+                    attempt=current_try,
+                    max_attempts=num_tries,
+                )
                 new_excerpt = cls.excerpt(
-                    audio_path, rng=rng, **kwargs
+                    audio_path, rng=rng, search_function=search_function, **kwargs
                 ).replace_loudness()
-                if current_try == 1 or new_excerpt.loudness > loudness:
+                if current_try == 0 or new_excerpt.loudness > loudness:
                     excerpt = new_excerpt
                     loudness = new_excerpt.loudness
+                current_try += 1
                 if num_tries is not None and current_try >= num_tries:
                     break
         return excerpt

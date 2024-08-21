@@ -118,7 +118,8 @@ def _rescale_audio_transform(audio_tree: AudioTree) -> AudioTree:
     caused the audio to clip. It won't change the relative balance of multichannel audio.
     """
     audio_data = audio_tree.audio_data
-    maxes = jnp.max(jnp.absolute(audio_data), axis=[-2, -1], keepdims=True)
+    maxes = jnp.max(jnp.absolute(audio_data), axis=[-2, -1])
+    maxes = jnp.expand_dims(maxes, [-2, -1])
     maxes = jnp.maximum(maxes, jnp.ones_like(maxes))
     audio_data = audio_data / maxes
 
