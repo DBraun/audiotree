@@ -292,7 +292,7 @@ class AudioTree:
         Returns:
             AudioTree: An instance of ``AudioTree``.
         """
-        audio_data = jnp.mean(self.audio_data, axis=1, keepdims=True)
+        audio_data = self.audio_data.mean(axis=1, keepdims=True)
         return self.replace(audio_data=audio_data, loudness=None)
 
     def resample(
