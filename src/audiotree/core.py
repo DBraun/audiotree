@@ -23,7 +23,7 @@ class SaliencyParams:
         enabled (bool): Whether to enable saliency detection.
         num_tries (int): Maximum number of attempts to find a salient section of audio (default 8).
         loudness_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
-        search_function (Callable): The search function for determining the random offset. The default is
+        search_function (Union[Callable, str]): The search function for determining the random offset. The default is
             ``SaliencyParams.search_uniform``. Another option is ``SaliencyParams.search_bias_early`` which gradually
             searches earlier in the file as more attempts are made.
     """
@@ -31,7 +31,9 @@ class SaliencyParams:
     enabled: bool = field(default=False)
     num_tries: int = 8
     loudness_cutoff: float = -40
-    search_function: Union[Callable, str] = None
+
+    # Note: Although Union[Callable, str] would be a better type annotation, it doesn't work well with argbind
+    search_function: str = "SaliencyParams.search_uniform"
 
     @staticmethod
     def search_uniform(
