@@ -1,3 +1,4 @@
+import math
 import os
 from random import Random
 from typing import AnyStr, List, Mapping, SupportsIndex
@@ -200,10 +201,23 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
                     f"The approved file extensions were {extensions}."
                 )
 
-        self._group_to_len = {i: len(group) for i, group in enumerate(groups)}
-        self._groups = groups
         self._num_groups = len(groups)
         self._length = num_steps
+
+        ideal_group_length = math.ceil(num_steps / self._num_groups)
+        seed = 0
+        lengthened_groups = []
+        for group in groups:
+            num_loops = math.ceil(ideal_group_length / len(group))
+            lengthened_group = []
+            for _ in range(num_loops):
+                copied = group.copy()
+                Random(seed).shuffle(copied)
+                seed += 1
+                lengthened_group += copied
+            lengthened_groups.append(lengthened_group)
+        self._groups = lengthened_groups
+
         assert self._length > 0
 
     def __len__(self) -> int:
@@ -213,18 +227,8 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         record_key = int(record_key)
 
         group_idx = record_key % self._num_groups
-
         idx = record_key // self._num_groups
 
-        x = idx % self._group_to_len[group_idx]
-        y = idx // self._group_to_len[group_idx]
-
-        file_paths_in_group = self._groups[group_idx].copy()
-
-        Random(y + 4617 * group_idx).shuffle(
-            file_paths_in_group
-        )  # todo: 4617 is arbitrary and could probably be zero.
-
-        file_path = file_paths_in_group[x]
+        file_path = self._groups[group_idx][idx]
 
         return self.load_audio(file_path, record_key)
