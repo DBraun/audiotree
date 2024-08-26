@@ -1,3 +1,4 @@
+import glob
 import math
 import os
 from random import Random
@@ -117,9 +118,12 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         for group_name, folders in sources.items():
             filepaths_in_group = []
             for folder in folders:
-                filepaths_in_group += _find_files_with_extensions(
-                    folder, extensions=extensions
-                )
+                if os.path.isdir(folder):
+                    filepaths_in_group += _find_files_with_extensions(
+                        folder, extensions=extensions
+                    )
+                else:
+                    filepaths_in_group = list(glob.glob(folder))
 
             if filepaths_in_group:
                 filepaths += filepaths_in_group
@@ -190,7 +194,12 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         for group_name, folders in sources.items():
             filepaths = []
             for folder in folders:
-                filepaths += _find_files_with_extensions(folder, extensions=extensions)
+                if os.path.isdir(folder):
+                    filepaths += _find_files_with_extensions(
+                        folder, extensions=extensions
+                    )
+                else:
+                    filepaths += list(glob.glob(folder))
 
             if filepaths:
                 groups.append(filepaths)
