@@ -117,7 +117,8 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         filepaths = []
         for group_name, folders in sources.items():
             filepaths_in_group = []
-            for folder in folders:
+            for _folder in folders:
+                folder = os.path.expandvars(os.path.expanduser(_folder))
                 if os.path.isdir(folder):
                     filepaths_in_group += _find_files_with_extensions(
                         folder, extensions=extensions
@@ -193,8 +194,9 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
 
         for group_name, folders in sources.items():
             filepaths = []
-            for folder in folders:
-                if os.path.isdir(folder):
+            for _folder in folders:
+                folder = os.path.expandvars(os.path.expanduser(_folder))
+                if os.path.isdir(os.path.expandvars(os.path.expanduser(folder))):
                     filepaths += _find_files_with_extensions(
                         folder, extensions=extensions
                     )
