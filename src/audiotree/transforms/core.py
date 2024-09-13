@@ -277,12 +277,12 @@ class Choose(grain.RandomMapTransform):
 
 class NeuralAudioCodecEncodeTransform(grain.MapTransform):
     """
-    Use a neural audio codec such as `Descript Audio Codec (DAC) <https://github.com/DBraun/DAC-JAX>`_ to encode audio
-    into tokens.
+    Use a neural audio codec such as `Descript Audio Codec (DAC) or EnCodec <https://github.com/DBraun/DAC-JAX>`_ to
+    encode audio into tokens.
 
     Args:
         encode_audio_fn (Callable): A jitted function that takes audio shaped ``(B, C, T)`` and returns tokens
-            shaped ``((B C), S, K)``, where ``T`` is length in samples, ``S`` is encoded sequence length, and ``K`` is
+            shaped ``((B C), K, S)``, where ``T`` is length in samples, ``S`` is encoded sequence length, and ``K`` is
             number of codebooks.
         n_codebooks (int): The number of codebooks in the codec.
     """
@@ -304,7 +304,7 @@ class NeuralAudioCodecEncodeTransform(grain.MapTransform):
             codes = self.encode_audio_fn(audio_data)
 
             codes = rearrange(
-                codes, "(B C) S K -> B (K C) S", B=B, C=C, K=self.n_codebooks
+                codes, "(B C) K S -> B (K C) S", B=B, C=C, K=self.n_codebooks
             )
 
             leaf = leaf.replace(codes=codes)
