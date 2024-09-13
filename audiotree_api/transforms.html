@@ -332,13 +332,13 @@ it’s independently selected for each frequency in the STFT.</p>
 <dl class="py class">
 <dt class="sig sig-object py" id="audiotree.transforms.core.NeuralAudioCodecEncodeTransform">
 <em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">NeuralAudioCodecEncodeTransform</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">encode_audio_fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Array</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_codebooks</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#audiotree.transforms.core.NeuralAudioCodecEncodeTransform" title="Link to this definition">¶</a></dt>
-<dd><p>Use a neural audio codec such as <a class="reference external" href="https://github.com/DBraun/DAC-JAX">Descript Audio Codec (DAC)</a> to encode audio
-into tokens.</p>
+<dd><p>Use a neural audio codec such as <a class="reference external" href="https://github.com/DBraun/DAC-JAX">Descript Audio Codec (DAC) or EnCodec</a> to
+encode audio into tokens.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>encode_audio_fn</strong> (<em>Callable</em>) – A jitted function that takes audio shaped <code class="docutils literal notranslate"><span class="pre">(B,</span> <span class="pre">C,</span> <span class="pre">T)</span></code> and returns tokens
-shaped <code class="docutils literal notranslate"><span class="pre">((B</span> <span class="pre">C),</span> <span class="pre">S,</span> <span class="pre">K)</span></code>, where <code class="docutils literal notranslate"><span class="pre">T</span></code> is length in samples, <code class="docutils literal notranslate"><span class="pre">S</span></code> is encoded sequence length, and <code class="docutils literal notranslate"><span class="pre">K</span></code> is
+shaped <code class="docutils literal notranslate"><span class="pre">((B</span> <span class="pre">C),</span> <span class="pre">K,</span> <span class="pre">S)</span></code>, where <code class="docutils literal notranslate"><span class="pre">T</span></code> is length in samples, <code class="docutils literal notranslate"><span class="pre">S</span></code> is encoded sequence length, and <code class="docutils literal notranslate"><span class="pre">K</span></code> is
 number of codebooks.</p></li>
 <li><p><strong>n_codebooks</strong> (<em>int</em>) – The number of codebooks in the codec.</p></li>
 </ul>
