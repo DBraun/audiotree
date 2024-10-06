@@ -73,7 +73,7 @@ Citation
       month = aug,
       title = {{AudioTree}},
       url = {https://github.com/DBraun/audiotree},
-      version = {0.1.1},
+      version = {0.1.2},
       year = {2024}
    }
 

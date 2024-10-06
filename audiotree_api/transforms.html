@@ -6,7 +6,7 @@
 <link rel="index" title="Index" href="../genindex.html" /><link rel="search" title="Search" href="../search.html" /><link rel="prev" title="audiotree.datasources" href="datasources.html" />
 
     <!-- Generated with Sphinx 8.0.2 and Furo 2024.08.06 -->
-        <title>audiotree.transforms - AudioTree documentation, v0.1.1</title>
+        <title>audiotree.transforms - AudioTree documentation, v0.1.2</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=a746c00c" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo.css?v=354aac6f" />
     <link rel="stylesheet" type="text/css" href="../_static/styles/furo-extensions.css?v=302659d7" />
@@ -166,7 +166,7 @@
       </label>
     </div>
     <div class="header-center">
-      <a href="../index.html"><div class="brand">AudioTree documentation, v0.1.1</div></a>
+      <a href="../index.html"><div class="brand">AudioTree documentation, v0.1.2</div></a>
     </div>
     <div class="header-right">
       <div class="theme-toggle-container theme-toggle-header">
@@ -190,7 +190,7 @@
       <div class="sidebar-sticky"><a class="sidebar-brand" href="../index.html">
   
   
-  <span class="sidebar-brand-text">AudioTree documentation, v0.1.1</span>
+  <span class="sidebar-brand-text">AudioTree documentation, v0.1.2</span>
   
 </a><form class="sidebar-search-container" method="get" action="../search.html" role="search">
   <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
@@ -331,7 +331,7 @@ it’s independently selected for each frequency in the STFT.</p>
 
 <dl class="py class">
 <dt class="sig sig-object py" id="audiotree.transforms.core.NeuralAudioCodecEncodeTransform">
-<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">NeuralAudioCodecEncodeTransform</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">encode_audio_fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Array</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_codebooks</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#audiotree.transforms.core.NeuralAudioCodecEncodeTransform" title="Link to this definition">¶</a></dt>
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">NeuralAudioCodecEncodeTransform</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">encode_audio_fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable</span><span class="p"><span class="pre">[</span></span><span class="p"><span class="pre">[</span></span><span class="pre">Array</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Array</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_codebooks</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#audiotree.transforms.core.NeuralAudioCodecEncodeTransform" title="Link to this definition">¶</a></dt>
 <dd><p>Use a neural audio codec such as <a class="reference external" href="https://github.com/DBraun/DAC-JAX">Descript Audio Codec (DAC) or EnCodec</a> to
 encode audio into tokens.</p>
 <dl class="field-list simple">
@@ -340,7 +340,7 @@ encode audio into tokens.</p>
 <li><p><strong>encode_audio_fn</strong> (<em>Callable</em>) – A jitted function that takes audio shaped <code class="docutils literal notranslate"><span class="pre">(B,</span> <span class="pre">C,</span> <span class="pre">T)</span></code> and returns tokens
 shaped <code class="docutils literal notranslate"><span class="pre">((B</span> <span class="pre">C),</span> <span class="pre">K,</span> <span class="pre">S)</span></code>, where <code class="docutils literal notranslate"><span class="pre">T</span></code> is length in samples, <code class="docutils literal notranslate"><span class="pre">S</span></code> is encoded sequence length, and <code class="docutils literal notranslate"><span class="pre">K</span></code> is
 number of codebooks.</p></li>
-<li><p><strong>n_codebooks</strong> (<em>int</em>) – The number of codebooks in the codec.</p></li>
+<li><p><strong>num_codebooks</strong> (<em>int</em>) – The number of codebooks in the codec.</p></li>
 </ul>
 </dd>
 </dl>
@@ -590,7 +590,7 @@ number of codebooks.</p></li>
       
     </aside>
   </div>
-</div><script src="../_static/documentation_options.js?v=a58bc63e"></script>
+</div><script src="../_static/documentation_options.js?v=92734c54"></script>
     <script src="../_static/doctools.js?v=9a2dae69"></script>
     <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="../_static/scripts/furo.js?v=5fa4622c"></script>
