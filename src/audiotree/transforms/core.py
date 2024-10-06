@@ -284,16 +284,16 @@ class NeuralAudioCodecEncodeTransform(grain.MapTransform):
         encode_audio_fn (Callable): A jitted function that takes audio shaped ``(B, C, T)`` and returns tokens
             shaped ``((B C), K, S)``, where ``T`` is length in samples, ``S`` is encoded sequence length, and ``K`` is
             number of codebooks.
-        n_codebooks (int): The number of codebooks in the codec.
+        num_codebooks (int): The number of codebooks in the codec.
     """
 
     def __init__(
         self,
         encode_audio_fn: Callable[[jnp.ndarray], jnp.ndarray],
-        n_codebooks: int,
+        num_codebooks: int,
     ):
         self.encode_audio_fn = encode_audio_fn
-        self.n_codebooks = n_codebooks
+        self.num_codebooks = num_codebooks
 
     def map(self, audio_signal: AudioTree):
 
@@ -304,7 +304,7 @@ class NeuralAudioCodecEncodeTransform(grain.MapTransform):
             codes = self.encode_audio_fn(audio_data)
 
             codes = rearrange(
-                codes, "(B C) K S -> B (K C) S", B=B, C=C, K=self.n_codebooks
+                codes, "(B C) K S -> B (K C) S", B=B, C=C, K=self.num_codebooks
             )
 
             leaf = leaf.replace(codes=codes)
