@@ -1,9 +1,8 @@
 import glob
-import math
 import os
-from random import Random
 from typing import AnyStr, List, Mapping, SupportsIndex
 
+from grain._src.python.dataset.transformations.mix import MixedIterDataset
 from grain import python as grain
 import numpy as np
 
@@ -67,7 +66,7 @@ class AudioDataSourceMixin:
                 sample_rate=self.sample_rate,
                 duration=self.duration,
                 mono=self.mono,
-                cpu=self.cpu,
+                cpu=False,
             )
 
         return AudioTree.from_file(
@@ -76,7 +75,6 @@ class AudioDataSourceMixin:
             offset=0,
             duration=self.duration,
             mono=self.mono,
-            cpu=self.cpu,
         )
 
 
@@ -91,7 +89,6 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         duration (float): The requested duration of the audio.
         extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
         saliency_params (SaliencyParams): Saliency parameters to use.
-        cpu (bool): Whether to load the audio data on the CPU.
     """
 
     def __init__(
@@ -103,7 +100,6 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         duration: float = 1.0,
         extensions: List[str] = None,
         saliency_params: SaliencyParams = None,
-        cpu: bool = False,
     ):
 
         self.sample_rate = sample_rate
@@ -112,7 +108,6 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         if extensions is None:
             extensions = _default_extensions
         self.saliency_params = saliency_params
-        self.cpu = cpu
 
         filepaths = []
         for group_name, folders in sources.items():
@@ -151,95 +146,58 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         return self.load_audio(file_path, record_key)
 
 
-class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
+class AudioDataBalancedDataset(MixedIterDataset):
     """A Data Source that equally weights multiple sources, where each source is a list of directories.
 
     Args:
         sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories.
-        num_steps (int): The requested length of the data source.
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
         duration (float): The requested duration of the audio.
         extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
         saliency_params (SaliencyParams): Saliency parameters to use.
-        cpu (bool): Whether to load the audio data on the CPU.
+        weights (Mapping[str, float]): A dictionary mapping each source to its proportion in the dataset.
     """
-
-    # todo: make this algorithm work if the user specifies weights for the groups.
-    #  Right now the groups are balanced uniformly.
-    #  Eventually the __init__ should just take a list of ``AudioDataSimpleSource`` and
-    #  the corresponding weights.
 
     def __init__(
         self,
         sources: Mapping[str, List[str]],
-        num_steps: int,
-        sample_rate: int = 44100,
+        sample_rate: int = 44_100,
         mono: int = 1,
         duration: float = 1.0,
         extensions: List[str] = None,
         saliency_params: SaliencyParams = None,
-        cpu: bool = False,
+        weights: Mapping[str, float] = None,
     ):
-
         self.sample_rate = sample_rate
         self.mono = bool(mono)
         self.duration = duration
         if extensions is None:
             extensions = _default_extensions
         self.saliency_params = saliency_params
-        self.cpu = cpu
 
-        groups = []
+        datasets = []
 
-        for group_name, folders in sources.items():
-            filepaths = []
-            for _folder in folders:
-                folder = os.path.expandvars(os.path.expanduser(_folder))
-                if os.path.isdir(os.path.expandvars(os.path.expanduser(folder))):
-                    filepaths += _find_files_with_extensions(
-                        folder, extensions=extensions
-                    )
-                else:
-                    filepaths += list(glob.glob(folder))
-
-            if filepaths:
-                groups.append(filepaths)
-            else:
-                raise RuntimeError(
-                    f"Group '{group_name}' is empty. "
-                    f"The number of specified folders in the group was {len(folders)}. "
-                    f"The approved file extensions were {extensions}."
-                )
-
-        self._num_groups = len(groups)
-        self._length = num_steps
-
-        ideal_group_length = math.ceil(num_steps / self._num_groups)
         seed = 0
-        lengthened_groups = []
-        for group in groups:
-            num_loops = math.ceil(ideal_group_length / len(group))
-            lengthened_group = []
-            for _ in range(num_loops):
-                copied = group.copy()
-                Random(seed).shuffle(copied)
-                seed += 1
-                lengthened_group += copied
-            lengthened_groups.append(lengthened_group)
-        self._groups = lengthened_groups
+        proportions = []
+        for group_name, folders in sources.items():
+            datasource = AudioDataSimpleSource(
+                sources={group_name: folders},
+                num_steps=None,
+                sample_rate=sample_rate,
+                mono=mono,
+                duration=duration,
+                extensions=extensions,
+                saliency_params=saliency_params,
+            )
+            dataset = (
+                grain.MapDataset.source(datasource)
+                .shuffle(seed=seed)
+                .repeat()
+                .to_iter_dataset()
+            )
+            seed += 1
+            datasets.append(dataset)
+            proportions.append(weights.get(group_name, 1.0)*1000)
 
-        assert self._length > 0
-
-    def __len__(self) -> int:
-        return self._length
-
-    def __getitem__(self, record_key: SupportsIndex):
-        record_key = int(record_key)
-
-        group_idx = record_key % self._num_groups
-        idx = record_key // self._num_groups
-
-        file_path = self._groups[group_idx][idx]
-
-        return self.load_audio(file_path, record_key)
+        super().__init__(datasets, proportions=proportions)
