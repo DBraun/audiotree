@@ -196,10 +196,10 @@ class NeuralLatentEncodeTransform(BaseMapTransform):
     def get_default_config() -> Dict[str, Any]:
         return {}
 
-    # @staticmethod
     def _apply_transform(self, audio_tree: AudioTree) -> AudioTree:
-        latents = self.encoder_fn(audio_tree)
-        audio_tree = audio_tree.replace(latents=latents)
+        if audio_tree.latents is None:
+            latents = self.encoder_fn(audio_tree)
+            audio_tree = audio_tree.replace(latents=latents)
         return audio_tree
 
 
