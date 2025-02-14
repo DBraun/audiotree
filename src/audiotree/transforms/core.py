@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List, Union
 
 from einops import rearrange
 from grain import python as grain
@@ -161,6 +161,48 @@ class SwapStereo(BaseMapTransform):
         return _swap_stereo_audio_transform(audio_tree)
 
 
+class NeuralLatentEncodeTransform(BaseMapTransform):
+    """Use a neural network to set the latents of the AudioTree.
+
+    .. code-block:: python
+
+        @staticmethod
+        def get_default_config() -> Dict[str, Any]:
+            return {}
+    """
+
+    def __init__(
+        self,
+        encoder_fn: Callable[[AudioTree], jnp.ndarray],
+        config: Dict[str, Dict[str, Any]] = None,
+        scope: Dict[str, Dict[str, Any]] = None,
+        output_key: Union[str, Callable[[List[str]], str]] = None,
+    ):
+        """
+        Initialize the base transform with a configuration, a flag for seed splitting, a probability, a scope, and an
+        output key.
+
+        Args:
+            encoder_fn (Callable[[AudioTree], jnp.ndarray]): A function that takes an audio_tree and returns a latent sequence.
+            config (Dict[str, Dict[str, Any]]): Configuration dictionary for the transform
+            scope (Dict[str, Dict[str, Any]]): Dictionary indicating which modalities to apply the transform to
+            output_key (Union[str, Callable[[List[str]], str]], optional): Key under which to store the transformed
+                value. By default, the values will be transformed in-place.
+        """
+        self.encoder_fn = encoder_fn
+        super().__init__(config, scope, output_key)
+
+    @staticmethod
+    def get_default_config() -> Dict[str, Any]:
+        return {}
+
+    # @staticmethod
+    def _apply_transform(self, audio_tree: AudioTree) -> AudioTree:
+        latents = self.encoder_fn(audio_tree)
+        audio_tree = audio_tree.replace(latents=latents)
+        return audio_tree
+
+
 class CorruptPhase(BaseRandomTransform):
     """
     Perform a phase corruption on the audio. The phase shift range is in the range ``[-pi * amount, pi * amount]``, and
@@ -295,7 +337,7 @@ class NeuralAudioCodecEncodeTransform(grain.MapTransform):
         self.encode_audio_fn = encode_audio_fn
         self.num_codebooks = num_codebooks
 
-    def map(self, audio_signal: AudioTree):
+    def map(self, audio_tree: AudioTree):
 
         def append_codes(leaf):
             audio_data = leaf.audio_data
@@ -313,11 +355,9 @@ class NeuralAudioCodecEncodeTransform(grain.MapTransform):
         def is_leaf(x):
             return isinstance(x, AudioTree)
 
-        audio_signal = jax.tree_util.tree_map(
-            append_codes, audio_signal, is_leaf=is_leaf
-        )
+        audio_tree = jax.tree_util.tree_map(append_codes, audio_tree, is_leaf=is_leaf)
 
-        return audio_signal
+        return audio_tree
 
 
 class ReduceBatchTransform(grain.MapTransform):
@@ -325,7 +365,7 @@ class ReduceBatchTransform(grain.MapTransform):
     def __init__(self, sample_rate: int):
         self.sample_rate = sample_rate
 
-    def map(self, audio_signal: AudioTree) -> AudioTree:
+    def map(self, audio_tree: AudioTree) -> AudioTree:
 
         def f(leaf):
             if isinstance(leaf, (np.ndarray, jnp.ndarray)):
@@ -335,6 +375,6 @@ class ReduceBatchTransform(grain.MapTransform):
                     return leaf.reshape(shape)
             return leaf
 
-        audio_signal = jax.tree_util.tree_map(f, audio_signal)
+        audio_tree = jax.tree_util.tree_map(f, audio_tree)
 
-        return audio_signal
+        return audio_tree

@@ -4,7 +4,7 @@ import warnings
 from grain.python import MapTransform, RandomMapTransform
 import jax
 from jax import random
-from jax.tree_util import DictKey, tree_map_with_path
+from jax.tree_util import DictKey, tree_map_with_path, tree_map
 import numpy as np
 
 from audiotree import AudioTree
@@ -76,7 +76,7 @@ def merge_pytree(tree1, tree2):
     def _combine(x, y):
         return {**x, **y}
 
-    return jax.tree_util.tree_map(_combine, tree1, tree2, is_leaf=is_leaf)
+    return tree_map(_combine, tree1, tree2, is_leaf=is_leaf)
 
 
 class BaseTransformMixIn:

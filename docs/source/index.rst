@@ -3,6 +3,7 @@ AudioTree documentation
 
 **AudioTree** is a `JAX <https://jax.readthedocs.io/en/latest/>`_ library for audio data loading and augmentations.
 The source code is `here <https://github.com/DBraun/audiotree>`_.
+AudioTree follows `Effort-based Versioning <https://jacobtomlinson.dev/effver/>`_.
 
 There are three requirements:
 
@@ -68,13 +69,13 @@ Citation
 
 .. code-block::
 
-   @software{Braun_AudioTree_2024,
+   @software{Braun_AudioTree_2025,
       author = {Braun, David},
       month = aug,
       title = {{AudioTree}},
       url = {https://github.com/DBraun/audiotree},
-      version = {0.1.2},
-      year = {2024}
+      version = {0.2.0},
+      year = {2025}
    }
 
 .. _flax.struct.dataclass: https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass

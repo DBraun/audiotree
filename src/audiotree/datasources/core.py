@@ -124,7 +124,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
                         folder, extensions=extensions
                     )
                 else:
-                    filepaths_in_group = list(glob.glob(folder))
+                    filepaths_in_group = list(glob.glob(folder, recursive=True))
 
             if filepaths_in_group:
                 filepaths += filepaths_in_group
