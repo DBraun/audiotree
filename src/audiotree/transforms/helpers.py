@@ -73,7 +73,6 @@ def _db2linear(decibels):
     return jnp.pow(10.0, decibels / 20.0)
 
 
-@jax.jit
 def _volume_norm_transform(
     audio_tree: AudioTree, key: jax.Array, min_db: float, max_db: float
 ) -> AudioTree:
@@ -93,7 +92,6 @@ def _volume_norm_transform(
     return audio_tree
 
 
-@jax.jit
 def _volume_change_transform(
     audio_tree: AudioTree, key: jax.Array, min_db: float, max_db: float
 ) -> (tuple)[AudioTree, jnp.ndarray]:
@@ -112,7 +110,6 @@ def _volume_change_transform(
     return audio_tree, gain_db
 
 
-@jax.jit
 def _rescale_audio_transform(audio_tree: AudioTree) -> AudioTree:
     """Rescales audio to the range [-1, 1] only if the original audio exceeds those bounds. Useful if transforms have
     caused the audio to clip. It won't change the relative balance of multichannel audio.
@@ -126,22 +123,18 @@ def _rescale_audio_transform(audio_tree: AudioTree) -> AudioTree:
     return audio_tree.replace(audio_data=audio_data)
 
 
-@jax.jit
 def _invert_phase_audio_transform(audio_tree: AudioTree) -> AudioTree:
     audio_data = audio_tree.audio_data
     audio_data = -audio_data
     return audio_tree.replace(audio_data=audio_data)
 
 
-@jax.jit
 def _swap_stereo_audio_transform(audio_tree: AudioTree) -> AudioTree:
     audio_data = audio_tree.audio_data
     audio_data = jnp.flip(audio_data, axis=1)
     return audio_tree.replace(audio_data=audio_data)
 
 
-# todo: potential slow-down with re-jitting due to changed static args
-@partial(jax.jit, static_argnums=(2, 3, 4, 5))
 def _corrupt_phase(
     audio_tree: AudioTree,
     rng: jax.Array,
@@ -173,8 +166,6 @@ def _corrupt_phase(
     return audio_tree.replace(audio_data=audio_data)
 
 
-# todo: potential slow-down with re-jitting due to changed static args
-@partial(jax.jit, static_argnums=(2, 3, 4, 5))
 def _shift_phase(
     audio_tree: AudioTree,
     key: jax.Array,

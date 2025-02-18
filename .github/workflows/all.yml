@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12"]  # grain doesn't support Python 3.13 yet.
 
     steps:
     - name: Checkout code
@@ -60,7 +60,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install ".[dev]"
         pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
-        pip install git+https://github.com/DBraun/jaxloudnorm.git@feature/speed-optimize
+        pip install git+https://github.com/boris-kuz/jaxloudnorm.git
         pip install git+https://github.com/DBraun/dm_aux.git@DBraun-patch-1
         pip install furo
 

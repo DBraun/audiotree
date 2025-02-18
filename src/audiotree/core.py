@@ -30,7 +30,7 @@ class SaliencyParams:
 
     enabled: bool = field(default=False)
     num_tries: int = 8
-    loudness_cutoff: float = -40
+    loudness_cutoff: float = -40.0
 
     # Note: Although Union[Callable, str] would be a better type annotation, it doesn't work well with argbind
     search_function: str = "SaliencyParams.search_uniform"
@@ -81,37 +81,41 @@ class AudioTree:
     Args:
         audio_data (jnp.ndarray): Audio waveform data in JAX numpy tensor shaped ``(Batch, Channels, Samples)``
         sample_rate (int): Sample rate of ``audio_data``, such as 44100 Hz.
-        loudness (float, optional): Loudness of the audio waveform in LUFs. Don't set this when initializing. Instead,
+        loudness (jnp.ndarray, optional): Loudness of the audio waveform in LUFs. You may not need to set this when initializing. Instead,
             use ``replace_loudness()`` to create a new AudioTree with ``loudness`` calculated.
-        pitch (float, optional): The MIDI pitch where 60 is middle C.
-        velocity (float, optional): The MIDI velocity between 0 and 127.
-        duration (float, optional): The duration of the audio waveform in seconds.
-        codes (jnp.ndarray): The neural audio codec tokens for the audio.
+        pitch (jnp.ndarray, optional): The MIDI pitch where 60 is middle C. The shape is ``(Batch,)``.
+        velocity (jnp.ndarray, optional): The MIDI velocity between 0 and 127. The shape is ``(Batch,)``.
+        duration (jnp.ndarray, optional): The duration of the audio waveform in seconds (like a note duration). The shape is ``(Batch,)``.
+        codes (jnp.ndarray, optional): The neural audio codec tokens for the audio.
+        latents (jnp.ndarray, optional): The latent representations of the audio.
         metadata (dict): Any extra metadata can be placed here.
     """
 
-    audio_data: jnp.ndarray
+    audio_data: np.ndarray
     sample_rate: int = struct.field(pytree_node=False)
-    loudness: float = None
-    pitch: float = None
-    velocity: float = None
-    duration: float = None
-    codes: jnp.ndarray = None
+    loudness: np.ndarray = None
+    pitch: np.ndarray = None
+    velocity: np.ndarray = None
+    duration: np.ndarray = None
+    codes: np.ndarray = None
+    latents: np.ndarray = None
     metadata: dict = struct.field(pytree_node=True, default_factory=dict)
 
     def replace_loudness(self) -> Self:
         """Replace ``loudness`` property with a JAX scalar."""
-        loudness = jit_integrated_loudness(self.audio_data, self.sample_rate, zeros=512)
+        loudness = jit_integrated_loudness(
+            jnp.array(self.audio_data), self.sample_rate, zeros=512
+        )
         return self.replace(loudness=loudness)
 
     @staticmethod
-    def _encode_string(s: str):
+    def _encode_string(s: str) -> np.ndarray:
         # Convert string to list of ASCII values and pad with 0
         encoded = [ord(char) for char in s] + [0] * (_str_max_length - len(s))
-        return jnp.array([encoded])  # [1, _str_max_length]
+        return np.array([encoded])  # [1, _str_max_length]
 
     @staticmethod
-    def _decode_string(encoded_array: jnp.ndarray):
+    def _decode_string(encoded_array: np.ndarray) -> str:
         # Convert list of integers to characters and join them into a string
         decoded = "".join([chr(val) for val in encoded_array if val != 0])
         return decoded
@@ -129,7 +133,6 @@ class AudioTree:
         offset: float = 0.0,
         duration: float = None,
         mono: bool = False,
-        cpu: bool = False,
     ):
         """Create an AudioTree from an audio file path.
 
@@ -158,16 +161,13 @@ class AudioTree:
             pad_right = round(duration * sample_rate) - data.shape[-1]
             data = np.pad(data, ((0, 0), (0, 0), (0, pad_right)))
 
-        if not cpu:
-            data = jnp.array(data, dtype=jnp.float32)
-
         return cls(
             audio_data=data,
             sample_rate=sr,
             metadata={
                 "filepath": cls._encode_string(audio_path),
-                "offset": offset,
-                "duration": duration,
+                "offset": np.array([offset]),
+                "duration": np.array([duration]),
             },
         )
 
@@ -176,13 +176,12 @@ class AudioTree:
         """Create an AudioTree from an audio array and a sample rate.
 
         Args:
-            audio_data (jnp.ndarray): Audio data shaped ``(Batch, Channels, Samples)``
+            audio_data (np.ndarray): Audio data shaped ``(Samples)``, ``(Channels, Samples)``, or ``(Batch, Channels, Samples)``
             sample_rate (int): Sample rate of audio data, such as 44100 Hz.
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
         """
-        audio_data = jnp.array(audio_data, dtype=jnp.float32)
         if audio_data.ndim == 1:
             audio_data = audio_data[None, None, :]  # Add batch and channel dimension
         elif audio_data.ndim == 2:
@@ -284,6 +283,11 @@ class AudioTree:
                 current_try += 1
                 if num_tries is not None and current_try >= num_tries:
                     break
+
+        # todo: revisit whether casting to numpy here actually prevents any slowdown with grain.
+        excerpt = excerpt.replace(
+            audio_data=np.array(excerpt.audio_data), loudness=np.array(excerpt.loudness)
+        )
         return excerpt
 
     def to_mono(self) -> Self:

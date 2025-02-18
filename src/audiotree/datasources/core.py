@@ -4,6 +4,7 @@ import os
 from random import Random
 from typing import AnyStr, List, Mapping, SupportsIndex
 
+from grain._src.python.dataset.transformations.mix import MixedIterDataset
 from grain import python as grain
 import numpy as np
 
@@ -67,7 +68,6 @@ class AudioDataSourceMixin:
                 sample_rate=self.sample_rate,
                 duration=self.duration,
                 mono=self.mono,
-                cpu=self.cpu,
             )
 
         return AudioTree.from_file(
@@ -76,7 +76,6 @@ class AudioDataSourceMixin:
             offset=0,
             duration=self.duration,
             mono=self.mono,
-            cpu=self.cpu,
         )
 
 
@@ -84,26 +83,25 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
     """A Data Source that aggregates all source files and weights them equally.
 
     Args:
-        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories.
-        num_steps (int): The requested length of the data source.
+        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
+            expressions involving a file extension.
+        num_records (int): The requested length of the data source.
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
         duration (float): The requested duration of the audio.
         extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
         saliency_params (SaliencyParams): Saliency parameters to use.
-        cpu (bool): Whether to load the audio data on the CPU.
     """
 
     def __init__(
         self,
         sources: Mapping[str, List[str]],
-        num_steps: int = None,
-        sample_rate: int = 44100,
+        num_records: int = None,
+        sample_rate: int = 44_100,
         mono: int = 1,
         duration: float = 1.0,
         extensions: List[str] = None,
         saliency_params: SaliencyParams = None,
-        cpu: bool = False,
     ):
 
         self.sample_rate = sample_rate
@@ -112,7 +110,6 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         if extensions is None:
             extensions = _default_extensions
         self.saliency_params = saliency_params
-        self.cpu = cpu
 
         filepaths = []
         for group_name, folders in sources.items():
@@ -124,7 +121,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
                         folder, extensions=extensions
                     )
                 else:
-                    filepaths_in_group = list(glob.glob(folder))
+                    filepaths_in_group = list(glob.glob(folder, recursive=True))
 
             if filepaths_in_group:
                 filepaths += filepaths_in_group
@@ -135,10 +132,10 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
                     f"The approved file extensions were {extensions}."
                 )
 
-        if num_steps is not None:
-            filepaths = filepaths[:num_steps]
+        if num_records is not None:
+            filepaths = filepaths[:num_records]
 
-        self._file_paths = filepaths
+        self.filepaths = filepaths
 
         self._length = len(filepaths)
         assert self._length > 0
@@ -147,7 +144,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         return self._length
 
     def __getitem__(self, record_key: SupportsIndex):
-        file_path = self._file_paths[record_key]
+        file_path = self.filepaths[record_key]
         return self.load_audio(file_path, record_key)
 
 
@@ -155,31 +152,32 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
     """A Data Source that equally weights multiple sources, where each source is a list of directories.
 
     Args:
-        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories.
-        num_steps (int): The requested length of the data source.
+        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
+            expressions involving a file extension.
+        num_records (int): The requested length of the data source.
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
         duration (float): The requested duration of the audio.
         extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
         saliency_params (SaliencyParams): Saliency parameters to use.
-        cpu (bool): Whether to load the audio data on the CPU.
     """
 
     # todo: make this algorithm work if the user specifies weights for the groups.
     #  Right now the groups are balanced uniformly.
     #  Eventually the __init__ should just take a list of ``AudioDataSimpleSource`` and
     #  the corresponding weights.
+    #  AudioDataBalancedDataset accomplishes this, but since it's an IterDataset it doesn't have all the features
+    #  of a plain RandomAccessDataSource.
 
     def __init__(
         self,
         sources: Mapping[str, List[str]],
-        num_steps: int,
-        sample_rate: int = 44100,
+        num_records: int,
+        sample_rate: int = 44_100,
         mono: int = 1,
         duration: float = 1.0,
         extensions: List[str] = None,
         saliency_params: SaliencyParams = None,
-        cpu: bool = False,
     ):
 
         self.sample_rate = sample_rate
@@ -188,7 +186,6 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         if extensions is None:
             extensions = _default_extensions
         self.saliency_params = saliency_params
-        self.cpu = cpu
 
         groups = []
 
@@ -213,9 +210,9 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
                 )
 
         self._num_groups = len(groups)
-        self._length = num_steps
+        self._length = num_records
 
-        ideal_group_length = math.ceil(num_steps / self._num_groups)
+        ideal_group_length = math.ceil(num_records / self._num_groups)
         seed = 0
         lengthened_groups = []
         for group in groups:
@@ -243,3 +240,64 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         file_path = self._groups[group_idx][idx]
 
         return self.load_audio(file_path, record_key)
+
+
+class AudioDataBalancedDataset(MixedIterDataset):
+    """A Data Source that equally weights multiple sources, where each source is a list of directories.
+
+    Args:
+        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
+            expressions involving a file extension.
+        sample_rate (int): The requested sample rate of the audio.
+        mono (bool): Whether to force the audio to be mono.
+        duration (float): The requested duration of the audio.
+        extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
+        saliency_params (SaliencyParams): Saliency parameters to use.
+        weights (Mapping[str, float]): A dictionary mapping each source to its proportion in the dataset.
+    """
+
+    def __init__(
+        self,
+        sources: Mapping[str, List[str]],
+        sample_rate: int = 44_100,
+        mono: int = 1,
+        duration: float = 1.0,
+        extensions: List[str] = None,
+        saliency_params: SaliencyParams = None,
+        weights: Mapping[str, float] = None,
+    ):
+        self.sample_rate = sample_rate
+        self.mono = bool(mono)
+        self.duration = duration
+        if extensions is None:
+            extensions = _default_extensions
+        self.saliency_params = saliency_params
+
+        datasets = []
+
+        seed = 0
+        proportions = []
+        for group_name, folders in sources.items():
+            datasource = AudioDataSimpleSource(
+                sources={group_name: folders},
+                num_records=None,
+                sample_rate=sample_rate,
+                mono=mono,
+                duration=duration,
+                extensions=extensions,
+                saliency_params=saliency_params,
+            )
+            dataset = (
+                grain.MapDataset.source(datasource)
+                .shuffle(seed=seed)
+                .repeat()
+                .to_iter_dataset()
+            )
+            seed += 1
+            datasets.append(dataset)
+            weight = 1.0
+            if isinstance(weights, dict):
+                weight = weights.get(group_name, 1.0)
+            proportions.append(weight * 1000)
+
+        super().__init__(datasets, proportions=proportions)

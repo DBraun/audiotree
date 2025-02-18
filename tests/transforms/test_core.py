@@ -16,6 +16,7 @@ from audiotree.transforms import (
     RescaleAudio,
     InvertPhase,
     SwapStereo,
+    NeuralLatentEncodeTransform,
 )
 
 
@@ -42,15 +43,20 @@ class AddSomethingTransform(BaseMapTransform):
         }
 
     @staticmethod
-    def _apply_transform(element: jnp.ndarray, offset: int):
-        return element + offset
+    def _apply_transform(audio_tree: AudioTree, offset: int):
+        audio_data = audio_tree.audio_data + offset
+        audio_tree = audio_tree.replace(audio_data=audio_data)
+        return audio_tree
 
 
 @pytest.mark.parametrize("split_seed", [False, True])
 def test_config_001(split_seed: bool):
 
-    v = jnp.full((1,), fill_value=1)
-    element = {"a": v, "b": v, "c": [v, v], "d": {"e": v, "f": v}}
+    def make_tree(v: float):
+        return AudioTree(np.full(shape=(1, 1, 44_100), fill_value=v), 44_100)
+
+    audio_zero = make_tree(0.)
+    element = {"a": audio_zero, "b": audio_zero, "c": [audio_zero, audio_zero], "d": {"e": audio_zero, "f": audio_zero}}
 
     config = {
         "b": {"minval": -1, "maxval": 3},
@@ -63,9 +69,6 @@ def test_config_001(split_seed: bool):
     transform = ReturnConfigTransform(config=config, split_seed=split_seed)
     seed = 42
     transformed_element = transform.random_map(element, rng=np.random.default_rng(seed))
-    transformed_element = jax.tree.map(
-        lambda x: np.array(x).tolist(), transformed_element
-    )
 
     expected = {
         "a": {"minval": 0, "maxval": 1},
@@ -81,8 +84,12 @@ def test_config_001(split_seed: bool):
 
 def test_scope():
 
-    v = jnp.zeros((1,))
-    element = {"a": v, "b": v, "c": [v, v], "d": {"e": v, "f": v}, "g": [v, v]}
+    def make_tree(v: float):
+        return AudioTree(np.full(shape=(1, 1, 44_100), fill_value=v), 44_100)
+
+    audio_zero = make_tree(0.)
+    element = {"a": audio_zero, "b": audio_zero, "c": [audio_zero, audio_zero], "d": {"e": audio_zero, "f": audio_zero},
+               "g": [audio_zero, audio_zero]}
 
     scope = {
         "b": {"scope": True},
@@ -96,21 +103,18 @@ def test_scope():
 
     transform = AddSomethingTransform(scope=scope)
     transformed_element = transform.map(element)
-    transformed_element = jax.tree.map(
-        lambda x: np.array(x.reshape()).astype(int).tolist(), transformed_element
-    )
 
     expected = {
-        "a": 0,
-        "b": 1,
-        "c": [0, 0],
+        "a": make_tree(0),
+        "b": make_tree(1),
+        "c": [make_tree(0), make_tree(0)],
         "d": {
-            "e": 1,
-            "f": 0,
+            "e": make_tree(1),
+            "f": make_tree(0),
         },
-        "g": [1, 1],
+        "g": [make_tree(1), make_tree(1)],
     }
-    assert expected == transformed_element
+    assert are_equal_pytree(expected, transformed_element)
 
 
 def are_equal_pytree(pytree1, pytree2):
@@ -292,3 +296,24 @@ def test_transforms():
     RescaleAudio().map(audio_tree)
     InvertPhase().map(audio_tree)
     Identity().map(audio_tree)
+
+
+def test_only_apply_to_audiotree():
+
+    """Only `src` can have its `latents` set because `src` is an AudioTree while `other` is a simple array."""
+
+    def encoder_fn(audio_tree: AudioTree) -> jnp.ndarray:
+        B = audio_tree.audio_data.shape[0]
+        return jnp.zeros((B,))
+
+    B = 2
+
+    audio_data = {"src": AudioTree(audio_data=jnp.zeros(shape=(B, 1, 44100)), sample_rate=44100), "other": jnp.zeros((B,))}
+
+    transform = NeuralLatentEncodeTransform(encoder_fn=encoder_fn, scope={"src": {"scope": True}})
+    out = transform.map(audio_data)
+    assert out["src"].latents is not None
+
+    transform = NeuralLatentEncodeTransform(encoder_fn=encoder_fn)
+    out = transform.map(audio_data)
+    assert out["src"].latents is not None

@@ -7,7 +7,7 @@ from jax import numpy as jnp
 
 
 @partial(jax.jit, static_argnames=("sample_rate", "zeros"))
-def jit_integrated_loudness(data, sample_rate, zeros: int):
+def jit_integrated_loudness(data: jnp.ndarray, sample_rate: int, zeros: int):
 
     block_size = 0.4
 

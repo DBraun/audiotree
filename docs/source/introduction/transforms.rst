@@ -34,8 +34,8 @@ Before transformations, your data source might provide a single :class:`~audiotr
 
     from jax import numpy as jnp
     from audiotree import AudioTree
-    sample_rate = 44100
-    data = jnp.zeros((16, 2, 441000))  # dummy placeholder shaped (B, C, T)
+    sample_rate = 44_100
+    data = jnp.zeros((16, 2, 441_000))  # dummy placeholder shaped (B, C, T)
     audio_tree = AudioTree(data, sample_rate)
     batch = {"src": [audio_tree, audio_tree], "target": audio_tree}
 

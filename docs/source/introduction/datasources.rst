@@ -16,15 +16,18 @@ Data Sources
 Data Sources in ``audiotree.datasources`` are `Grain`_ `data sources <https://github.com/google/grain/blob/main/docs/data_sources.md>`_
 that are specially designed for audio. Grain is a new library for dataset operations in JAX with no TensorFlow dependency.
 
-For now, there are only two types of Data Sources, but they fit many needs.
+For now, there are only two types of Data Sources and one Data Set, but they fit many needs.
 You can take a look at DAC-JAX's `input_pipeline.py <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_ to see how they're used.
 
-Both :class:`~audiotree.datasources.core.AudioDataSimpleSource` and :class:`~audiotree.datasources.core.AudioDataBalancedSource` are initialized with a dictionary of ``sources``.
+The three :class:`~audiotree.datasources.core.AudioDataSimpleSource`, :class:`~audiotree.datasources.core.AudioDataBalancedSource`, and :class:`~audiotree.datasources.core.AudioDataBalancedDataset` are initialized with a dictionary of ``sources``.
 For example, with ArgBind, the YAML might be this (adapted from `DAC <https://github.com/descriptinc/descript-audio-codec/blob/main/conf/base.yml>`_):
 
 .. code-block:: yaml
-    
-    train/AudioDataSimpleSource.sources:
+
+    train/AudioDataBalancedSource.extensions:
+        - .wav
+        - .flac
+    train/AudioDataBalancedSource.sources:
         speech_fb:
             - /data/daps/train
         speech_hq:
@@ -46,7 +49,22 @@ For example, with ArgBind, the YAML might be this (adapted from `DAC <https://gi
             - /data/audioset/data/unbalanced_train_segments/
             - /data/audioset/data/balanced_train_segments/
 
-The second thing to know is that both :class:`~audiotree.datasources.core.AudioDataSimpleSource` and :class:`~audiotree.datasources.core.AudioDataBalancedSource`
+The folders can also be glob expressions (due to the balancing, the result is different from the above):
+
+.. code-block:: yaml
+
+    train/AudioDataBalancedSource.sources:
+        speech:
+            - /data/*speech/**/*.wav
+            - /data/daps/train
+            - /data/vctk
+            - /data/vocalset
+            - /data/common_voice
+        music:
+            - /data/musdb/train
+            - /data/jamendo
+
+The second thing to know is that :class:`~audiotree.datasources.core.AudioDataSimpleSource`, :class:`~audiotree.datasources.core.AudioDataBalancedSource`, and :class:`~audiotree.datasources.core.AudioDataBalancedDataset`
 can be initialized with an instance of :class:`~audiotree.datasources.core.SaliencyParams`. If :class:`~audiotree.datasources.core.SaliencyParams` has ``enabled``
 set to ``True``, then a random section of an audio file will be selected until it meets a specified minimum loudness.
 

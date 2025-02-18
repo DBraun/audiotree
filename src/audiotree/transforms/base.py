@@ -4,7 +4,8 @@ import warnings
 from grain.python import MapTransform, RandomMapTransform
 import jax
 from jax import random
-from jax.tree_util import DictKey, tree_map_with_path
+from jax.tree import map_with_path
+from jax.tree_util import DictKey
 import numpy as np
 
 from audiotree import AudioTree
@@ -76,7 +77,7 @@ def merge_pytree(tree1, tree2):
     def _combine(x, y):
         return {**x, **y}
 
-    return jax.tree_util.tree_map(_combine, tree1, tree2, is_leaf=is_leaf)
+    return jax.tree.map(_combine, tree1, tree2, is_leaf=is_leaf)
 
 
 class BaseTransformMixIn:
@@ -140,7 +141,7 @@ class BaseTransformMixIn:
             return leaf
 
         # Rename the deepest keys in the new tree using the `output_key` function.
-        new_tree = tree_map_with_path(rename_node, new_tree, is_leaf=is_leaf)
+        new_tree = map_with_path(rename_node, new_tree, is_leaf=is_leaf)
 
         # Merge the trees. Unfortunately, the order matters.
         new_tree = merge_pytree(new_tree, old_tree)
@@ -205,6 +206,10 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
             seed = rng.integers(2**63)
             key = random.PRNGKey(seed)
 
+        def is_leaf(leaf):
+            res = isinstance(leaf, AudioTree)  # todo: ask JAX experts about this
+            return res
+
         def pre_transform_map_func(path: list[DictKey], leaf):
             if _is_in_scope(self.scope, path):
                 transformed_leaf = self._pre_transform(leaf)
@@ -212,6 +217,8 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
             return leaf
 
         def map_func(path: list[DictKey], leaf, rng: jax.Array, *config):
+            if not is_leaf(leaf):
+                return leaf
             if _is_in_scope(self.scope, path):
                 transformed_leaf = self._apply_transform(leaf, rng, **config[0])
                 return transformed_leaf
@@ -229,23 +236,16 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
                 for key, default in self.default_config.items()
             }
 
-        def is_leaf(leaf):
-            return isinstance(leaf, AudioTree)  # todo: ask JAX experts about this
-
-        element = tree_map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
+        element = map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
 
         treedef = jax.tree.flatten(element, is_leaf=is_leaf)[1]
         length = treedef.num_leaves
         subkeys = random.split(key, length) if self.split_seed else [key] * length
         subkeys = jax.tree.unflatten(treedef, subkeys)
 
-        config = tree_map_with_path(
-            map_use_default_config_val, element, is_leaf=is_leaf
-        )
+        config = map_with_path(map_use_default_config_val, element, is_leaf=is_leaf)
 
-        new_tree = tree_map_with_path(
-            map_func, element, subkeys, config, is_leaf=is_leaf
-        )
+        new_tree = map_with_path(map_func, element, subkeys, config, is_leaf=is_leaf)
         new_tree = self._post_process(element, new_tree)
 
         # Determine if we should apply the transform
@@ -297,13 +297,21 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
             Any: transformed element
         """
 
+        def is_leaf(leaf):
+            res = isinstance(leaf, AudioTree)  # todo: ask JAX experts about this
+            return res
+
         def pre_transform_map_func(path: list[DictKey], leaf):
+            if not is_leaf(leaf):
+                return leaf
             if _is_in_scope(self.scope, path):
                 transformed_leaf = self._pre_transform(leaf)
                 return transformed_leaf
             return leaf
 
         def map_func(path: list[DictKey], leaf, *config):
+            if not is_leaf(leaf):
+                return leaf
             if _is_in_scope(self.scope, path):
                 transformed_leaf = self._apply_transform(leaf, **config[0])
                 return transformed_leaf
@@ -321,13 +329,8 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
                 for key, default in self.default_config.items()
             }
 
-        def is_leaf(leaf):
-            return isinstance(leaf, AudioTree)  # todo: ask JAX experts about this
+        element = map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
 
-        element = tree_map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
-
-        config = tree_map_with_path(
-            map_use_default_config_val, element, is_leaf=is_leaf
-        )
-        new_tree = tree_map_with_path(map_func, element, config, is_leaf=is_leaf)
+        config = map_with_path(map_use_default_config_val, element, is_leaf=is_leaf)
+        new_tree = map_with_path(map_func, element, config, is_leaf=is_leaf)
         return self._post_process(element, new_tree)
