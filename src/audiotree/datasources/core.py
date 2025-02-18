@@ -84,7 +84,8 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
     """A Data Source that aggregates all source files and weights them equally.
 
     Args:
-        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories.
+        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
+            expressions involving a file extension.
         num_records (int): The requested length of the data source.
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
@@ -152,7 +153,8 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
     """A Data Source that equally weights multiple sources, where each source is a list of directories.
 
     Args:
-        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories.
+        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
+            expressions involving a file extension.
         num_records (int): The requested length of the data source.
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
@@ -245,7 +247,8 @@ class AudioDataBalancedDataset(MixedIterDataset):
     """A Data Source that equally weights multiple sources, where each source is a list of directories.
 
     Args:
-        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories.
+        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
+            expressions involving a file extension.
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
         duration (float): The requested duration of the audio.

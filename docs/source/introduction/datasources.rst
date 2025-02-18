@@ -24,10 +24,10 @@ For example, with ArgBind, the YAML might be this (adapted from `DAC <https://gi
 
 .. code-block:: yaml
 
-    train/AudioDataSimpleSource.extensions:
+    train/AudioDataBalancedSource.extensions:
         - .wav
         - .flac
-    train/AudioDataSimpleSource.sources:
+    train/AudioDataBalancedSource.sources:
         speech_fb:
             - /data/daps/train
         speech_hq:
@@ -48,6 +48,21 @@ For example, with ArgBind, the YAML might be this (adapted from `DAC <https://gi
         general:
             - /data/audioset/data/unbalanced_train_segments/
             - /data/audioset/data/balanced_train_segments/
+
+The folders can also be glob expressions (due to the balancing, the result is different from the above):
+
+.. code-block:: yaml
+
+    train/AudioDataBalancedSource.sources:
+        speech:
+            - /data/*speech/**/*.wav
+            - /data/daps/train
+            - /data/vctk
+            - /data/vocalset
+            - /data/common_voice
+        music:
+            - /data/musdb/train
+            - /data/jamendo
 
 The second thing to know is that :class:`~audiotree.datasources.core.AudioDataSimpleSource`, :class:`~audiotree.datasources.core.AudioDataBalancedSource`, and :class:`~audiotree.datasources.core.AudioDataBalancedDataset`
 can be initialized with an instance of :class:`~audiotree.datasources.core.SaliencyParams`. If :class:`~audiotree.datasources.core.SaliencyParams` has ``enabled``
