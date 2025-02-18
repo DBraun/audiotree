@@ -85,7 +85,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
 
     Args:
         sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories.
-        num_steps (int): The requested length of the data source.
+        num_records (int): The requested length of the data source.
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
         duration (float): The requested duration of the audio.
@@ -96,8 +96,8 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
     def __init__(
         self,
         sources: Mapping[str, List[str]],
-        num_steps: int = None,
-        sample_rate: int = 44100,
+        num_records: int = None,
+        sample_rate: int = 44_100,
         mono: int = 1,
         duration: float = 1.0,
         extensions: List[str] = None,
@@ -132,10 +132,10 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
                     f"The approved file extensions were {extensions}."
                 )
 
-        if num_steps is not None:
-            filepaths = filepaths[:num_steps]
+        if num_records is not None:
+            filepaths = filepaths[:num_records]
 
-        self._file_paths = filepaths
+        self.filepaths = filepaths
 
         self._length = len(filepaths)
         assert self._length > 0
@@ -144,7 +144,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         return self._length
 
     def __getitem__(self, record_key: SupportsIndex):
-        file_path = self._file_paths[record_key]
+        file_path = self.filepaths[record_key]
         return self.load_audio(file_path, record_key)
 
 
@@ -153,7 +153,7 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
 
     Args:
         sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories.
-        num_steps (int): The requested length of the data source.
+        num_records (int): The requested length of the data source.
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
         duration (float): The requested duration of the audio.
@@ -165,12 +165,14 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
     #  Right now the groups are balanced uniformly.
     #  Eventually the __init__ should just take a list of ``AudioDataSimpleSource`` and
     #  the corresponding weights.
+    #  AudioDataBalancedDataset accomplishes this, but since it's an IterDataset it doesn't have all the features
+    #  of a plain RandomAccessDataSource.
 
     def __init__(
         self,
         sources: Mapping[str, List[str]],
-        num_steps: int,
-        sample_rate: int = 44100,
+        num_records: int,
+        sample_rate: int = 44_100,
         mono: int = 1,
         duration: float = 1.0,
         extensions: List[str] = None,
@@ -207,9 +209,9 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
                 )
 
         self._num_groups = len(groups)
-        self._length = num_steps
+        self._length = num_records
 
-        ideal_group_length = math.ceil(num_steps / self._num_groups)
+        ideal_group_length = math.ceil(num_records / self._num_groups)
         seed = 0
         lengthened_groups = []
         for group in groups:
@@ -276,7 +278,7 @@ class AudioDataBalancedDataset(MixedIterDataset):
         for group_name, folders in sources.items():
             datasource = AudioDataSimpleSource(
                 sources={group_name: folders},
-                num_steps=None,
+                num_records=None,
                 sample_rate=sample_rate,
                 mono=mono,
                 duration=duration,
@@ -294,6 +296,6 @@ class AudioDataBalancedDataset(MixedIterDataset):
             weight = 1.0
             if isinstance(weights, dict):
                 weight = weights.get(group_name, 1.0)
-            proportions.append(weight*1000)
+            proportions.append(weight * 1000)
 
         super().__init__(datasets, proportions=proportions)

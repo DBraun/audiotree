@@ -183,7 +183,8 @@ class NeuralLatentEncodeTransform(BaseMapTransform):
         output key.
 
         Args:
-            encoder_fn (Callable[[AudioTree], jnp.ndarray]): A function that takes an audio_tree and returns a latent sequence.
+            encoder_fn (Callable[[AudioTree], jnp.ndarray]): A function that takes an audio_tree and returns a latent
+                sequence.
             config (Dict[str, Dict[str, Any]]): Configuration dictionary for the transform
             scope (Dict[str, Dict[str, Any]]): Dictionary indicating which modalities to apply the transform to
             output_key (Union[str, Callable[[List[str]], str]], optional): Key under which to store the transformed
@@ -317,46 +318,56 @@ class Choose(grain.RandomMapTransform):
         return element
 
 
-class NeuralAudioCodecEncodeTransform(grain.MapTransform):
+class NeuralAudioCodecEncodeTransform(BaseMapTransform):
     """
     Use a neural audio codec such as `Descript Audio Codec (DAC) or EnCodec <https://github.com/DBraun/DAC-JAX>`_ to
     encode audio into tokens.
 
-    Args:
-        encode_audio_fn (Callable): A jitted function that takes audio shaped ``(B, C, T)`` and returns tokens
-            shaped ``((B C), K, S)``, where ``T`` is length in samples, ``S`` is encoded sequence length, and ``K`` is
-            number of codebooks.
-        num_codebooks (int): The number of codebooks in the codec.
+    .. code-block:: python
+
+        @staticmethod
+        def get_default_config() -> Dict[str, Any]:
+            return {}
     """
 
     def __init__(
         self,
-        encode_audio_fn: Callable[[jnp.ndarray], jnp.ndarray],
+        encoder_fn: Callable[[AudioTree], jnp.ndarray],
         num_codebooks: int,
+        config: Dict[str, Dict[str, Any]] = None,
+        scope: Dict[str, Dict[str, Any]] = None,
+        output_key: Union[str, Callable[[List[str]], str]] = None,
     ):
-        self.encode_audio_fn = encode_audio_fn
+        """
+        Initialize the base transform with a configuration, a flag for seed splitting, a probability, a scope, and an
+        output key.
+
+        Args:
+            encoder_fn (Callable[[AudioTree], jnp.ndarray]): A function that takes audio shaped ``(B, C, T)`` and
+                returns tokens shaped ``((B C), K, S)``, where ``T`` is length in samples, ``S`` is encoded sequence
+                length, and ``K`` is number of codebooks.
+            num_codebooks (int): The number of codebooks in the codec.
+            config (Dict[str, Dict[str, Any]]): Configuration dictionary for the transform
+            scope (Dict[str, Dict[str, Any]]): Dictionary indicating which modalities to apply the transform to
+            output_key (Union[str, Callable[[List[str]], str]], optional): Key under which to store the transformed
+                value. By default, the values will be transformed in-place.
+        """
+        self.encoder_fn = encoder_fn
         self.num_codebooks = num_codebooks
+        super().__init__(config, scope, output_key)
 
-    def map(self, audio_tree: AudioTree):
+    @staticmethod
+    def get_default_config() -> Dict[str, Any]:
+        return {}
 
-        def append_codes(leaf):
-            audio_data = leaf.audio_data
-            B, C, T = audio_data.shape
-
-            codes = self.encode_audio_fn(audio_data)
-
+    def _apply_transform(self, audio_tree: AudioTree) -> AudioTree:
+        if audio_tree.codes is None:
+            B, C, T = audio_tree.audio_data.shape
+            codes = self.encoder_fn(audio_tree)
             codes = rearrange(
                 codes, "(B C) K S -> B (K C) S", B=B, C=C, K=self.num_codebooks
             )
-
-            leaf = leaf.replace(codes=codes)
-            return leaf
-
-        def is_leaf(x):
-            return isinstance(x, AudioTree)
-
-        audio_tree = jax.tree_util.tree_map(append_codes, audio_tree, is_leaf=is_leaf)
-
+            audio_tree = audio_tree.replace(codes=codes)
         return audio_tree
 
 
