@@ -11,7 +11,7 @@ There are three requirements:
 
    pip install "git+https://github.com/DBraun/argbind.git@improve.subclasses"
    pip install "git+https://github.com/DBraun/dm_aux.git@DBraun-patch-2"
-   pip install "git+https://github.com/DBraun/jaxloudnorm.git@feature/speed-optimize"
+   pip install "git+https://github.com/boris-kuz/jaxloudnorm.git"
 
 Then AudioTree can be installed with pip:
 
@@ -20,7 +20,8 @@ Then AudioTree can be installed with pip:
    pip install audiotree
 
 The namesake class :class:`~audiotree.core.AudioTree` is a `flax.struct.dataclass`_ with properties for audio data,
-sample rate, on-demand data such as loudness, and optional metadata such as MIDI pitch, velocity, and duration.
+sample rate, on-demand data such as loudness, and optional data such as filepaths, MIDI pitch, velocity, and duration.
+An AudioTree can also store arrays for codebooks or latent embeddings.
 
 Although ``AudioTree`` is a specific class, we loosely refer to any combination of dictionaries and lists of
 ``AudioTrees`` as also an ``AudioTree`` (check out the `Pytree`_ JAX docs).
@@ -38,7 +39,7 @@ For example, in the code below, we consider ``batch`` to be an ``AudioTree``.
 The batch above can be used with `jax.tree.map`_ to create a new batch. That's essentially what the Transform classes in
 :mod:`~audiotree.transforms` do.
 They perform GPU-based `jax.jit`_-compatible augmentations on arbitrarily shaped AudioTrees.
-When used with `ArgBind`_, they are also highly configurable from the command-line and YAML.
+When used with `ArgBind`_, they are also highly configurable from the command-line, YAML and Python.
 
 Whether you're creating a data loader for training, validation, testing, or prompt generation, AudioTree can help.
 

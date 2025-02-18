@@ -250,7 +250,7 @@ AudioTree follows <a class="reference external" href="https://jacobtomlinson.dev
 <p>There are three requirements:</p>
 <div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;git+https://github.com/DBraun/argbind.git@improve.subclasses&quot;</span>
 pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;git+https://github.com/DBraun/dm_aux.git@DBraun-patch-2&quot;</span>
-pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;git+https://github.com/DBraun/jaxloudnorm.git@feature/speed-optimize&quot;</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;git+https://github.com/boris-kuz/jaxloudnorm.git&quot;</span>
 </pre></div>
 </div>
 <p>Then AudioTree can be installed with pip:</p>
@@ -258,7 +258,8 @@ pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot
 </pre></div>
 </div>
 <p>The namesake class <a class="reference internal" href="audiotree_api/core.html#audiotree.core.AudioTree" title="audiotree.core.AudioTree"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioTree</span></code></a> is a <a class="reference external" href="https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass">flax.struct.dataclass</a> with properties for audio data,
-sample rate, on-demand data such as loudness, and optional metadata such as MIDI pitch, velocity, and duration.</p>
+sample rate, on-demand data such as loudness, and optional data such as filepaths, MIDI pitch, velocity, and duration.
+An AudioTree can also store arrays for codebooks or latent embeddings.</p>
 <p>Although <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code> is a specific class, we loosely refer to any combination of dictionaries and lists of
 <code class="docutils literal notranslate"><span class="pre">AudioTrees</span></code> as also an <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code> (check out the <a class="reference external" href="https://jax.readthedocs.io/en/latest/pytrees.html">Pytree</a> JAX docs).
 For example, in the code below, we consider <code class="docutils literal notranslate"><span class="pre">batch</span></code> to be an <code class="docutils literal notranslate"><span class="pre">AudioTree</span></code>.</p>
@@ -273,7 +274,7 @@ For example, in the code below, we consider <code class="docutils literal notran
 <p>The batch above can be used with <a class="reference external" href="https://jax.readthedocs.io/en/latest/_autosummary/jax.tree.map.html#jax.tree.map">jax.tree.map</a> to create a new batch. That’s essentially what the Transform classes in
 <code class="xref py py-mod docutils literal notranslate"><span class="pre">transforms</span></code> do.
 They perform GPU-based <a class="reference external" href="https://jax.readthedocs.io/en/latest/_autosummary/jax.jit.html">jax.jit</a>-compatible augmentations on arbitrarily shaped AudioTrees.
-When used with <a class="reference external" href="https://github.com/pseeth/argbind/">ArgBind</a>, they are also highly configurable from the command-line and YAML.</p>
+When used with <a class="reference external" href="https://github.com/pseeth/argbind/">ArgBind</a>, they are also highly configurable from the command-line, YAML and Python.</p>
 <p>Whether you’re creating a data loader for training, validation, testing, or prompt generation, AudioTree can help.</p>
 <section id="content">
 <h2>Content<a class="headerlink" href="#content" title="Link to this heading">¶</a></h2>
