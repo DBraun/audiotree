@@ -27,7 +27,7 @@ def test_audiodatabalancedataset():
             weights={"group1": 1, "group2": 2},  # show group2 twice as much as group 1.
         )
         .batch(1)
-        .map(audiotree.transforms.ReduceBatchTransform(sample_rate))
+        .map(audiotree.transforms.ReduceBatchTransform())
     )
     i = 0
     for item in dataset:
