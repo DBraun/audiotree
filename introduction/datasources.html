@@ -250,10 +250,10 @@ that are specially designed for audio. Grain is a new library for dataset operat
 You can take a look at DAC-JAX’s <a class="reference external" href="https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py">input_pipeline.py</a> to see how they’re used.</p>
 <p>The three <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.AudioDataSimpleSource" title="audiotree.datasources.core.AudioDataSimpleSource"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioDataSimpleSource</span></code></a>, <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.AudioDataBalancedSource" title="audiotree.datasources.core.AudioDataBalancedSource"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioDataBalancedSource</span></code></a>, and <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.AudioDataBalancedDataset" title="audiotree.datasources.core.AudioDataBalancedDataset"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioDataBalancedDataset</span></code></a> are initialized with a dictionary of <code class="docutils literal notranslate"><span class="pre">sources</span></code>.
 For example, with ArgBind, the YAML might be this (adapted from <a class="reference external" href="https://github.com/descriptinc/descript-audio-codec/blob/main/conf/base.yml">DAC</a>):</p>
-<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">train/AudioDataSimpleSource.extensions</span><span class="p">:</span>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">train/AudioDataBalancedSource.extensions</span><span class="p">:</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.wav</span>
 <span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.flac</span>
-<span class="nt">train/AudioDataSimpleSource.sources</span><span class="p">:</span>
+<span class="nt">train/AudioDataBalancedSource.sources</span><span class="p">:</span>
 <span class="w">    </span><span class="nt">speech_fb</span><span class="p">:</span>
 <span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/daps/train</span>
 <span class="w">    </span><span class="nt">speech_hq</span><span class="p">:</span>
@@ -274,6 +274,19 @@ For example, with ArgBind, the YAML might be this (adapted from <a class="refere
 <span class="w">    </span><span class="nt">general</span><span class="p">:</span>
 <span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/audioset/data/unbalanced_train_segments/</span>
 <span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/audioset/data/balanced_train_segments/</span>
+</pre></div>
+</div>
+<p>The folders can also be glob expressions (due to the balancing, the result is different from the above):</p>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">train/AudioDataBalancedSource.sources</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">speech</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/*speech/**/*.wav</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/daps/train</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/vctk</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/vocalset</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/common_voice</span>
+<span class="w">    </span><span class="nt">music</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/musdb/train</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/jamendo</span>
 </pre></div>
 </div>
 <p>The second thing to know is that <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.AudioDataSimpleSource" title="audiotree.datasources.core.AudioDataSimpleSource"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioDataSimpleSource</span></code></a>, <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.AudioDataBalancedSource" title="audiotree.datasources.core.AudioDataBalancedSource"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioDataBalancedSource</span></code></a>, and <a class="reference internal" href="../audiotree_api/datasources.html#audiotree.datasources.core.AudioDataBalancedDataset" title="audiotree.datasources.core.AudioDataBalancedDataset"><code class="xref py py-class docutils literal notranslate"><span class="pre">AudioDataBalancedDataset</span></code></a>
