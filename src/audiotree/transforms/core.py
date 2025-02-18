@@ -373,8 +373,8 @@ class NeuralAudioCodecEncodeTransform(BaseMapTransform):
 
 class ReduceBatchTransform(grain.MapTransform):
 
-    def __init__(self, sample_rate: int):
-        self.sample_rate = sample_rate
+    def __init__(self):
+        pass
 
     def map(self, audio_tree: AudioTree) -> AudioTree:
 
@@ -386,6 +386,6 @@ class ReduceBatchTransform(grain.MapTransform):
                     return leaf.reshape(shape)
             return leaf
 
-        audio_tree = jax.tree_util.tree_map(f, audio_tree)
+        audio_tree = jax.tree.map(f, audio_tree)
 
         return audio_tree
