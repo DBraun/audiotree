@@ -68,7 +68,6 @@ class AudioDataSourceMixin:
                 sample_rate=self.sample_rate,
                 duration=self.duration,
                 mono=self.mono,
-                cpu=False,
             )
 
         return AudioTree.from_file(

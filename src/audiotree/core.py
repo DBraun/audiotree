@@ -103,7 +103,9 @@ class AudioTree:
 
     def replace_loudness(self) -> Self:
         """Replace ``loudness`` property with a JAX scalar."""
-        loudness = jit_integrated_loudness(self.audio_data, self.sample_rate, zeros=512)
+        loudness = jit_integrated_loudness(
+            jnp.array(self.audio_data), self.sample_rate, zeros=512
+        )
         return self.replace(loudness=loudness)
 
     @staticmethod
@@ -131,7 +133,6 @@ class AudioTree:
         offset: float = 0.0,
         duration: float = None,
         mono: bool = False,
-        cpu: bool = True,
     ):
         """Create an AudioTree from an audio file path.
 
@@ -143,7 +144,6 @@ class AudioTree:
             duration (float, optional): Duration in seconds of audio data. The audio data will be trimmed or extended as
                 necessary.
             mono (bool, optional): Whether to force the audio data to be single-channel.
-            cpu (bool, optional): Whether to keep the audio data in CPU RAM (not GPU/TPU etc.)
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
@@ -160,9 +160,6 @@ class AudioTree:
         if duration is not None and data.shape[-1] < round(duration * sample_rate):
             pad_right = round(duration * sample_rate) - data.shape[-1]
             data = np.pad(data, ((0, 0), (0, 0), (0, pad_right)))
-
-        if not cpu:
-            data = jnp.array(data, dtype=jnp.float32)
 
         return cls(
             audio_data=data,
@@ -286,6 +283,11 @@ class AudioTree:
                 current_try += 1
                 if num_tries is not None and current_try >= num_tries:
                     break
+
+        # todo: revisit whether casting to numpy here actually prevents any slowdown with grain.
+        excerpt = excerpt.replace(
+            audio_data=np.array(excerpt.audio_data), loudness=np.array(excerpt.loudness)
+        )
         return excerpt
 
     def to_mono(self) -> Self:
