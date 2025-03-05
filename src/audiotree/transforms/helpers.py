@@ -3,7 +3,6 @@ from typing import Any, Optional, Tuple, Union
 
 import chex
 import jax
-from einops import rearrange
 from jax import numpy as jnp
 from jax import random
 from jax.tree_util import DictKey
@@ -15,11 +14,7 @@ KeyLeafPairs = list[tuple[list[DictKey], Any]]
 
 def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window="hann"):
 
-    batch_size, num_channels, audio_length = x.shape
-
     frame_step = int(frame_length * hop_factor)
-
-    x = rearrange(x, "b c t -> (b c) t")
 
     # This probably uses less memory than the aux method, but it's definitely slower than aux.
     _, _, stft_data = jax.scipy.signal.stft(
@@ -28,8 +23,6 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window="hann"):
         nperseg=frame_length,
         noverlap=(frame_length - frame_step),
     )
-    stft_data = rearrange(stft_data, "(b c) nf nt -> b c nf nt", b=batch_size)
-
     return stft_data
 
 
