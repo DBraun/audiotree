@@ -55,8 +55,13 @@ def test_config_001(split_seed: bool):
     def make_tree(v: float):
         return AudioTree(np.full(shape=(1, 1, 44_100), fill_value=v), 44_100)
 
-    audio_zero = make_tree(0.)
-    element = {"a": audio_zero, "b": audio_zero, "c": [audio_zero, audio_zero], "d": {"e": audio_zero, "f": audio_zero}}
+    audio_zero = make_tree(0.0)
+    element = {
+        "a": audio_zero,
+        "b": audio_zero,
+        "c": [audio_zero, audio_zero],
+        "d": {"e": audio_zero, "f": audio_zero},
+    }
 
     config = {
         "b": {"minval": -1, "maxval": 3},
@@ -87,9 +92,14 @@ def test_scope():
     def make_tree(v: float):
         return AudioTree(np.full(shape=(1, 1, 44_100), fill_value=v), 44_100)
 
-    audio_zero = make_tree(0.)
-    element = {"a": audio_zero, "b": audio_zero, "c": [audio_zero, audio_zero], "d": {"e": audio_zero, "f": audio_zero},
-               "g": [audio_zero, audio_zero]}
+    audio_zero = make_tree(0.0)
+    element = {
+        "a": audio_zero,
+        "b": audio_zero,
+        "c": [audio_zero, audio_zero],
+        "d": {"e": audio_zero, "f": audio_zero},
+        "g": [audio_zero, audio_zero],
+    }
 
     scope = {
         "b": {"scope": True},
@@ -299,7 +309,6 @@ def test_transforms():
 
 
 def test_only_apply_to_audiotree():
-
     """Only `src` can have its `latents` set because `src` is an AudioTree while `other` is a simple array."""
 
     def encoder_fn(audio_tree: AudioTree) -> jnp.ndarray:
@@ -308,9 +317,14 @@ def test_only_apply_to_audiotree():
 
     B = 2
 
-    audio_data = {"src": AudioTree(audio_data=jnp.zeros(shape=(B, 1, 44100)), sample_rate=44100), "other": jnp.zeros((B,))}
+    audio_data = {
+        "src": AudioTree(audio_data=jnp.zeros(shape=(B, 1, 44100)), sample_rate=44100),
+        "other": jnp.zeros((B,)),
+    }
 
-    transform = NeuralLatentEncodeTransform(encoder_fn=encoder_fn, scope={"src": {"scope": True}})
+    transform = NeuralLatentEncodeTransform(
+        encoder_fn=encoder_fn, scope={"src": {"scope": True}}
+    )
     out = transform.map(audio_data)
     assert out["src"].latents is not None
 
