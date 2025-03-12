@@ -1,4 +1,4 @@
-# File under the MIT license, see https://github.com/adefossez/julius/LICENSE for details.
+# File under the MIT license, see https://github.com/adefossez/julius/blob/main/LICENSE for details.
 # Author: adefossez, 2020
 """
 Differentiable, Pytorch based resampling.
@@ -15,6 +15,7 @@ is optimized for the case mentioned before, while resampy is slower but more gen
 import math
 from typing import Optional
 
+from einops import rearrange
 from jax import lax
 from jax import numpy as jnp
 
@@ -35,6 +36,25 @@ def resample(
 ) -> jnp.ndarray:
     """Resampling algorithm adapted from the pytorch library Julius:
     https://github.com/adefossez/julius/blob/main/julius/resample.py
+
+    Args:
+        x (jnp.ndarray): Input array shaped
+        old_sr (int): sample rate of the input signal x.
+        new_sr (int): sample rate of the output.
+        zeros (int): number of zero crossing to keep in the sinc filter.
+        rolloff (float): use a lowpass filter that is `rolloff * new_sr / 2`,
+            to ensure sufficient margin due to the imperfection of the FIR filter used.
+            Lowering this value will reduce anti-aliasing, but will reduce some of the
+            highest frequencies.
+
+    Shape:
+
+        - Input: `[B, C, T]`
+        - Output: `[B, C, T']` with `T' = int(new_sr * T / old_sr)
+
+    .. caution::
+        After dividing `old_sr` and `new_sr` by their GCD, both should be small
+        for this implementation to be fast.
     """
 
     if not isinstance(old_sr, int) or not isinstance(new_sr, int):
@@ -71,15 +91,15 @@ def resample(
 
     kernel = jnp.stack(kernels).reshape((new_sr, 1, -1))
 
+    x = rearrange(x, "b (c one) t -> (b c) one t", b=batch_size, c=c, one=1)
+
     y = lax.conv_general_dilated(
         x,
         kernel,
         window_strides=(old_sr,),
         padding=((int(_width), int(_width + old_sr)),),
     )
-
-    y = jnp.transpose(y, (0, 2, 1))
-    y = jnp.reshape(y, x.shape[:-1] + (-1,))
+    y = rearrange(y, "(b c) w t -> b c (t w)", b=batch_size, c=c)
 
     float_output_length = new_sr * length / old_sr
     max_output_length = jnp.ceil(float_output_length).astype(int)
