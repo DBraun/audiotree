@@ -1,17 +1,40 @@
+from functools import partial
+
 import numpy as np
 import jax.numpy as jnp
+import jax
+import pytest
 
 from audiotree.resample import resample
 
-import pytest
 
-
-def _resample(y: np.ndarray, old_sr: int, new_sr: int, output_path: str = None):
+def _resample(
+    y: np.ndarray,
+    old_sr: int,
+    new_sr: int,
+    output_path: str = None,
+    do_jit: bool = True,
+):
 
     y = jnp.array(y)
     # print('y shape: ', y.shape)
 
-    y = resample(y, old_sr=old_sr, new_sr=new_sr)
+    if do_jit:
+
+        @partial(
+            jax.jit,
+            static_argnames=(
+                "old_sr",
+                "new_sr",
+            ),
+        )
+        def resample_fn(x, old_sr, new_sr):
+            return resample(x, old_sr, new_sr)
+
+    else:
+        resample_fn = resample
+
+    y = resample_fn(y, old_sr=old_sr, new_sr=new_sr)
     # print('y shape: ', y.shape)
     y = np.array(y)
 

@@ -102,8 +102,8 @@ def resample(
     y = rearrange(y, "(b c) w t -> b c (t w)", b=batch_size, c=c)
 
     float_output_length = new_sr * length / old_sr
-    max_output_length = jnp.ceil(float_output_length).astype(int)
-    default_output_length = jnp.floor(float_output_length).astype(int)
+    max_output_length = math.ceil(float_output_length)
+    default_output_length = math.floor(float_output_length)
 
     if output_length is None:
         applied_output_length = max_output_length if full else default_output_length
