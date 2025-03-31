@@ -33,8 +33,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install ".[dev]"
         pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
-        pip install git+https://github.com/DBraun/jaxloudnorm.git@feature/speed-optimize
-        pip install git+https://github.com/DBraun/dm_aux.git@DBraun-patch-1
+        pip install git+https://github.com/boris-kuz/jaxloudnorm.git
 
     - name: Run tests
       run: |
@@ -61,7 +60,6 @@ jobs:
         pip install ".[dev]"
         pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
         pip install git+https://github.com/boris-kuz/jaxloudnorm.git
-        pip install git+https://github.com/DBraun/dm_aux.git@DBraun-patch-1
         pip install furo
 
     - name: Build Docs
