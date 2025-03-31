@@ -5,7 +5,7 @@ AudioTree documentation
 The source code is `here <https://github.com/DBraun/audiotree>`_.
 AudioTree follows `Effort-based Versioning <https://jacobtomlinson.dev/effver/>`_.
 
-There are three requirements:
+There are two requirements:
 
 .. code-block:: bash
 
@@ -30,8 +30,8 @@ For example, in the code below, we consider ``batch`` to be an ``AudioTree``.
 
     from jax import numpy as jnp
     from audiotree import AudioTree
-    sample_rate = 44100
-    data = jnp.zeros((16, 2, 441000)) # dummy placeholder shaped (B, C, T)
+    sample_rate = 44_100
+    data = jnp.zeros((16, 2, sample_rate*10)) # dummy placeholder shaped (B, C, T)
     audio_tree = AudioTree(data, sample_rate)
     batch = {"src": [audio_tree, audio_tree], "target": audio_tree}
 
@@ -71,7 +71,7 @@ Citation
 
    @software{Braun_AudioTree_2025,
       author = {Braun, David},
-      month = aug,
+      month = mar,
       title = {{AudioTree}},
       url = {https://github.com/DBraun/audiotree},
       version = {0.2.0},
