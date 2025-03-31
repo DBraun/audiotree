@@ -365,7 +365,10 @@ class NeuralAudioCodecEncodeTransform(BaseMapTransform):
             B, C, T = audio_tree.audio_data.shape
             codes = self.encoder_fn(audio_tree)
             codes = rearrange(
-                codes, "(B C) K S -> B (K C) S", B=B, C=C,
+                codes,
+                "(B C) K S -> B (K C) S",
+                B=B,
+                C=C,
             )
             audio_tree = audio_tree.replace(codes=codes)
         return audio_tree

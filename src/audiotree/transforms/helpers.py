@@ -16,7 +16,6 @@ def stft(x: jnp.ndarray, frame_length=2048, hop_factor=0.25, window="hann"):
 
     frame_step = int(frame_length * hop_factor)
 
-    # This probably uses less memory than the aux method, but it's definitely slower than aux.
     _, _, stft_data = jax.scipy.signal.stft(
         x,
         window=window,
@@ -51,15 +50,6 @@ def istft(
             reconstructed_signal = reconstructed_signal[..., :length]
 
     return reconstructed_signal
-
-
-# def _where_with_p(rng, modified: jnp.ndarray, original: jnp.ndarray, p: float):
-#     B = original.shape[0]
-#
-#     shape = (B,) + (1,) * (original.ndim - 1)
-#     use_modified = random.uniform(rng, shape=shape, minval=0) < p
-#
-#     return jnp.where(use_modified, modified, original)
 
 
 def _db2linear(decibels):
