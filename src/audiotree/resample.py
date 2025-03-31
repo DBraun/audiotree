@@ -17,6 +17,7 @@ from typing import Optional
 
 from einops import rearrange
 from jax import lax
+from jax import vmap
 from jax import numpy as jnp
 
 
@@ -50,7 +51,7 @@ def resample(
     Shape:
 
         - Input: `[B, C, T]`
-        - Output: `[B, C, T']` with `T' = int(new_sr * T / old_sr)
+        - Output: `[B, C, T']` with `T' = int(new_sr * T / old_sr)`
 
     .. caution::
         After dividing `old_sr` and `new_sr` by their GCD, both should be small
@@ -79,17 +80,18 @@ def resample(
     sr = min(new_sr, old_sr) * rolloff
     _width = math.ceil(zeros * old_sr / sr)
     idx = jnp.arange(-_width, _width + old_sr)
-    kernels = []
-    for i in range(new_sr):
+
+    @vmap
+    def get_kernels(i):
         t = (-i / new_sr + idx / old_sr) * sr
-        t = jnp.clip(t, -zeros, zeros)
-        t = t * jnp.pi
+        t = jnp.clip(t, -zeros, zeros) * jnp.pi
         window = jnp.cos(t / zeros / 2) ** 2
         kernel = sinc(t) * window
         kernel = kernel / kernel.sum()
-        kernels.append(kernel)
+        return kernel
 
-    kernel = jnp.stack(kernels).reshape((new_sr, 1, -1))
+    kernel = get_kernels(jnp.arange(new_sr))
+    kernel = kernel.reshape((new_sr, 1, -1))
 
     x = rearrange(x, "b (c one) t -> (b c) one t", b=batch_size, c=c, one=1)
 
