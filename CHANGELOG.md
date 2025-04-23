@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* The kwarg `pad_mode="constant"` has been added to `AudioTree.from_file(...)`. Other useful choices include `None` (don't pad), and `wrap` (loop audio).
+
 ## audiotree 0.2.0 (Feb 17, 2025)
 
 * `jit` has been removed in most places. We encourage users to jit as late as possible, and DAC-JAX demonstrates this.

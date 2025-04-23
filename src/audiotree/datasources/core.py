@@ -76,6 +76,7 @@ class AudioDataSourceMixin:
             offset=0,
             duration=self.duration,
             mono=self.mono,
+            pad_mode=self.pad_mode,
         )
 
 
@@ -89,6 +90,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
         duration (float): The requested duration of the audio.
+        pad_mode (str): The requested padding mode.
         extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
         saliency_params (SaliencyParams): Saliency parameters to use.
     """
@@ -100,6 +102,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         sample_rate: int = 44_100,
         mono: int = 1,
         duration: float = 1.0,
+        pad_mode: str = "constant",
         extensions: List[str] = None,
         saliency_params: SaliencyParams = None,
     ):
@@ -107,6 +110,7 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         self.sample_rate = sample_rate
         self.mono = bool(mono)
         self.duration = duration
+        self.pad_mode = pad_mode
         if extensions is None:
             extensions = _default_extensions
         self.saliency_params = saliency_params
@@ -158,6 +162,7 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
         duration (float): The requested duration of the audio.
+        pad_mode (str): The requested padding mode.
         extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
         saliency_params (SaliencyParams): Saliency parameters to use.
     """
@@ -176,6 +181,7 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         sample_rate: int = 44_100,
         mono: int = 1,
         duration: float = 1.0,
+        pad_mode: str = "constant",
         extensions: List[str] = None,
         saliency_params: SaliencyParams = None,
     ):
@@ -183,6 +189,7 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         self.sample_rate = sample_rate
         self.mono = bool(mono)
         self.duration = duration
+        self.pad_mode = pad_mode
         if extensions is None:
             extensions = _default_extensions
         self.saliency_params = saliency_params
@@ -251,6 +258,7 @@ class AudioDataBalancedDataset(MixedIterDataset):
         sample_rate (int): The requested sample rate of the audio.
         mono (bool): Whether to force the audio to be mono.
         duration (float): The requested duration of the audio.
+        pad_mode (str): The requested padding mode.
         extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
         saliency_params (SaliencyParams): Saliency parameters to use.
         weights (Mapping[str, float]): A dictionary mapping each source to its proportion in the dataset.
@@ -262,6 +270,7 @@ class AudioDataBalancedDataset(MixedIterDataset):
         sample_rate: int = 44_100,
         mono: int = 1,
         duration: float = 1.0,
+        pad_mode: str = "constant",
         extensions: List[str] = None,
         saliency_params: SaliencyParams = None,
         weights: Mapping[str, float] = None,
@@ -269,6 +278,7 @@ class AudioDataBalancedDataset(MixedIterDataset):
         self.sample_rate = sample_rate
         self.mono = bool(mono)
         self.duration = duration
+        self.pad_mode = pad_mode
         if extensions is None:
             extensions = _default_extensions
         self.saliency_params = saliency_params

@@ -1,7 +1,7 @@
 from dataclasses import field
 from functools import partial
 from pathlib import Path
-from typing import Callable, List, Union
+from typing import Callable, List, Literal, Union
 from typing_extensions import Self
 
 from flax import struct
@@ -133,6 +133,7 @@ class AudioTree:
         offset: float = 0.0,
         duration: float = None,
         mono: bool = False,
+        pad_mode: Literal["constant"] = "constant",
     ):
         """Create an AudioTree from an audio file path.
 
@@ -144,6 +145,9 @@ class AudioTree:
             duration (float, optional): Duration in seconds of audio data. The audio data will be trimmed or extended as
                 necessary.
             mono (bool, optional): Whether to force the audio data to be single-channel.
+            pad_mode (Literal): If duration is not None, and duration is less than the length of the audio, then
+                ``pad_mode`` controls how the audio is right-padded. The default is "constant" (zeros). A choice of
+                ``None`` results in no padding. Another useful choice is "wrap" to loop the audio.
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
@@ -157,9 +161,15 @@ class AudioTree:
         elif data.ndim == 2:
             data = data[None, :, :]  # Add batch dimension
 
-        if duration is not None and data.shape[-1] < round(duration * sample_rate):
+        if (
+            duration is not None
+            and pad_mode is not None
+            and data.shape[-1] < round(duration * sample_rate)
+        ):
             pad_right = round(duration * sample_rate) - data.shape[-1]
-            data = np.pad(data, ((0, 0), (0, 0), (0, pad_right)))
+            data = np.pad(
+                data, pad_width=((0, 0), (0, 0), (0, pad_right)), mode=pad_mode
+            )
 
         return cls(
             audio_data=data,

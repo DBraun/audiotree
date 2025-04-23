@@ -1,4 +1,4 @@
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 __author__ = "David Braun"
 # Effort-based versioning. Don't move the line above. It must be the first line due to `docs/source/conf.py`
 from .core import AudioTree
