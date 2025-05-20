@@ -110,30 +110,64 @@ class AudioTree:
 
     @staticmethod
     def _encode_string(s: str) -> np.ndarray:
-        # Convert string to list of ASCII values and pad with 0
-        encoded = [ord(char) for char in s] + [0] * (_str_max_length - len(s))
-        return np.array([encoded])  # [1, _str_max_length]
+        """Encode a single filepath *s* to an array of ASCII codes.
+
+        The returned array is shaped ``(1, _str_max_length)`` so that multiple
+        rows (filepaths) can be concatenated along *axis=0*.
+        """
+        s = str(s)
+        encoded = [ord(char) for char in s[:_str_max_length]]
+        encoded += [0] * (_str_max_length - len(encoded))
+        return np.array([encoded], dtype=np.int16)  # [1, _str_max_length]
+
+    @classmethod
+    def _encode_filepaths(
+        cls, paths: Union[str, Path, List[Union[str, Path]]]
+    ) -> np.ndarray:
+        """Vectorized helper to encode one or more *paths*.
+
+        Args:
+            paths: A single filepath or an iterable of filepaths.
+
+        Returns
+        -------
+        np.ndarray
+            An array shaped ``(N, _str_max_length)`` where *N* is the number of
+            paths provided.
+        """
+        if isinstance(paths, (str, Path)):
+            paths = [paths]
+
+        encoded_rows = [cls._encode_string(p)[0] for p in paths]
+        return np.stack(encoded_rows, axis=0)
 
     @staticmethod
     def _decode_string(encoded_array: np.ndarray) -> str:
-        # Convert list of integers to characters and join them into a string
-        decoded = "".join([chr(val) for val in encoded_array if val != 0])
+        """Decode a single encoded filepath back to *str*."""
+        decoded = "".join(chr(int(val)) for val in encoded_array if val != 0)
         return decoded
 
     @property
     def filepath(self) -> List[str]:
-        """Return a list of filepaths assuming information exists in ``metadata['filepath']]``"""
+        """Return the decoded filepaths stored in ``metadata['filepath']``.
+
+        An empty list is returned if the AudioTree does not contain any filepath
+        metadata.
+        """
+        if "filepath" not in self.metadata:
+            return []
         return [self._decode_string(data) for data in self.metadata["filepath"]]
 
     @classmethod
     def from_file(
         cls,
-        audio_path: str,
-        sample_rate: int = None,
+        audio_path: Union[str, Path],
+        sample_rate: int | None = None,
         offset: float = 0.0,
-        duration: float = None,
+        duration: float | None = None,
         mono: bool = False,
-        pad_mode: Literal["constant"] = "constant",
+        pad_mode: Literal["constant"] | None = "constant",
+        filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
     ):
         """Create an AudioTree from an audio file path.
 
@@ -148,12 +182,16 @@ class AudioTree:
             pad_mode (Literal): If duration is not None, and duration is less than the length of the audio, then
                 ``pad_mode`` controls how the audio is right-padded. The default is "constant" (zeros). A choice of
                 ``None`` results in no padding. Another useful choice is "wrap" to loop the audio.
+            filepaths (Union[str, Path, List[str | Path]], optional): One or more filepaths to store in the returned
+                ``AudioTree``'s metadata. If *None* (default) the provided ``audio_path`` will be used.
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
         """
+        audio_path = Path(audio_path)
+
         data, sr = librosa.load(
-            audio_path, sr=sample_rate, offset=offset, duration=duration, mono=mono
+            str(audio_path), sr=sample_rate, offset=offset, duration=duration, mono=mono
         )
         assert sr == sample_rate
         if data.ndim == 1:
@@ -171,18 +209,35 @@ class AudioTree:
                 data, pad_width=((0, 0), (0, 0), (0, pad_right)), mode=pad_mode
             )
 
+        metadata = {
+            "offset": np.array([offset]),
+            "duration": np.array([duration]),
+        }
+
+        if filepaths is None:
+            filepaths_to_store = [audio_path]
+        else:
+            # Normalize to list
+            if isinstance(filepaths, (str, Path)):
+                filepaths_to_store = [filepaths]
+            else:
+                filepaths_to_store = list(filepaths)
+
+        metadata["filepath"] = cls._encode_filepaths(filepaths_to_store)
+
         return cls(
             audio_data=data,
             sample_rate=sr,
-            metadata={
-                "filepath": cls._encode_string(audio_path),
-                "offset": np.array([offset]),
-                "duration": np.array([duration]),
-            },
+            metadata=metadata,
         )
 
     @classmethod
-    def from_array(cls, audio_data: np.ndarray, sample_rate: int) -> Self:
+    def from_array(
+        cls,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
+    ) -> Self:
         """Create an AudioTree from an audio array and a sample rate.
 
         Args:
@@ -196,7 +251,12 @@ class AudioTree:
             audio_data = audio_data[None, None, :]  # Add batch and channel dimension
         elif audio_data.ndim == 2:
             audio_data = audio_data[None, :, :]  # Add batch dimension
-        return cls(audio_data=audio_data, sample_rate=sample_rate)
+
+        metadata = {}
+        if filepaths is not None:
+            metadata["filepath"] = cls._encode_filepaths(filepaths)
+
+        return cls(audio_data=audio_data, sample_rate=sample_rate, metadata=metadata)
 
     @classmethod
     def excerpt(
