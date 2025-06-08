@@ -243,6 +243,7 @@ class AudioTree:
         Args:
             audio_data (np.ndarray): Audio data shaped ``(Samples)``, ``(Channels, Samples)``, or ``(Batch, Channels, Samples)``
             sample_rate (int): Sample rate of audio data, such as 44100 Hz.
+            filepaths (Union[str, Path, List[Union[str, Path]]] | None): List of filepaths for the batch of audio.
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
