@@ -433,42 +433,36 @@ class Roll(BaseRandomTransform):
             rng, shape=(B,), minval=min_samples, maxval=max_samples + 1
         )
 
-        # Apply roll to each batch item
-        rolled_audio = []
-        for i in range(B):
-            # Get audio for this batch item (all channels)
-            item_audio = audio_tree.audio_data[i]  # Shape: (C, T)
-
-            # Apply the same roll amount to all channels
-            roll_amount = roll_amounts[i]
-
+        @jax.vmap
+        def roll_single_item(
+            item_audio: jnp.ndarray, roll_amount: jnp.ndarray
+        ) -> jnp.ndarray:
+            """Apply roll to a single batch item (all channels)."""
+            # item_audio shape: (C, T)
             if mode == "wrap":
                 # Circular shift
-                rolled_item = jnp.roll(item_audio, shift=roll_amount, axis=-1)
+                return jnp.roll(item_audio, shift=roll_amount, axis=-1)
             elif mode == "constant":
                 # Zero padding mode
-                if roll_amount > 0:
-                    # Roll right: pad left with zeros, drop right samples
-                    rolled_item = jnp.concatenate(
-                        [jnp.zeros((C, roll_amount)), item_audio[:, :-roll_amount]],
-                        axis=-1,
-                    )
-                elif roll_amount < 0:
-                    # Roll left: drop left samples, pad right with zeros
-                    rolled_item = jnp.concatenate(
-                        [item_audio[:, -roll_amount:], jnp.zeros((C, -roll_amount))],
-                        axis=-1,
-                    )
-                else:
-                    # No roll
-                    rolled_item = item_audio
+                # Create indices for slicing
+                indices = jnp.arange(T)
+                rolled_indices = indices - roll_amount
+
+                # Create mask for valid indices
+                valid_mask = (rolled_indices >= 0) & (rolled_indices < T)
+
+                # Use where to select valid samples or zeros
+                rolled_item = jnp.where(
+                    valid_mask[None, :],  # Broadcast over channels
+                    item_audio[:, jnp.clip(rolled_indices, 0, T - 1)],
+                    0.0,
+                )
+                return rolled_item
             else:
                 raise ValueError(f"Unknown mode: {mode}. Use 'wrap' or 'constant'.")
 
-            rolled_audio.append(rolled_item)
-
-        # Stack back into batch dimension
-        rolled_audio = jnp.stack(rolled_audio, axis=0)
+        # Apply the vmapped function to all batch items
+        rolled_audio = roll_single_item(audio_tree.audio_data, roll_amounts)
 
         # Create new AudioTree with rolled audio
         return audio_tree.replace(audio_data=rolled_audio)
