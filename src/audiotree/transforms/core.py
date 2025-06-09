@@ -374,6 +374,106 @@ class NeuralAudioCodecEncodeTransform(BaseMapTransform):
         return audio_tree
 
 
+class Roll(BaseRandomTransform):
+    """
+    Apply a circular shift (roll) to the audio data. The amount of roll is
+    randomly selected per item in the batch (not per channel).
+
+    The roll amount is specified in seconds and will be converted to samples
+    based on the sample rate. Positive values roll the audio to the right
+    (equivalent to left padding), negative values roll to the left.
+
+    .. code-block:: python
+
+        @staticmethod
+        def get_default_config() -> Dict[str, Any]:
+            return {
+                "min_seconds": 0.0,
+                "max_seconds": 0.0,
+                "mode": "wrap",
+            }
+
+    Args in config:
+        min_seconds (float): Minimum roll amount in seconds. Use negative values
+            to roll left.
+        max_seconds (float): Maximum roll amount in seconds. Use negative values
+            to roll left.
+        mode (str): Padding mode for the roll operation. Options are:
+            - "wrap": Circular shift (default). Audio wraps around.
+            - "constant": Zero padding. To roll audio only to the right (left
+              padding with zeros, dropping right samples), use positive roll
+              values with mode="constant".
+    """
+
+    @staticmethod
+    def get_default_config() -> Dict[str, Any]:
+        return {
+            "min_seconds": 0.0,
+            "max_seconds": 0.0,
+            "mode": "wrap",
+        }
+
+    @staticmethod
+    def _apply_transform(
+        audio_tree: AudioTree,
+        rng: jax.Array,
+        min_seconds: float,
+        max_seconds: float,
+        mode: str,
+    ) -> AudioTree:
+        # Get batch size and number of samples
+        B, C, T = audio_tree.audio_data.shape
+
+        # Convert seconds to samples
+        min_samples = int(min_seconds * audio_tree.sample_rate)
+        max_samples = int(max_seconds * audio_tree.sample_rate)
+
+        # Generate random roll amounts per batch item
+        roll_amounts = jax.random.randint(
+            rng, shape=(B,), minval=min_samples, maxval=max_samples + 1
+        )
+
+        # Apply roll to each batch item
+        rolled_audio = []
+        for i in range(B):
+            # Get audio for this batch item (all channels)
+            item_audio = audio_tree.audio_data[i]  # Shape: (C, T)
+
+            # Apply the same roll amount to all channels
+            roll_amount = roll_amounts[i]
+
+            if mode == "wrap":
+                # Circular shift
+                rolled_item = jnp.roll(item_audio, shift=roll_amount, axis=-1)
+            elif mode == "constant":
+                # Zero padding mode
+                if roll_amount > 0:
+                    # Roll right: pad left with zeros, drop right samples
+                    rolled_item = jnp.concatenate(
+                        [jnp.zeros((C, roll_amount)), item_audio[:, :-roll_amount]],
+                        axis=-1,
+                    )
+                elif roll_amount < 0:
+                    # Roll left: drop left samples, pad right with zeros
+                    rolled_item = jnp.concatenate(
+                        [item_audio[:, -roll_amount:], jnp.zeros((C, -roll_amount))],
+                        axis=-1,
+                    )
+                else:
+                    # No roll
+                    rolled_item = item_audio
+            else:
+                raise ValueError(f"Unknown mode: {mode}. Use 'wrap' or 'constant'.")
+
+            rolled_audio.append(rolled_item)
+
+        # Stack back into batch dimension
+        rolled_audio = jnp.stack(rolled_audio, axis=0)
+
+        # Create new AudioTree with rolled audio
+        return audio_tree.replace(audio_data=rolled_audio)
+
+
 class ReduceBatchTransform(grain.MapTransform):
 
     def __init__(self):

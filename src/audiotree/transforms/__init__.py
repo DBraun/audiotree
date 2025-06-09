@@ -6,6 +6,7 @@ from .core import InvertPhase
 from .core import SwapStereo
 from .core import CorruptPhase
 from .core import ShiftPhase
+from .core import Roll
 from .core import Choose
 from .core import NeuralAudioCodecEncodeTransform
 from .core import NeuralLatentEncodeTransform
@@ -20,6 +21,7 @@ __all__ = [
     "SwapStereo",
     "CorruptPhase",
     "ShiftPhase",
+    "Roll",
     "Choose",
     "NeuralAudioCodecEncodeTransform",
     "NeuralLatentEncodeTransform",
