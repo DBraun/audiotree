@@ -252,7 +252,7 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         key, subkey = random.split(key)
         if self.prob == 1:
             return new_tree
-        mask_new = random.uniform(subkey) < self.prob
+        mask_new = random.bernoulli(subkey, p=self.prob)
         selected = jax.tree.map(
             (lambda x, y: jax.numpy.where(mask_new, x, y)), new_tree, element
         )
