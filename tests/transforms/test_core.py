@@ -1,6 +1,9 @@
 from typing import Any, Dict, List
 
 import jax
+import platform
+if platform.system() == "Darwin":
+    jax.config.update('jax_platform_name', 'cpu')
 from jax import numpy as jnp
 import numpy as np
 import pytest
