@@ -79,7 +79,7 @@ class AudioTree:
         .. _flax.struct.dataclass: https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass
 
     Args:
-        audio_data (jnp.ndarray): Audio waveform data in JAX numpy tensor shaped ``(Batch, Channels, Samples)``
+        audio_data (jnp.ndarray): Audio waveform data shaped ``(Samples)``, ``(Channels, Samples)``, or ``(Batch, Channels, Samples)``
         sample_rate (int): Sample rate of ``audio_data``, such as 44100 Hz.
         loudness (jnp.ndarray, optional): Loudness of the audio waveform in LUFs. You may not need to set this when initializing. Instead,
             use ``replace_loudness()`` to create a new AudioTree with ``loudness`` calculated.
@@ -88,6 +88,7 @@ class AudioTree:
         duration (jnp.ndarray, optional): The duration of the audio waveform in seconds (like a note duration). The shape is ``(Batch,)``.
         codes (jnp.ndarray, optional): The neural audio codec tokens for the audio.
         latents (jnp.ndarray, optional): The latent representations of the audio.
+        filepaths (Union[str, Path, List[Union[str, Path]]] | None): List of filepaths for the batch of audio.
         metadata (dict): Any extra metadata can be placed here.
     """
 
@@ -100,6 +101,48 @@ class AudioTree:
     codes: np.ndarray = None
     latents: np.ndarray = None
     metadata: dict = struct.field(pytree_node=True, default_factory=dict)
+
+    @classmethod
+    def create(
+        cls,
+        audio_data: np.ndarray,
+        sample_rate: int,
+        loudness: np.ndarray = None,
+        pitch: np.ndarray = None,
+        velocity: np.ndarray = None,
+        duration: np.ndarray = None,
+        codes: np.ndarray = None,
+        latents: np.ndarray = None,
+        metadata: dict = None,
+        filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
+    ) -> Self:
+        """Create an AudioTree with automatic audio dimensionality handling and filepath processing."""
+        # Handle audio dimensionality - ensure it's (Batch, Channels, Samples)
+        if audio_data.ndim == 1:
+            audio_data = audio_data[None, None, :]  # Add batch and channel dimension
+        elif audio_data.ndim == 2:
+            audio_data = audio_data[None, :, :]  # Add batch dimension
+
+        # Handle metadata and filepaths
+        if metadata is None:
+            metadata = {}
+        else:
+            metadata = metadata.copy()  # Don't modify the original dict
+        
+        if filepaths is not None:
+            metadata["filepath"] = cls._encode_filepaths(filepaths)
+
+        return cls(
+            audio_data=audio_data,
+            sample_rate=sample_rate,
+            loudness=loudness,
+            pitch=pitch,
+            velocity=velocity,
+            duration=duration,
+            codes=codes,
+            latents=latents,
+            metadata=metadata,
+        )
 
     def replace_loudness(self) -> Self:
         """Replace ``loudness`` property with a JAX scalar."""
@@ -231,33 +274,6 @@ class AudioTree:
             metadata=metadata,
         )
 
-    @classmethod
-    def from_array(
-        cls,
-        audio_data: np.ndarray,
-        sample_rate: int,
-        filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
-    ) -> Self:
-        """Create an AudioTree from an audio array and a sample rate.
-
-        Args:
-            audio_data (np.ndarray): Audio data shaped ``(Samples)``, ``(Channels, Samples)``, or ``(Batch, Channels, Samples)``
-            sample_rate (int): Sample rate of audio data, such as 44100 Hz.
-            filepaths (Union[str, Path, List[Union[str, Path]]] | None): List of filepaths for the batch of audio.
-
-        Returns:
-            AudioTree: An instance of ``AudioTree``.
-        """
-        if audio_data.ndim == 1:
-            audio_data = audio_data[None, None, :]  # Add batch and channel dimension
-        elif audio_data.ndim == 2:
-            audio_data = audio_data[None, :, :]  # Add batch dimension
-
-        metadata = {}
-        if filepaths is not None:
-            metadata["filepath"] = cls._encode_filepaths(filepaths)
-
-        return cls(audio_data=audio_data, sample_rate=sample_rate, metadata=metadata)
 
     @classmethod
     def excerpt(
