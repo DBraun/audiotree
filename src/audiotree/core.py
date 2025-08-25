@@ -5,7 +5,7 @@ from typing import Callable, List, Literal, Union
 from typing_extensions import Self
 
 from flax import struct
-from jax import numpy as jnp
+from jax import numpy as jnp, tree_util
 import librosa
 import numpy as np
 import soundfile
@@ -88,8 +88,8 @@ class AudioTree:
         duration (jnp.ndarray, optional): The duration of the audio waveform in seconds (like a note duration). The shape is ``(Batch,)``.
         codes (jnp.ndarray, optional): The neural audio codec tokens for the audio.
         latents (jnp.ndarray, optional): The latent representations of the audio.
-        filepaths (Union[str, Path, List[Union[str, Path]]] | None): List of filepaths for the batch of audio.
         metadata (dict): Any extra metadata can be placed here.
+        filepaths (Union[str, Path, List[Union[str, Path]]] | None): List of filepaths for the batch of audio.
     """
 
     audio_data: np.ndarray
@@ -432,3 +432,38 @@ class AudioTree:
         return self.replace(
             audio_data=audio_data, sample_rate=sample_rate, loudness=None
         )
+
+    def split_by_batch(self, n_splits: int) -> List[Self]:
+        """Split a tree with concatenated batch dimensions into multiple trees using slicing.
+
+        This works because pytree structures like AudioTree store non-array data (e.g., sample_rate)
+        in the tree structure itself, not as leaves, so slicing only affects arrays.
+
+        Args:
+            n_splits: The desired number of output AudioTrees.
+
+        Returns:
+            List of trees, each with batch size of split_batch_size
+
+        Example:
+            >>> x = AudioTree(np.zeros((4, 1, 44100)), 44100)
+            >>> trees = [x, x, x]
+            >>> big_tree = jax.tree.map(lambda *xs: np.concatenate(xs, axis=0), *trees)
+            >>> big_tree.audio_tree.shape
+            (12, 1, 44100)
+            >>> split_trees = big_tree.split_by_batch(2)
+            >>> len(split_trees)
+            2
+            >>> split_trees[0].audio_data.shape
+            (6, 1, 44100)
+        """
+        total_batch_size = self.audio_data.shape[0]
+        assert total_batch_size % n_splits == 0, \
+            f"Total batch size {total_batch_size} must be divisible by number of splits {n_splits}"
+
+        split_batch_size = total_batch_size // n_splits
+
+        return [
+            tree_util.tree_map(lambda x: x[i * split_batch_size:(i + 1) * split_batch_size], self)
+            for i in range(n_splits)
+        ]

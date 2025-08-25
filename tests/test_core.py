@@ -1,7 +1,8 @@
 """Tests for AudioTree core functionality."""
-import numpy as np
-import pytest
 from pathlib import Path
+
+import jax
+import numpy as np
 
 from audiotree.core import AudioTree
 
@@ -94,3 +95,13 @@ def test_audiotree_create_metadata_handling():
     tree2 = AudioTree.create(audio_data, sample_rate, filepaths="test2.wav")
     assert "filepath" in tree2.metadata
     assert tree2.filepath == ["test2.wav"]
+
+
+def test_split_by_batch():
+    x = AudioTree(np.zeros((4, 1, 44100)), 44100)
+    trees = [x, x, x]
+    big_tree = jax.tree.map(lambda *xs: np.concatenate(xs, axis=0), *trees)
+    assert big_tree.audio_data.shape == (12, 1, 44100)
+    split_trees = big_tree.split_by_batch(2)
+    assert len(split_trees) == 2
+    assert split_trees[0].audio_data.shape == (6, 1, 44100)
