@@ -10,7 +10,7 @@ from .core import Roll
 from .core import Choose
 from .core import NeuralAudioCodecEncodeTransform
 from .core import NeuralLatentEncodeTransform
-from .core import ReduceBatchTransform
+from .core import Batch
 
 __all__ = [
     "Identity",
@@ -25,5 +25,5 @@ __all__ = [
     "Choose",
     "NeuralAudioCodecEncodeTransform",
     "NeuralLatentEncodeTransform",
-    "ReduceBatchTransform",
+    "Batch",
 ]

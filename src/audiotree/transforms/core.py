@@ -1,10 +1,14 @@
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Sequence, Union
 
 from einops import rearrange
-from grain import python as grain
+import grain
 import jax
 from jax import numpy as jnp
 import numpy as np
+
+from grain._src.core import tree_lib
+from grain._src.python.shared_memory_array import SharedMemoryArray
+from grain.python import BatchOperation
 
 from audiotree import AudioTree
 from audiotree.transforms.base import BaseRandomTransform, BaseMapTransform
@@ -271,7 +275,7 @@ class ShiftPhase(BaseRandomTransform):
         return _shift_phase(audio_tree, rng, amount)
 
 
-class Choose(grain.RandomMapTransform):
+class Choose(grain.transforms.RandomMap):
     """
     With probability ``prob``, choose ``c`` transform(s) among ``transforms`` with optional probability weights
     ``weights``.
@@ -305,9 +309,9 @@ class Choose(grain.RandomMapTransform):
 
         for transform in transforms:
 
-            if isinstance(transform, grain.MapTransform):
+            if isinstance(transform, grain.transforms.Map):
                 element = transform.map(element)
-            elif isinstance(transform, grain.RandomMapTransform):
+            elif isinstance(transform, grain.transforms.RandomMap):
                 element = transform.random_map(element, rng)
             elif hasattr(transform, "np_random_map"):  # TfRandomMapTransform
                 element = transform.np_random_map(element, rng)
@@ -400,9 +404,11 @@ class Roll(BaseRandomTransform):
             to roll left.
         mode (str): Padding mode for the roll operation. Options are:
             - "wrap": Circular shift (default). Audio wraps around.
-            - "constant": Zero padding. To roll audio only to the right (left
-              padding with zeros, dropping right samples), use positive roll
-              values with mode="constant".
+            - "constant": Zero padding.
+
+
+    To roll audio only to the right (left padding with zeros, dropping right
+    samples), use positive roll values with mode="constant".
     """
 
     @staticmethod
@@ -468,21 +474,26 @@ class Roll(BaseRandomTransform):
         return audio_tree.replace(audio_data=rolled_audio)
 
 
-class ReduceBatchTransform(grain.MapTransform):
+class Batch(BatchOperation):
 
-    def __init__(self):
-        pass
+    """A special version of grain's BatchOperation that concatenates on the batch axis instead of stacking.
+    """
 
-    def map(self, audio_tree: AudioTree) -> AudioTree:
+    def __post_init__(self):
+        super().__post_init__()
+        self._display_deprecation_message = False
 
-        def f(leaf):
-            if isinstance(leaf, (np.ndarray, jnp.ndarray)):
-                if leaf.ndim > 1:
-                    shape = leaf.shape
-                    shape = (shape[0] * shape[1],) + shape[2:]
-                    return leaf.reshape(shape)
-            return leaf
+    def _batch(self, input_records: Sequence[Any]):
+        """Batches records together and copies Numpy arrays to Shared Memory."""
+        self._validate_structure(input_records)
 
-        audio_tree = jax.tree.map(f, audio_tree)
+        def stacking_function(*args):
+            first_arg = np.asanyarray(args[0])
+            shape, dtype = (len(args)*first_arg.shape[0],) + first_arg.shape[1:], first_arg.dtype
+            if not self._use_shared_memory or dtype.hasobject:
+                return np.concatenate(args, axis=0)
+            return np.concatenate(args, axis=0, out=SharedMemoryArray(shape, dtype=dtype)).metadata
 
-        return audio_tree
+        return tree_lib.map_structure(
+            stacking_function, input_records[0], *input_records[1:]
+        )

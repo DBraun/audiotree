@@ -8,6 +8,7 @@
 * The kwarg `pad_mode="constant"` has been added to `AudioTree.from_file(...)`. Other useful choices include `None` (don't pad), and `wrap` (loop audio).
 * New `audiotree.transforms.Roll` Transform that rolls audio forwards or backwards in time with a padding mode.
 * New `AudioTree.split_by_batch` to split an AudioTree into a list of AudioTree.
+* Remove `audiotree.transforms.ReduceBatchTransform` and replace with `audiotree.transforms.Batch`, which should be used in place of `grain.transforms.Batch`
 
 ## audiotree 0.2.0 (Feb 17, 2025)
 
