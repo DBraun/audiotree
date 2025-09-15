@@ -20,6 +20,7 @@ from audiotree.transforms import (
     InvertPhase,
     SwapStereo,
     NeuralLatentEncodeTransform,
+    Trim,
 )
 
 
@@ -334,3 +335,68 @@ def test_only_apply_to_audiotree():
     transform = NeuralLatentEncodeTransform(encoder_fn=encoder_fn)
     out = transform.map(audio_data)
     assert out["src"].latents is not None
+
+
+def test_trim_shorten():
+    """Test that Trim correctly shortens audio that is longer than the target length."""
+
+    # Create audio with 2 seconds of data at 44100 Hz
+    sample_rate = 44_100
+    audio_data = jnp.ones(shape=(1, 1, sample_rate * 2))  # 2 seconds
+    audio_tree = AudioTree(audio_data=audio_data, sample_rate=sample_rate)
+
+    # Test trimming to 0.5 seconds
+    transform = Trim(config={"length": 0.5})
+    trimmed_audio = transform.map(audio_tree)
+
+    expected_samples = int(0.5 * sample_rate)  # 22050 samples
+    assert trimmed_audio.audio_data.shape == (1, 1, expected_samples)
+    # Verify the trimmed audio contains the first part of the original
+    assert jnp.array_equal(trimmed_audio.audio_data, audio_data[:, :, :expected_samples])
+
+    # Test trimming to 1 second
+    transform = Trim(config={"length": 1.0})
+    trimmed_audio = transform.map(audio_tree)
+
+    expected_samples = sample_rate  # 44100 samples
+    assert trimmed_audio.audio_data.shape == (1, 1, expected_samples)
+    assert jnp.array_equal(trimmed_audio.audio_data, audio_data[:, :, :expected_samples])
+
+
+def test_trim_lengthen():
+    """Test that Trim correctly lengthens audio that is shorter than the target length."""
+
+    # Create audio with 0.5 seconds of data at 44100 Hz
+    sample_rate = 44_100
+    original_samples = int(0.5 * sample_rate)  # 22050 samples
+    audio_data = jnp.arange(original_samples, dtype=jnp.float32).reshape(1, 1, -1)
+    audio_tree = AudioTree(audio_data=audio_data, sample_rate=sample_rate)
+
+    # Test lengthening to 1 second with "wrap" mode (default)
+    transform = Trim(config={"length": 1.0, "mode": "wrap"})
+    lengthened_audio = transform.map(audio_tree)
+
+    expected_samples = sample_rate  # 44100 samples
+    assert lengthened_audio.audio_data.shape == (1, 1, expected_samples)
+
+    # With wrap mode, the audio should repeat to fill the target length
+    # Check that the first part matches the original
+    assert jnp.array_equal(lengthened_audio.audio_data[:, :, :original_samples], audio_data)
+    # Check that the wrapped part starts repeating from the beginning
+    wrapped_part = lengthened_audio.audio_data[:, :, original_samples:expected_samples]
+    expected_wrap = audio_data[:, :, :expected_samples - original_samples]
+    assert jnp.array_equal(wrapped_part, expected_wrap)
+
+    # Test lengthening to 1.5 seconds with "constant" mode (zero padding)
+    transform = Trim(config={"length": 1.5, "mode": "constant"})
+    lengthened_audio = transform.map(audio_tree)
+
+    expected_samples = int(1.5 * sample_rate)  # 66150 samples
+    assert lengthened_audio.audio_data.shape == (1, 1, expected_samples)
+
+    # With constant mode, the audio should be padded with zeros
+    # Check that the first part matches the original
+    assert jnp.array_equal(lengthened_audio.audio_data[:, :, :original_samples], audio_data)
+    # Check that the padded part is all zeros
+    padded_part = lengthened_audio.audio_data[:, :, original_samples:]
+    assert jnp.all(padded_part == 0)

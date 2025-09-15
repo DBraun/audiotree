@@ -165,6 +165,48 @@ class SwapStereo(BaseMapTransform):
         return _swap_stereo_audio_transform(audio_tree)
 
 
+class Trim(BaseMapTransform):
+    """
+    Adjust the length of audio to a fixed length in seconds. If the audio will be lengthened,
+    then the padding mode `mode` matters. Otherwise, the audio will just be shortened.
+
+    .. code-block:: python
+
+        @staticmethod
+        def get_default_config() -> Dict[str, Any]:
+            return {
+                "length": 1.0,
+                "mode": "wrap",
+            }
+
+    Args in config:
+        length (float): Desired output audio length in seconds. Defaults to 1.0.
+        mode (str): Padding mode if the audio will be lengthened. Options are:
+            - "wrap": Circular shift (default). Audio wraps around.
+            - "constant": Zero padding.
+    """
+
+    @staticmethod
+    def get_default_config() -> Dict[str, Any]:
+        return {"length": 1.0, "mode": "wrap"}
+
+    @staticmethod
+    def _apply_transform(audio_tree: AudioTree, length: float, mode: str) -> AudioTree:
+        audio_data = audio_tree.audio_data
+        T = audio_data.shape[-1]
+
+        target_T = int(length*audio_tree.sample_rate)
+
+        if T < target_T:
+            # audio needs to be lengthened
+            audio_data = jnp.pad(audio_data, pad_width=((0, 0), (0,0), (0, target_T - T)), mode=mode)
+        elif T > target_T:
+            # audio needs to be trimmed
+            audio_data = audio_data[..., :target_T]
+
+        return audio_tree.replace(audio_data=audio_data)
+
+
 class NeuralLatentEncodeTransform(BaseMapTransform):
     """Use a neural network to set the latents of the AudioTree.
 

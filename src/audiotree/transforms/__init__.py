@@ -11,6 +11,7 @@ from .core import Choose
 from .core import NeuralAudioCodecEncodeTransform
 from .core import NeuralLatentEncodeTransform
 from .core import Batch
+from .core import Trim
 
 __all__ = [
     "Identity",
@@ -26,4 +27,5 @@ __all__ = [
     "NeuralAudioCodecEncodeTransform",
     "NeuralLatentEncodeTransform",
     "Batch",
+    "Trim",
 ]
