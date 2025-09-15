@@ -102,6 +102,123 @@ def test_split_by_batch():
     trees = [x, x, x]
     big_tree = jax.tree.map(lambda *xs: np.concatenate(xs, axis=0), *trees)
     assert big_tree.audio_data.shape == (12, 1, 44100)
-    split_trees = big_tree.split_by_batch(2)
+    split_trees = big_tree.mini_batch_list(2)
     assert len(split_trees) == 2
     assert split_trees[0].audio_data.shape == (6, 1, 44100)
+
+
+def test_split_by_mini_batch():
+    """Test that split_by_mini_batch correctly reshapes AudioTree with mini-batch dimension."""
+
+    # Create an AudioTree with batch size 12
+    sample_rate = 44_100
+    batch_size = 12
+    channels = 2
+    samples = 1000
+
+    # Create distinctive audio data so we can verify correct reshaping
+    audio_data = np.arange(batch_size * channels * samples, dtype=np.float32).reshape(
+        batch_size, channels, samples
+    )
+    audio_tree = AudioTree(audio_data, sample_rate)
+
+    # Test splitting into mini-batches of size 3
+    mini_batch_size = 3
+    reshaped_tree = audio_tree.mini_batch(mini_batch_size)
+
+    # Expected shape: (num_mini_batches=4, mini_batch_size=3, channels=2, samples=1000)
+    expected_shape = (4, 3, channels, samples)
+    assert reshaped_tree.audio_data.shape == expected_shape
+
+    # Verify the data is correctly reshaped (not just shape but actual values)
+    # The first mini-batch should contain the first 3 samples from the original batch
+    first_mini_batch = reshaped_tree.audio_data[0]  # Shape: (3, 2, 1000)
+    expected_first_mini_batch = audio_data[:3]  # First 3 samples from original
+    np.testing.assert_array_equal(first_mini_batch, expected_first_mini_batch)
+
+    # The last mini-batch should contain samples 9-11 from the original batch
+    last_mini_batch = reshaped_tree.audio_data[-1]  # Shape: (3, 2, 1000)
+    expected_last_mini_batch = audio_data[9:12]  # Last 3 samples from original
+    np.testing.assert_array_equal(last_mini_batch, expected_last_mini_batch)
+
+    # Test with different mini-batch size
+    mini_batch_size_2 = 4
+    reshaped_tree_2 = audio_tree.mini_batch(mini_batch_size_2)
+
+    # Expected shape: (num_mini_batches=3, mini_batch_size=4, channels=2, samples=1000)
+    expected_shape_2 = (3, 4, channels, samples)
+    assert reshaped_tree_2.audio_data.shape == expected_shape_2
+
+    # Test that sample_rate is preserved
+    assert reshaped_tree.sample_rate == sample_rate
+    assert reshaped_tree_2.sample_rate == sample_rate
+
+    # Test edge case: mini_batch_size equals batch_size
+    reshaped_tree_full = audio_tree.mini_batch(batch_size)
+    assert reshaped_tree_full.audio_data.shape == (1, batch_size, channels, samples)
+    np.testing.assert_array_equal(reshaped_tree_full.audio_data[0], audio_data)
+
+
+def test_unsplit_mini_batch():
+    """Test that unsplit_mini_batch correctly flattens mini-batch dimension back to batch dimension."""
+
+    # Create an AudioTree with batch size 12
+    sample_rate = 44_100
+    batch_size = 12
+    channels = 2
+    samples = 1000
+
+    # Create distinctive audio data so we can verify correct reshaping
+    original_audio_data = np.arange(batch_size * channels * samples, dtype=np.float32).reshape(
+        batch_size, channels, samples
+    )
+    audio_tree = AudioTree(original_audio_data, sample_rate)
+
+    # Test round-trip: split then unsplit with mini-batch size 3
+    mini_batch_size = 3
+    batched_tree = audio_tree.mini_batch(mini_batch_size)
+    unbatched_tree = batched_tree.unbatch()
+
+    # Verify we get back the original shape
+    assert unbatched_tree.audio_data.shape == original_audio_data.shape
+    # Verify we get back the exact same data
+    np.testing.assert_array_equal(unbatched_tree.audio_data, original_audio_data)
+    # Verify sample_rate is preserved
+    assert unbatched_tree.sample_rate == sample_rate
+
+    # Test with different mini-batch size
+    mini_batch_size_2 = 4
+    batched_tree_2 = audio_tree.mini_batch(mini_batch_size_2)
+    unbatched_tree_2 = batched_tree_2.unbatch()
+
+    assert unbatched_tree_2.audio_data.shape == original_audio_data.shape
+    np.testing.assert_array_equal(unbatched_tree_2.audio_data, original_audio_data)
+
+    # Test edge case: mini_batch_size equals batch_size
+    batched_tree_full = audio_tree.mini_batch(batch_size)
+    unbatched_tree_full = batched_tree_full.unbatch()
+
+    assert unbatched_tree_full.audio_data.shape == original_audio_data.shape
+    np.testing.assert_array_equal(unbatched_tree_full.audio_data, original_audio_data)
+
+    # Test that unsplitting preserves metadata if present
+    audio_tree_with_metadata = AudioTree(
+        original_audio_data,
+        sample_rate,
+        metadata={"test_key": "test_value"}
+    )
+    batched_with_metadata = audio_tree_with_metadata.mini_batch(mini_batch_size)
+    unbatched_with_metadata = batched_with_metadata.unbatch()
+
+    assert unbatched_with_metadata.metadata == {"test_key": "test_value"}
+
+    # Test direct unsplit on already mini-batched data
+    # Create data that's already in mini-batch format
+    mini_batched_data = np.arange(4 * 3 * channels * samples, dtype=np.float32).reshape(
+        4, 3, channels, samples  # (num_mini_batches, mini_batch_size, channels, samples)
+    )
+    mini_batched_tree = AudioTree(mini_batched_data, sample_rate)
+    flattened_tree = mini_batched_tree.unbatch()
+
+    expected_shape = (12, channels, samples)  # 4 * 3 = 12
+    assert flattened_tree.audio_data.shape == expected_shape

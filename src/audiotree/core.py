@@ -456,6 +456,7 @@ class AudioTree:
             2
             >>> split_trees[0].audio_data.shape
             (6, 1, 44100)
+            (6, 1, 44100)  # Each tree has half the original batch size
         """
         total_batch_size = self.audio_data.shape[0]
         assert total_batch_size % n_splits == 0, \
@@ -467,3 +468,76 @@ class AudioTree:
             tree_util.tree_map(lambda x: x[i * split_batch_size:(i + 1) * split_batch_size], self)
             for i in range(n_splits)
         ]
+
+    def mini_batch(self, mini_batch_size: int) -> Self:
+        """Reshape batch dimension into mini-batches by adding a new leading axis.
+
+        Transforms audio data from shape (B, C, T) to (num_mini_batches, mini_batch_size, C, T),
+        where B must be evenly divisible by mini_batch_size.
+
+        Args:
+            mini_batch_size: Number of samples per mini-batch. The total batch size must be
+                evenly divisible by this value.
+
+        Returns:
+            AudioTree with an additional mini-batch dimension as the first axis.
+
+        Example:
+            >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
+            >>> x_batched = x.mini_batch(3)
+            >>> x_batched.audio_data.shape
+            (4, 3, 1, 44100)  # 4 mini-batches of size 3
+        """
+        B, C, _ = self.audio_data.shape
+
+        # Calculate number of mini-batches (assuming B is evenly divisible)
+        assert B % mini_batch_size == 0
+        num_mini_batches = B // mini_batch_size
+
+        # Reshape AudioTree to have leading mini-batch dimension
+        # From (B, C, T) to (num_mini_batches, mini_batch_size, C, T)
+        # Only reshape array-like objects since metadata can contain non-arrays
+        reshaped_audio_tree = tree_util.tree_map(
+            lambda x: x.reshape(num_mini_batches, mini_batch_size, *x.shape[1:]) if hasattr(x, "shape") else x,
+            self,
+        )
+        return reshaped_audio_tree
+
+    def unbatch(self) -> Self:
+        """Flatten mini-batches back into a single batch dimension.
+
+        Undoes the operation performed by mini_batch(), transforming audio data
+        from shape (num_mini_batches, mini_batch_size, C, T) back to (B, C, T).
+
+        Returns:
+            AudioTree with the mini-batch dimension flattened into the batch dimension.
+
+        Example:
+            >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
+            >>> x_batched = x.mini_batch(3)
+            >>> x_batched.audio_data.shape
+            (4, 3, 1, 44100)  # 4 mini-batches of size 3
+            >>> x_unbatched = x_batched.unbatch()
+            >>> x_unbatched.audio_data.shape
+            (12, 1, 44100)  # Back to original shape
+        """
+        # Assuming the audio_data has shape (num_mini_batches, mini_batch_size, C, T)
+        # We want to reshape to (num_mini_batches * mini_batch_size, C, T)
+
+        # Get the current shape
+        shape = self.audio_data.shape
+
+        # We expect at least 4 dimensions for mini-batched data
+        assert len(shape) >= 4, (
+            f"Expected at least 4 dimensions for mini-batched data, got {len(shape)}. "
+            f"Shape: {shape}"
+        )
+
+        # Flatten the first two dimensions
+        # From (num_mini_batches, mini_batch_size, C, T) to (B, C, T)
+        # Only reshape array-like objects since metadata can contain non-arrays
+        flattened_audio_tree = tree_util.tree_map(
+            lambda x: x.reshape(-1, *x.shape[2:]) if hasattr(x, "shape") else x,
+            self,
+        )
+        return flattened_audio_tree
