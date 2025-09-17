@@ -19,18 +19,22 @@ def test_audiodatabalancedataset():
             if not os.path.exists(outpath):
                 soundfile.write(outpath, data, sample_rate)
 
-    dataset = (
-        AudioDataBalancedDataset(
-            sources={"group1": ["group1"], "group2": ["group2"]},
-            sample_rate=sample_rate,
-            duration=0.01,
-            weights={"group1": 1, "group2": 2},  # show group2 twice as much as group 1.
-        )
-        .map(audiotree.transforms.Batch(1))
-    )
+    batch_size = 4
+
+    dataset = AudioDataBalancedDataset(
+        sources={"group1": ["group1"], "group2": ["group2"]},
+        sample_rate=sample_rate,
+        duration=0.01,
+        weights={"group1": 1, "group2": 2},  # show group2 twice as much as group 1.
+    ).batch(batch_size)  # Use grain's batch method directly
+
     i = 0
-    for item in dataset:
-        print(item.filepath)
+    for audio_tree in dataset:
+        audio_tree = audio_tree.unbatch()
+        print(audio_tree.filepath)
+        assert audio_tree.audio_data.ndim == 3
+        assert len(audio_tree.filepath) == batch_size
+        assert audio_tree.audio_data.shape[0] == batch_size
         i += 1
-        if i > 100:
+        if i > 1:
             break
