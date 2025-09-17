@@ -182,6 +182,7 @@ class Trim(BaseMapTransform):
     Args in config:
         length (float): Desired output audio length in seconds. Defaults to 1.0.
         mode (str): Padding mode if the audio will be lengthened. Options are:
+
             - "wrap": Circular shift (default). Audio wraps around.
             - "constant": Zero padding.
     """

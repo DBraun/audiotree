@@ -145,7 +145,23 @@ class AudioTree:
         )
 
     def replace_loudness(self) -> Self:
-        """Replace ``loudness`` property with a JAX scalar."""
+        """Compute and set the loudness in LUFS for each item in the batch.
+
+        Calculates the integrated loudness following ITU-R BS.1770-4 standard.
+        Returns a new AudioTree with the ``loudness`` property populated.
+
+        Returns:
+            AudioTree with loudness values computed, shaped (batch_size,).
+
+        Note:
+            **Channel Limitations**: Supports up to 5 channels:
+
+            - Mono (1 channel): Single channel
+            - Stereo (2 channels): [Left, Right]
+            - 5.0/5.1 Surround (5 channels): [Left, Right, Center, Left Surround, Right Surround]
+
+            Will raise ValueError if audio has more than 5 channels.
+        """
         loudness = jit_integrated_loudness(
             jnp.array(self.audio_data), self.sample_rate, zeros=512
         )
@@ -434,28 +450,26 @@ class AudioTree:
         )
 
     def mini_batch_list(self, n_splits: int) -> List[Self]:
-        """Split a tree with concatenated batch dimensions into multiple trees using slicing.
+        """Split batch dimension into a list of smaller AudioTree objects.
 
-        This works because pytree structures like AudioTree store non-array data (e.g., sample_rate)
-        in the tree structure itself, not as leaves, so slicing only affects arrays.
+        Divides the batch dimension evenly into n_splits separate AudioTree objects,
+        each containing a portion of the original batch.
 
         Args:
-            n_splits: The desired number of output AudioTrees.
+            n_splits: Number of AudioTree objects to create. The batch size must be
+                evenly divisible by this value.
 
         Returns:
-            List of trees, each with batch size of split_batch_size
+            List of AudioTree objects, each with batch_size = original_batch_size / n_splits.
 
         Example:
-            >>> x = AudioTree(np.zeros((4, 1, 44100)), 44100)
-            >>> trees = [x, x, x]
-            >>> big_tree = jax.tree.map(lambda *xs: np.concatenate(xs, axis=0), *trees)
-            >>> big_tree.audio_tree.shape
+            >>> big_tree = AudioTree(np.zeros((12, 1, 44100)), 44100)
+            >>> big_tree.audio_data.shape
             (12, 1, 44100)
             >>> split_trees = big_tree.mini_batch_list(2)
             >>> len(split_trees)
             2
             >>> split_trees[0].audio_data.shape
-            (6, 1, 44100)
             (6, 1, 44100)  # Each tree has half the original batch size
         """
         total_batch_size = self.audio_data.shape[0]

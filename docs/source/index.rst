@@ -47,6 +47,7 @@ Content
    :maxdepth: 1
    :caption: Introduction
 
+   introduction/introduction
    introduction/datasources
    introduction/transforms
 
