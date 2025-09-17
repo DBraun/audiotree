@@ -5,12 +5,11 @@ AudioTree documentation
 The source code is `here <https://github.com/DBraun/audiotree>`_.
 AudioTree follows `Effort-based Versioning <https://jacobtomlinson.dev/effver/>`_.
 
-There are two requirements:
+There is one requirement:
 
 .. code-block:: bash
 
    pip install "git+https://github.com/DBraun/argbind.git@improve.subclasses"
-   pip install "git+https://github.com/boris-kuz/jaxloudnorm.git"
 
 Then AudioTree can be installed with pip:
 

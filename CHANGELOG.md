@@ -11,6 +11,7 @@
 * New `AudioTree.mini_batch_list` to split an AudioTree into a list of AudioTree.
 * New `AudioTree.mini_batch` and `AudioTree.unbatch` to add or removing a mini-batch axis (useful for `nnx.scan`, etc.)
 * Remove `audiotree.transforms.ReduceBatchTransform` and replace with `audiotree.transforms.Batch`, which should be used in place of `grain.transforms.Batch`
+* Use `jaxloudnorm` from PyPI.
 
 ## audiotree 0.2.0 (Feb 17, 2025)
 

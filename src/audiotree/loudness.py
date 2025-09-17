@@ -24,7 +24,6 @@ def jit_integrated_loudness(data: jnp.ndarray, sample_rate: int, zeros: int):
             ),
         )
 
-    data = rearrange(data, "b c t -> b t c")
     meter = jln.Meter(sample_rate, block_size=block_size, use_fir=True, zeros=zeros)
     loudness = jax.vmap(meter.integrated_loudness)(data)
 

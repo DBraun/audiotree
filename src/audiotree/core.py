@@ -433,7 +433,7 @@ class AudioTree:
             audio_data=audio_data, sample_rate=sample_rate, loudness=None
         )
 
-    def split_by_batch(self, n_splits: int) -> List[Self]:
+    def mini_batch_list(self, n_splits: int) -> List[Self]:
         """Split a tree with concatenated batch dimensions into multiple trees using slicing.
 
         This works because pytree structures like AudioTree store non-array data (e.g., sample_rate)
@@ -451,7 +451,7 @@ class AudioTree:
             >>> big_tree = jax.tree.map(lambda *xs: np.concatenate(xs, axis=0), *trees)
             >>> big_tree.audio_tree.shape
             (12, 1, 44100)
-            >>> split_trees = big_tree.split_by_batch(2)
+            >>> split_trees = big_tree.mini_batch_list(2)
             >>> len(split_trees)
             2
             >>> split_trees[0].audio_data.shape

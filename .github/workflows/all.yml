@@ -33,7 +33,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install ".[dev]"
         pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
-        pip install git+https://github.com/boris-kuz/jaxloudnorm.git
 
     - name: Run tests
       run: |
@@ -59,7 +58,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install ".[dev]"
         pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
-        pip install git+https://github.com/boris-kuz/jaxloudnorm.git
         pip install furo
 
     - name: Build Docs

@@ -17,7 +17,7 @@ Transforms in ``audiotree.transforms`` are `Grain`_
 `transformations <https://github.com/google/grain/blob/754636534bb16b5b2dd74970043d03e24ea44d3f/docs/transformations.md>`_ that operate on batches.
 Examples include:
 
-   * GPU-based `volume normalization <https://github.com/boris-kuz/jaxloudnorm/pull/1>`_ to a LUFS value in a configurable uniformly sampled range
+   * GPU-based `volume normalization <https://github.com/DBraun/jaxloudnorm/>`_ to a LUFS value in a configurable uniformly sampled range
    * Encoding to `DAC-JAX`_ audio tokens
    * Swapping stereo channels
    * Randomly shifting or corrupting the phase(s) of a waveform
