@@ -1,7 +1,7 @@
 from dataclasses import field
 from functools import partial
 from pathlib import Path
-from typing import Callable, List, Literal, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 from typing_extensions import Self
 
 from flax import struct
@@ -85,7 +85,8 @@ class AudioTree:
             use ``replace_loudness()`` to create a new AudioTree with ``loudness`` calculated.
         pitch (jnp.ndarray, optional): The MIDI pitch where 60 is middle C. The shape is ``(Batch,)``.
         velocity (jnp.ndarray, optional): The MIDI velocity between 0 and 127. The shape is ``(Batch,)``.
-        duration (jnp.ndarray, optional): The duration of the audio waveform in seconds (like a note duration). The shape is ``(Batch,)``.
+        note_duration (jnp.ndarray, optional): A note duration in units of your choice.
+            The value is not necessarily the same as the duration of the audio data. The shape is ``(Batch,)``.
         codes (jnp.ndarray, optional): The neural audio codec tokens for the audio.
         latents (jnp.ndarray, optional): The latent representations of the audio.
         metadata (dict): Any extra metadata can be placed here.
@@ -97,7 +98,7 @@ class AudioTree:
     loudness: np.ndarray = None
     pitch: np.ndarray = None
     velocity: np.ndarray = None
-    duration: np.ndarray = None
+    note_duration: np.ndarray = None
     codes: np.ndarray = None
     latents: np.ndarray = None
     metadata: dict = struct.field(pytree_node=True, default_factory=dict)
@@ -110,7 +111,7 @@ class AudioTree:
         loudness: np.ndarray = None,
         pitch: np.ndarray = None,
         velocity: np.ndarray = None,
-        duration: np.ndarray = None,
+        note_duration: np.ndarray = None,
         codes: np.ndarray = None,
         latents: np.ndarray = None,
         metadata: dict = None,
@@ -138,7 +139,7 @@ class AudioTree:
             loudness=loudness,
             pitch=pitch,
             velocity=velocity,
-            duration=duration,
+            note_duration=note_duration,
             codes=codes,
             latents=latents,
             metadata=metadata,
@@ -227,6 +228,14 @@ class AudioTree:
         mono: bool = False,
         pad_mode: Literal["constant"] | None = "constant",
         filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        # AudioTree properties
+        loudness: Optional[np.ndarray] = None,
+        pitch: Optional[np.ndarray] = None,
+        velocity: Optional[np.ndarray] = None,
+        note_duration: Optional[np.ndarray] = None,
+        codes: Optional[np.ndarray] = None,
+        latents: Optional[np.ndarray] = None,
     ):
         """Create an AudioTree from an audio file path.
 
@@ -243,6 +252,14 @@ class AudioTree:
                 ``None`` results in no padding. Another useful choice is "wrap" to loop the audio.
             filepaths (Union[str, Path, List[str | Path]], optional): One or more filepaths to store in the returned
                 ``AudioTree``'s metadata. If *None* (default) the provided ``audio_path`` will be used.
+            metadata (dict, optional): Additional metadata to include in the AudioTree. This metadata is merged with
+                automatically generated fields (offset, note_duration, filepath).
+            loudness (np.ndarray, optional): Loudness values to assign to the AudioTree.
+            pitch (np.ndarray, optional): Pitch values to assign to the AudioTree.
+            velocity (np.ndarray, optional): Velocity values to assign to the AudioTree.
+            note_duration (np.ndarray, optional): Note note_duration values to assign to the AudioTree.
+            codes (jnp.ndarray, optional): The neural audio codec tokens for the audio.
+            latents (jnp.ndarray, optional): The latent representations of the audio.
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
@@ -268,10 +285,14 @@ class AudioTree:
                 data, pad_width=((0, 0), (0, 0), (0, pad_right)), mode=pad_mode
             )
 
-        metadata = {
-            "offset": np.array([offset]),
-            "duration": np.array([duration]),
-        }
+        # Start with user-provided metadata or empty dict
+        if metadata is None:
+            combined_metadata = {}
+        else:
+            combined_metadata = metadata.copy()  # Don't modify the original
+
+        # Add automatic metadata (these override user metadata to ensure correctness)
+        combined_metadata["offset"] = np.array([offset])
 
         if filepaths is None:
             filepaths_to_store = [audio_path]
@@ -282,12 +303,30 @@ class AudioTree:
             else:
                 filepaths_to_store = list(filepaths)
 
-        metadata["filepath"] = cls._encode_filepaths(filepaths_to_store)
+        combined_metadata["filepath"] = cls._encode_filepaths(filepaths_to_store)
+
+        # Wrap scalar properties in arrays with batch dimension
+        # This ensures consistency - all AudioTree properties should have batch dimension
+        def wrap_if_scalar(val, dtype=None):
+            if val is None:
+                return None
+            if np.isscalar(val):
+                return np.array([val], dtype=dtype)
+            elif isinstance(val, np.ndarray) and val.ndim == 0:
+                return np.array([val.item()], dtype=dtype)
+            else:
+                return val
 
         return cls(
             audio_data=data,
             sample_rate=sr,
-            metadata=metadata,
+            metadata=combined_metadata,
+            loudness=wrap_if_scalar(loudness, np.float32),
+            pitch=wrap_if_scalar(pitch, np.float32),
+            velocity=wrap_if_scalar(velocity, np.int16),
+            note_duration=wrap_if_scalar(note_duration, np.float32),
+            codes=wrap_if_scalar(codes),
+            latents=wrap_if_scalar(latents),
         )
 
 

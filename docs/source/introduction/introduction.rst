@@ -78,9 +78,20 @@ AudioTree provides convenient methods for loading audio files:
         mono=False       # Keep stereo
     )
 
+    # Load with custom metadata
+    tree = AudioTree.from_file(
+        "audio.wav",
+        sample_rate=44_100,
+        metadata={
+            "params": np.zeros((1, 4,)),  # intentionally give batch axis of 1
+        }
+    )
+
     # The filepath is automatically stored in metadata
     >>> tree.filepath
     ['audio.wav']
+    >>> tree.metadata["params"]
+    array([[0., 0., 0., 0.]])
 
 Manipulating AudioTree Objects
 -------------------------------
@@ -411,11 +422,45 @@ Metadata should contain array-like data with a batch dimension:
     >>> combined.sample_rate
     44100  # Sample rate stays the same (not a pytree node)
 
+Writing Audio to Disk
+---------------------
+
+The :class:`~audiotree.writer.AudioWriter` class provides a convenient way to write AudioTree objects to disk with automatic manifest generation for tracking metadata.
+
+Basic Example
+~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    from audiotree import AudioTree, AudioWriter
+    import numpy as np
+
+    # Create an AudioTree with 3 samples
+    tree = AudioTree.create(
+        np.random.randn(3, 2, 44_100),  # 3 batches, stereo, 1 second
+        sample_rate=44_100,
+        loudness=np.array([-20.0, -15.0, -18.0])
+    )
+
+    # Write to disk with automatic manifest
+    with AudioWriter("output", manifest_format="npz") as writer:
+        paths = writer.write(tree, tags={"dataset": "train"})
+
+    >>> len(paths)
+    3  # One file per batch item
+
+    # Read the data back
+    from audiotree.datasources import ManifestDataSource
+    source = ManifestDataSource.from_writer_output("output")
+    >>> source[0].loudness  # Metadata is preserved
+    array([-20.])
+
 Next Steps
 ----------
 
 Now that you understand the basics of AudioTree, explore:
 
+- :ref:`writer` - Learn how to write AudioTree objects to disk with manifests
 - :ref:`datasources` - Learn how to create data loaders for ML pipelines
 - :ref:`transforms` - Discover audio augmentations and transformations
 - :class:`~audiotree.core.AudioTree` API reference for detailed documentation

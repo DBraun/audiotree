@@ -48,6 +48,7 @@ Content
    :caption: Introduction
 
    introduction/introduction
+   introduction/writer
    introduction/datasources
    introduction/transforms
 
@@ -56,6 +57,7 @@ Content
    :caption: AudioTree API
 
    audiotree_api/core
+   audiotree_api/writer
    audiotree_api/datasources
    audiotree_api/transforms
 

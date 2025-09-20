@@ -12,6 +12,8 @@
 * New `AudioTree.mini_batch` and `AudioTree.unbatch` to add or removing a mini-batch axis (useful for `nnx.scan`, etc.)
 * Remove `audiotree.transforms.ReduceBatchTransform` and replace with `audiotree.transforms.Batch`, which should be used in place of `grain.transforms.Batch`
 * Use `jaxloudnorm` from PyPI.
+* New `AudioWriter` class for writing AudioTree batches to disk with manifest generation (JSON/CSV formats).
+* New `ManifestDataSource` for reading AudioWriter outputs as a grain RandomAccessDataSource with metadata preservation and filtering capabilities.
 
 ## audiotree 0.2.0 (Feb 17, 2025)
 
