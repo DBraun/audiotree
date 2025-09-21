@@ -102,7 +102,7 @@ def test_filter_by_tag():
         writer.save_manifest()
 
         # Filter by category
-        source = ManifestDataSource(output_dir / "manifest.json")
+        source = ManifestDataSource(output_dir / "manifest.npz")
         source_a = source.filter_by_tag("category", "A")
 
         assert len(source_a) == 2  # Two items with category "A"
@@ -133,7 +133,7 @@ def test_filter_by_loudness():
         writer.save_manifest()
 
         # Filter by loudness range
-        source = ManifestDataSource(output_dir / "manifest.json")
+        source = ManifestDataSource(output_dir / "manifest.npz")
         filtered = source.filter_by_loudness(min_lufs=-20, max_lufs=-10)
 
         assert len(filtered) == 3  # -20, -15, -10
@@ -229,7 +229,7 @@ def test_get_entry():
         with AudioWriter(output_dir, manifest_format="npz") as writer:
             writer.write(tree, tags={"test": True})
 
-        source = ManifestDataSource(output_dir / "manifest.json")
+        source = ManifestDataSource(output_dir / "manifest.npz")
 
         # Get raw entry
         entry = source.get_entry(0)
@@ -249,7 +249,7 @@ def test_grain_integration():
             writer.write(tree)
 
         # Use as grain RandomAccessDataSource
-        source = ManifestDataSource(output_dir / "manifest.json")
+        source = ManifestDataSource(output_dir / "manifest.npz")
 
         # Test it works with basic grain functionality
         assert len(source) == 8
