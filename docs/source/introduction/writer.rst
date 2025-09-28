@@ -22,14 +22,14 @@ AudioWriter sequentially writes AudioTree batches to disk, automatically handlin
     import numpy as np
 
     # Create an AudioTree with 3 samples
-    tree = AudioTree.create(
+    audio_tree = AudioTree.create(
         np.random.randn(3, 2, 44_100),  # 3 batches, stereo, 1 second
         sample_rate=44_100
     )
 
     # Write to disk with automatic manifest
     with AudioWriter("output", pattern="audio_{index:04d}.wav") as writer:
-        paths = writer.write(tree)
+        paths = writer.write(audio_tree)
 
     >>> len(paths)
     3  # One file per batch item
@@ -50,7 +50,7 @@ NPZ is the recommended format for all use cases, especially for large datasets:
 
     # NPZ format - best for large datasets
     with AudioWriter("output", manifest_format="npz") as writer:
-        writer.write(tree)
+        writer.write(audio_tree)
     # Creates output/manifest.npz with efficient binary storage
 
 **Advantages of NPZ:**
@@ -69,7 +69,7 @@ You can also write audio files without generating a manifest:
 
     # No manifest - just write audio files
     with AudioWriter("output", manifest_format=None) as writer:
-        writer.write(tree)
+        writer.write(audio_tree)
 
 NPZ Compression Options
 -----------------------
@@ -94,7 +94,7 @@ AudioWriter automatically tracks all AudioTree metadata in the manifest:
 .. code-block:: python
 
     # Create AudioTree with comprehensive metadata
-    tree = AudioTree.create(
+    audio_tree = AudioTree.create(
         np.random.randn(2, 1, 44_100),
         sample_rate=44_100,
         loudness=np.array([-20.0, -15.0]),
@@ -106,7 +106,7 @@ AudioWriter automatically tracks all AudioTree metadata in the manifest:
 
     # Write with custom tags
     with AudioWriter("output") as writer:
-        writer.write(tree, tags={"dataset": "train", "version": 2})
+        writer.write(audio_tree, tags={"dataset": "train", "version": 2})
 
 The manifest will contain:
 
@@ -141,11 +141,11 @@ AudioWriter can automatically resample audio to a target sample rate:
 .. code-block:: python
 
     # Original at 44.1 kHz
-    tree = AudioTree.create(np.zeros((1, 2, 44_100)), 44_100)
+    audio_tree = AudioTree.create(np.zeros((1, 2, 44_100)), 44_100)
 
     # Resample to 16 kHz when writing
     with AudioWriter("output", sample_rate=16_000) as writer:
-        writer.write(tree)
+        writer.write(audio_tree)
     # Written files will be at 16 kHz
 
 This is useful when:
@@ -200,9 +200,9 @@ AudioWriter supports progress tracking via tqdm integration:
     pbar = tqdm(total=1000, desc="Generating dataset")
 
     with AudioWriter("output", pbar=pbar) as writer:
-        for tree in big_audio_tree.mini_batch_list(batch_size):
-            if tree.loudness > -30:  # Only write loud samples
-                writer.write(tree)  # Automatically updates pbar
+        for audio_tree in big_audio_tree.mini_batch_list(batch_size):
+            if audio_tree.loudness > -30:  # Only write loud samples
+                writer.write(audio_tree)  # Automatically updates pbar
 
 **Using Internal Progress Bar:**
 
@@ -211,8 +211,8 @@ AudioWriter supports progress tracking via tqdm integration:
     # Let AudioWriter create its own progress bar
     with AudioWriter("output", show_progress=True,
                      progress_desc="Writing audio") as writer:
-        for tree in audio_trees:
-            writer.write(tree)
+        for audio_tree in audio_trees:
+            writer.write(audio_tree)
     # Progress bar automatically closed
 
 **Conditional Writing with Progress:**
@@ -227,9 +227,9 @@ AudioWriter supports progress tracking via tqdm integration:
 
     pbar = tqdm(total=total_samples, desc="Writing loud samples")
     with AudioWriter("output", pbar=pbar, close_pbar=True) as writer:
-        for tree in trees:
-            if tree.loudness.mean() > -30:
-                writer.write(tree)
+        for audio_tree in trees:
+            if audio_tree.loudness.mean() > -30:
+                writer.write(audio_tree)
     # pbar automatically closed when close_pbar=True
 
 The progress bar is updated by the batch size of each AudioTree written, providing accurate progress tracking even with variable batch sizes.
@@ -261,7 +261,7 @@ Use :class:`~audiotree.datasources.manifest.ManifestDataSource` to read AudioWri
 
     # Write some data
     with AudioWriter("output", manifest_format="npz") as writer:
-        writer.write(tree, tags={"split": "train"})
+        writer.write(audio_tree, tags={"split": "train"})
 
     # Read it back
     source = ManifestDataSource.from_writer_output("output", manifest_format="npz")
@@ -311,7 +311,7 @@ Here's how metadata flows through AudioTree transformations and into the manifes
     import numpy as np
 
     # Load with rich metadata
-    tree = AudioTree.from_file(
+    audio_tree = AudioTree.from_file(
         "input.wav",
         sample_rate=44_100,
         metadata={
@@ -323,7 +323,7 @@ Here's how metadata flows through AudioTree transformations and into the manifes
     )
 
     # Metadata is preserved through transformations
-    processed = tree.resample(16_000)
+    processed = audio_tree.resample(16_000)
     processed = processed.replace_loudness()
 
     # Check metadata is still there
