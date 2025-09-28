@@ -24,6 +24,8 @@ class AudioWriter:
         manifest_format: Format for manifest file ("npz" or None to disable)
         include_timestamp: Whether to include timestamps in manifest entries
         compress_manifest: Whether to compress NPZ manifest files (only applies to npz format)
+        write_audio: Whether to write audio files to disk (default True). When False,
+            only manifest is generated with metadata
         pbar: Optional tqdm progress bar instance to update during writing
         close_pbar: Whether to close the progress bar on exit (default False)
         show_progress: Create an internal tqdm progress bar (requires tqdm installed)
@@ -51,6 +53,7 @@ class AudioWriter:
         manifest_format: Optional[Literal["npz"]] = "npz",
         include_timestamp: bool = False,
         compress_manifest: bool = True,
+        write_audio: bool = True,
         pbar: Optional[Any] = None,
         close_pbar: bool = False,
         show_progress: bool = False,
@@ -63,6 +66,7 @@ class AudioWriter:
         self.manifest_format = manifest_format
         self.include_timestamp = include_timestamp
         self.compress_manifest = compress_manifest
+        self.write_audio = write_audio
         self.index = 0
         self.written_paths = []
         self.manifest_data = []
@@ -107,13 +111,14 @@ class AudioWriter:
             filename = self.pattern.format(index=self.index)
             filepath = self.output_dir / filename
 
-            # Convert to numpy and transpose for soundfile (channels, samples) -> (samples, channels)
-            audio = np.array(tree.audio_data[i].T)
+            # Write audio file if requested
+            if self.write_audio:
+                # Convert to numpy and transpose for soundfile (channels, samples) -> (samples, channels)
+                audio = np.array(tree.audio_data[i].T)
+                soundfile.write(filepath, audio, tree.sample_rate)
+                self.written_paths.append(filepath)
 
-            # Write audio file
-            soundfile.write(filepath, audio, tree.sample_rate)
             paths.append(filepath)
-            self.written_paths.append(filepath)
 
             # Collect manifest entry
             if self.manifest_format:
@@ -152,7 +157,8 @@ class AudioWriter:
             'sample_rate': np.int32(tree.sample_rate),
             'channels': np.int32(tree.audio_data.shape[1]),
             'samples': np.int32(tree.audio_data.shape[2]),
-            'duration_seconds': np.float32(tree.audio_data.shape[2] / tree.sample_rate)
+            'duration_seconds': np.float32(tree.audio_data.shape[2] / tree.sample_rate),
+            'files_written': self.write_audio
         }
 
         # Add timestamp only if requested
@@ -284,6 +290,9 @@ class AudioWriter:
             elif field in ['velocity']:
                 # MIDI velocity is typically 0-127, can be stored as int16
                 arrays[field] = np.array(values, dtype=np.int16)
+            elif field in ['files_written']:
+                # Boolean fields
+                arrays[field] = np.array(values, dtype=bool)
             elif field.startswith('metadata_'):
                 # Metadata fields - preserve original dtype if possible
                 # Check the first non-None value to determine dtype
@@ -346,7 +355,8 @@ class AudioWriter:
             'total_files': len(self.written_paths),
             'output_directory': str(self.output_dir),
             'manifest_format': self.manifest_format,
-            'current_index': self.index
+            'current_index': self.index,
+            'write_audio': self.write_audio
         }
 
         # Only include batch count if timestamps are being tracked

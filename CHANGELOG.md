@@ -14,6 +14,7 @@
 * Use `jaxloudnorm` from PyPI.
 * New `AudioWriter` class for writing AudioTree batches to disk with manifest generation (JSON/CSV formats).
 * New `ManifestDataSource` for reading AudioWriter outputs as a grain RandomAccessDataSource with metadata preservation and filtering capabilities.
+* New `AudioTree.filter` which takes a function `filter_fn(AudioTree) -> bool` 
 
 ## audiotree 0.2.0 (Feb 17, 2025)
 

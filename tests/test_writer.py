@@ -534,6 +534,127 @@ def test_metadata_array_preservation():
         np.testing.assert_array_almost_equal(manifest_data['metadata_confidence'], [0.9, 0.85, 0.95])
 
 
+def test_manifest_only_generation():
+    """Test generating manifest without writing audio files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        # Create AudioTree with metadata
+        audio_data = np.random.randn(3, 2, 22050)
+        tree = AudioTree.create(
+            audio_data,
+            sample_rate=22050,
+            loudness=np.array([-20.0, -18.0, -22.0]),
+            pitch=np.array([60.0, 62.0, 64.0]),
+            velocity=np.array([64, 80, 100]),
+            filepaths=["original1.wav", "original2.wav", "original3.wav"]
+        )
+
+        # Write manifest only (no audio files)
+        with AudioWriter(output_dir, manifest_format="npz", write_audio=False) as writer:
+            paths = writer.write(tree, tags={"dataset": "test", "version": 1})
+
+        # Check that audio files were NOT created
+        for path in paths:
+            assert not path.exists(), f"Audio file {path} should not exist when write_audio=False"
+
+        # Check that manifest was created
+        manifest_path = output_dir / "manifest.npz"
+        assert manifest_path.exists()
+
+        # Load and verify manifest contents
+        data = np.load(manifest_path, allow_pickle=True)
+
+        # Check basic metadata
+        assert len(data['index']) == 3
+        assert len(data['filename']) == 3
+        assert all(data['sample_rate'] == 22050)
+        assert all(data['channels'] == 2)
+        assert all(data['samples'] == 22050)
+
+        # Check AudioTree metadata
+        assert np.allclose(data['loudness'], [-20.0, -18.0, -22.0])
+        assert np.allclose(data['pitch'], [60.0, 62.0, 64.0])
+        assert np.allclose(data['velocity'], [64, 80, 100])
+
+        # Check files_written flag
+        assert 'files_written' in data
+        assert all(data['files_written'] == False)
+
+        # Check stats
+        stats = writer.get_stats()
+        assert stats['write_audio'] == False
+        assert stats['total_files'] == 0  # No files written to disk
+
+
+def test_manifest_only_with_write_audio_true():
+    """Test that files_written flag is True when write_audio=True."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        tree = AudioTree.create(np.random.randn(2, 1, 8000), sample_rate=8000)
+
+        # Write with audio files (default behavior)
+        with AudioWriter(output_dir, manifest_format="npz", write_audio=True) as writer:
+            paths = writer.write(tree)
+
+        # Check that audio files WERE created
+        for path in paths:
+            assert path.exists(), f"Audio file {path} should exist when write_audio=True"
+
+        # Check files_written flag in manifest
+        data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        assert 'files_written' in data
+        assert all(data['files_written'] == True)
+
+        # Check stats
+        stats = writer.get_stats()
+        assert stats['write_audio'] == True
+        assert stats['total_files'] == 2  # Files written to disk
+
+
+def test_manifest_only_multiple_writes():
+    """Test manifest-only generation with multiple write calls."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        writer = AudioWriter(output_dir, manifest_format="npz", write_audio=False)
+
+        # Write first batch
+        tree1 = AudioTree.create(
+            np.random.randn(2, 1, 22050),
+            sample_rate=22050,
+            loudness=np.array([-18.0, -20.0])
+        )
+        paths1 = writer.write(tree1)
+
+        # Write second batch
+        tree2 = AudioTree.create(
+            np.random.randn(3, 1, 22050),
+            sample_rate=22050,
+            loudness=np.array([-15.0, -25.0, -19.0])
+        )
+        paths2 = writer.write(tree2)
+
+        # No files should exist
+        for path in paths1 + paths2:
+            assert not path.exists()
+
+        # Save manifest and check
+        manifest_path = writer.save_manifest()
+        assert manifest_path.exists()
+
+        data = np.load(manifest_path, allow_pickle=True)
+        assert len(data['index']) == 5
+        assert all(data['files_written'] == False)
+        assert np.allclose(data['loudness'], [-18.0, -20.0, -15.0, -25.0, -19.0])
+
+        # Check stats
+        stats = writer.get_stats()
+        assert stats['total_files'] == 0
+        assert stats['current_index'] == 5
+
+
 if __name__ == "__main__":
     # Run tests
     test_basic_sequential_writing()
@@ -554,4 +675,9 @@ if __name__ == "__main__":
     test_internal_progress_bar()
     test_progress_bar_no_close()
     test_manifest_datasource_npz()
+    test_dtype_preservation()
+    test_metadata_array_preservation()
+    test_manifest_only_generation()
+    test_manifest_only_with_write_audio_true()
+    test_manifest_only_multiple_writes()
     print("All tests passed!")
