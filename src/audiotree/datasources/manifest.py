@@ -7,6 +7,7 @@ import numpy as np
 from grain import python as grain
 
 from audiotree import AudioTree
+from audiotree.writer import _AUDIOTREE_FIELDS
 
 
 class ManifestDataSource(grain.RandomAccessDataSource):
@@ -218,22 +219,22 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                     # Convert scalar to array with batch dim
                     metadata[metadata_key] = np.array([value])
 
-        # Load audio file with AudioTree properties
-        tree = AudioTree.from_file(
-            audio_path,
-            sample_rate=self.sample_rate or entry.get('sample_rate'),
-            duration=self.duration,
-            mono=self.mono,
-            pad_mode=self.pad_mode if self.duration else None,
-            metadata=metadata,  # Pass metadata back
-            # Pass AudioTree properties directly from manifest
-            loudness=entry.get('loudness', None),
-            pitch=entry.get('pitch', None),
-            velocity=entry.get('velocity', None),
-            note_duration=entry.get('note_duration', None),
-            codes=entry.get('codes', None),
-            latents=entry.get('latents', None),
-        )
+        # Build kwargs for AudioTree.from_file with all available fields
+        tree_kwargs = {
+            'sample_rate': self.sample_rate or entry.get('sample_rate'),
+            'duration': self.duration,
+            'mono': self.mono,
+            'pad_mode': self.pad_mode if self.duration else None,
+            'metadata': metadata,  # Pass metadata back
+        }
+
+        # Add AudioTree fields dynamically from manifest
+        for field_name in _AUDIOTREE_FIELDS:
+            if field_name in entry:
+                tree_kwargs[field_name] = entry[field_name]
+
+        # Load audio file with all properties
+        tree = AudioTree.from_file(audio_path, **tree_kwargs)
 
         return tree
 

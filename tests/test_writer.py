@@ -636,6 +636,144 @@ def test_manifest_only_multiple_writes():
         assert stats['current_index'] == 5
 
 
+def test_field_validation():
+    """Test that AudioWriter validates field consistency across writes."""
+    import pytest
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        # First tree has loudness and pitch
+        tree1 = AudioTree.create(
+            np.random.randn(2, 1, 8000),
+            sample_rate=8000,
+            loudness=np.array([-20.0, -18.0]),
+            pitch=np.array([60.0, 62.0])
+        )
+
+        # Second tree only has loudness (missing pitch)
+        tree2 = AudioTree.create(
+            np.random.randn(2, 1, 8000),
+            sample_rate=8000,
+            loudness=np.array([-15.0, -22.0])
+        )
+
+        # Third tree has loudness, pitch, and velocity (extra field)
+        tree3 = AudioTree.create(
+            np.random.randn(2, 1, 8000),
+            sample_rate=8000,
+            loudness=np.array([-19.0, -21.0]),
+            pitch=np.array([64.0, 66.0]),
+            velocity=np.array([80, 90])
+        )
+
+        writer = AudioWriter(output_dir)
+
+        # First write should succeed
+        writer.write(tree1)
+
+        # Second write should fail (missing pitch)
+        with pytest.raises(ValueError, match="missing fields"):
+            writer.write(tree2)
+
+        # Third write should fail (extra velocity)
+        with pytest.raises(ValueError, match="extra fields"):
+            writer.write(tree3)
+
+
+def test_metadata_different_batch_sizes():
+    """Test that metadata arrays work correctly across writes with different batch sizes."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        # First write: batch size 2 with metadata params [2, 10]
+        tree1 = AudioTree.create(
+            np.random.randn(2, 1, 8000),
+            sample_rate=8000,
+            loudness=np.array([-20.0, -18.0])
+        )
+        tree1 = tree1.replace(metadata={
+            "params": np.random.randn(2, 10).astype(np.float32),
+            "frame_id": np.array([100, 200], dtype=np.int32)
+        })
+
+        # Second write: batch size 3 with metadata params [3, 10]
+        tree2 = AudioTree.create(
+            np.random.randn(3, 1, 8000),
+            sample_rate=8000,
+            loudness=np.array([-15.0, -22.0, -19.0])
+        )
+        tree2 = tree2.replace(metadata={
+            "params": np.random.randn(3, 10).astype(np.float32),
+            "frame_id": np.array([300, 400, 500], dtype=np.int32)
+        })
+
+        # Third write: batch size 1 with metadata params [1, 10]
+        tree3 = AudioTree.create(
+            np.random.randn(1, 1, 8000),
+            sample_rate=8000,
+            loudness=np.array([-17.0])
+        )
+        tree3 = tree3.replace(metadata={
+            "params": np.random.randn(1, 10).astype(np.float32),
+            "frame_id": np.array([600], dtype=np.int32)
+        })
+
+        # Write all trees
+        with AudioWriter(output_dir) as writer:
+            writer.write(tree1)
+            writer.write(tree2)
+            writer.write(tree3)
+
+        # Load manifest and verify
+        manifest_data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+
+        # Check that metadata was stacked correctly
+        assert 'metadata_params' in manifest_data
+        assert 'metadata_frame_id' in manifest_data
+
+        # Should have 2 + 3 + 1 = 6 entries total
+        assert manifest_data['metadata_params'].shape == (6, 10)
+        assert manifest_data['metadata_frame_id'].shape == (6,)
+
+        # Verify dtypes preserved
+        assert manifest_data['metadata_params'].dtype == np.float32
+        assert manifest_data['metadata_frame_id'].dtype == np.int32
+
+        # Verify frame_ids are correct
+        np.testing.assert_array_equal(
+            manifest_data['metadata_frame_id'],
+            [100, 200, 300, 400, 500, 600]
+        )
+
+        # Test reading back with ManifestDataSource
+        source = ManifestDataSource.from_writer_output(output_dir)
+        assert len(source) == 6
+
+        # Check all items have correct metadata shapes and values
+        expected_frame_ids = [100, 200, 300, 400, 500, 600]
+
+        for idx, expected_frame_id in enumerate(expected_frame_ids):
+            loaded_tree = source[idx]
+
+            # Verify metadata exists and has correct shape
+            assert 'params' in loaded_tree.metadata
+            assert loaded_tree.metadata['params'].shape == (1, 10), f"Item {idx}: params shape mismatch"
+            assert loaded_tree.metadata['params'].dtype == np.float32, f"Item {idx}: params dtype mismatch"
+
+            assert 'frame_id' in loaded_tree.metadata
+            assert loaded_tree.metadata['frame_id'].shape == (1,), f"Item {idx}: frame_id shape mismatch"
+            assert loaded_tree.metadata['frame_id'].dtype == np.int32, f"Item {idx}: frame_id dtype mismatch"
+
+            # Verify frame_id value matches
+            assert loaded_tree.metadata['frame_id'][0] == expected_frame_id, f"Item {idx}: frame_id value mismatch"
+
+            # Verify AudioTree field shapes
+            assert loaded_tree.audio_data.shape == (1, 1, 8000), f"Item {idx}: audio_data shape mismatch"
+            assert loaded_tree.loudness is not None, f"Item {idx}: loudness should not be None"
+            assert loaded_tree.loudness.shape == (1,), f"Item {idx}: loudness shape mismatch"
+
+
 if __name__ == "__main__":
     # Run tests
     test_basic_sequential_writing()
@@ -643,7 +781,6 @@ if __name__ == "__main__":
     test_resampling()
     test_context_manager()
     test_manual_save_manifest()
-    test_no_manifest()
     test_directory_creation()
     test_mono_audio()
     test_stereo_audio()
@@ -661,4 +798,5 @@ if __name__ == "__main__":
     test_manifest_only_generation()
     test_manifest_only_with_write_audio_true()
     test_manifest_only_multiple_writes()
+    test_field_validation()
     print("All tests passed!")

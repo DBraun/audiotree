@@ -10,6 +10,10 @@ import soundfile
 from .core import AudioTree
 
 
+# AudioTree fields that should be tracked (excluding audio_data, sample_rate, metadata)
+_AUDIOTREE_FIELDS = ['loudness', 'pitch', 'velocity', 'note_duration', 'codes', 'latents']
+
+
 class AudioWriter:
     """Write AudioTree objects sequentially to disk with optional manifest generation.
 
@@ -67,6 +71,7 @@ class AudioWriter:
         self.index = 0
         self.written_paths = []
         self.manifest_data = []
+        self._expected_fields = None  # Track which AudioTree fields should be present
 
         # Progress bar support
         self.pbar = pbar
@@ -86,6 +91,21 @@ class AudioWriter:
                 # tqdm not available, silently continue without progress bar
                 pass
 
+    def _get_present_fields(self, tree: AudioTree) -> set:
+        """Get the set of AudioTree fields that are not None.
+
+        Args:
+            tree: AudioTree to inspect
+
+        Returns:
+            Set of field names that are present (not None)
+        """
+        present = set()
+        for field_name in _AUDIOTREE_FIELDS:
+            if getattr(tree, field_name, None) is not None:
+                present.add(field_name)
+        return present
+
     def write(self, tree: AudioTree, tags: Optional[Dict] = None) -> List[Path]:
         """Write all items in an AudioTree batch to disk.
 
@@ -95,10 +115,34 @@ class AudioWriter:
 
         Returns:
             List of Path objects for all written files
+
+        Raises:
+            ValueError: If AudioTree fields don't match previously written trees
         """
         # Optionally resample if target sample rate specified
         if self.sample_rate and tree.sample_rate != self.sample_rate:
             tree = tree.resample(self.sample_rate)
+
+        # Validate field consistency
+        present_fields = self._get_present_fields(tree)
+        if self._expected_fields is None:
+            # First write - record which fields are present
+            self._expected_fields = present_fields
+        else:
+            # Subsequent writes - validate fields match
+            if present_fields != self._expected_fields:
+                missing = self._expected_fields - present_fields
+                extra = present_fields - self._expected_fields
+                error_parts = []
+                if missing:
+                    error_parts.append(f"missing fields: {sorted(missing)}")
+                if extra:
+                    error_parts.append(f"extra fields: {sorted(extra)}")
+                raise ValueError(
+                    f"AudioTree fields don't match previous writes. "
+                    f"{', '.join(error_parts)}. "
+                    f"All AudioTrees written to the same manifest must have consistent fields."
+                )
 
         batch_size = tree.audio_data.shape[0]
         paths = []
@@ -161,25 +205,22 @@ class AudioWriter:
         if self.include_timestamp:
             entry['timestamp'] = datetime.now().isoformat()
 
-        # Add optional AudioTree metadata with consistent naming
-        # Keep original dtypes - don't convert to Python float
-        if tree.loudness is not None and batch_index < len(tree.loudness):
-            val = tree.loudness[batch_index]
-            # Keep as numpy scalar to preserve dtype
-            entry['loudness'] = val if isinstance(val, np.generic) else np.float32(val)
-
-        if tree.pitch is not None and batch_index < len(tree.pitch):
-            val = tree.pitch[batch_index]
-            entry['pitch'] = val if isinstance(val, np.generic) else np.float32(val)
-
-        if tree.velocity is not None and batch_index < len(tree.velocity):
-            val = tree.velocity[batch_index]
-            # Velocity should stay as int16
-            entry['velocity'] = val if isinstance(val, np.generic) else np.int16(val)
-
-        if tree.note_duration is not None and batch_index < len(tree.note_duration):
-            val = tree.note_duration[batch_index]
-            entry['note_duration'] = val if isinstance(val, np.generic) else np.float32(val)
+        # Add AudioTree fields dynamically, preserving dtypes
+        for field_name in _AUDIOTREE_FIELDS:
+            field_value = getattr(tree, field_name, None)
+            if field_value is not None:
+                # Extract the value for this batch index
+                if isinstance(field_value, np.ndarray):
+                    if field_value.ndim > 0 and batch_index < len(field_value):
+                        val = field_value[batch_index]
+                        # Keep as numpy scalar to preserve dtype
+                        entry[field_name] = val if isinstance(val, np.generic) else np.array(val, dtype=field_value.dtype)
+                    elif field_value.ndim == 0:
+                        # Scalar array
+                        entry[field_name] = field_value
+                else:
+                    # Non-array value (shouldn't normally happen for these fields)
+                    entry[field_name] = field_value
 
         # Add source filepath if available (consistent naming)
         filepaths = tree.filepath
@@ -255,66 +296,36 @@ class AudioWriter:
 
         # Process scalar fields
         for field in scalar_fields:
-            values = []
-            for entry in self.manifest_data:
-                if field in entry:
-                    value = entry[field]
-                    # Convert strings to object array for proper storage
-                    if isinstance(value, str):
-                        values.append(value)
-                    else:
-                        values.append(value)
-                else:
-                    # Use appropriate default based on field type
-                    if field in ['index', 'sample_rate', 'channels', 'samples']:
-                        values.append(-1)  # Use -1 as missing value for integers
-                    elif field in ['loudness', 'pitch', 'velocity', 'note_duration']:
-                        values.append(np.nan)  # Use NaN for floats
-                    else:
-                        values.append('')  # Empty string for text fields
+            # Collect values from all entries
+            values = [entry[field] for entry in self.manifest_data]
+
+            # Infer dtype from first value
+            first_val = values[0]
 
             # Convert to appropriate numpy array type
-            if field in ['filename', 'filepath', 'timestamp']:
+            if isinstance(first_val, str):
                 # String fields - use object dtype
                 arrays[field] = np.array(values, dtype=object)
-            elif field in ['index', 'sample_rate', 'channels', 'samples']:
-                # Integer fields
-                arrays[field] = np.array(values, dtype=np.int32)
-            elif field in ['velocity']:
-                # MIDI velocity is typically 0-127, can be stored as int16
-                arrays[field] = np.array(values, dtype=np.int16)
-            elif field in ['files_written']:
+            elif isinstance(first_val, bool):
                 # Boolean fields
                 arrays[field] = np.array(values, dtype=bool)
-            elif field.startswith('metadata_'):
-                # Metadata fields - preserve original dtype if possible
-                # Check the first non-None value to determine dtype
-                first_val = None
-                for v in values:
-                    if v is not None and not (isinstance(v, float) and np.isnan(v)):
-                        first_val = v
-                        break
-
-                if first_val is not None:
-                    if isinstance(first_val, np.ndarray):
-                        # For arrays, stack them
-                        arrays[field] = np.stack(values)
-                    elif isinstance(first_val, str):
-                        # String metadata
-                        arrays[field] = np.array(values, dtype=object)
-                    elif isinstance(first_val, (np.integer, int)):
-                        arrays[field] = np.array(values, dtype=np.int32)
-                    elif isinstance(first_val, np.floating):
-                        arrays[field] = np.array(values, dtype=first_val.dtype)
-                    else:
-                        # Try to preserve the original type
-                        arrays[field] = np.array(values)
+            elif isinstance(first_val, np.ndarray):
+                # Array fields (e.g., metadata arrays, codes, latents)
+                arrays[field] = np.stack(values)
+            elif isinstance(first_val, (np.generic, int, float)):
+                # Numeric scalars - preserve dtype
+                if isinstance(first_val, np.generic):
+                    # numpy scalar - use its dtype
+                    arrays[field] = np.array(values, dtype=first_val.dtype)
                 else:
-                    # Default to object array if all values are None
-                    arrays[field] = np.array(values, dtype=object)
+                    # Python scalar - convert to numpy type
+                    if isinstance(first_val, int):
+                        arrays[field] = np.array(values, dtype=np.int32)
+                    else:
+                        arrays[field] = np.array(values, dtype=np.float32)
             else:
-                # Default float fields
-                arrays[field] = np.array(values, dtype=np.float32)
+                # Fallback for other types
+                arrays[field] = np.concatenate(values, axis=0)
 
         # Process tags if present
         if any('tags' in entry for entry in self.manifest_data):
