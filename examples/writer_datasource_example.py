@@ -59,7 +59,6 @@ def main():
         with AudioWriter(
             output_dir,
             pattern="audio_{index:03d}.wav",
-            manifest_format="npz"
         ) as writer:
             for i, tree in enumerate(trees):
                 paths = writer.write(tree, tags={
@@ -70,7 +69,6 @@ def main():
 
             stats = writer.get_stats()
             print(f"\n  Total files written: {stats['total_files']}")
-            print(f"  Manifest format: {stats['manifest_format']}\n")
 
         # 3. Read back with ManifestDataSource
         print("3. Reading back with ManifestDataSource...")
@@ -78,7 +76,6 @@ def main():
         # Load all files
         source = ManifestDataSource.from_writer_output(
             output_dir,
-            manifest_format="npz"
         )
 
         print(f"  Loaded {len(source)} files from manifest\n")

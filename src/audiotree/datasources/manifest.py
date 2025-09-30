@@ -44,7 +44,6 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         >>> # Use convenience constructor for AudioWriter output
         >>> source = ManifestDataSource.from_writer_output(
         ...     "output_dir",
-        ...     manifest_format="npz"  # Automatically finds manifest.npz
         ... )
     """
 
@@ -325,7 +324,6 @@ class ManifestDataSource(grain.RandomAccessDataSource):
     def from_writer_output(
         cls,
         output_dir: Union[str, Path],
-        manifest_format: Literal["npz"] = "npz",
         **kwargs
     ) -> 'ManifestDataSource':
         """Convenience constructor for reading AudioWriter output.
@@ -336,8 +334,6 @@ class ManifestDataSource(grain.RandomAccessDataSource):
 
         Args:
             output_dir: Directory containing AudioWriter output
-            manifest_format: Format of the manifest file ("npz").
-                           NPZ format provides compression and fast loading.
             **kwargs: Additional arguments passed to ManifestDataSource
                      (e.g., sample_rate, mono, note_duration, filter_fn)
 
@@ -351,10 +347,9 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             >>> # Read with resampling
             >>> source = ManifestDataSource.from_writer_output(
             ...     "output",
-            ...     manifest_format="npz",
             ...     sample_rate=16000
             ... )
         """
         output_dir = Path(output_dir)
-        manifest_path = output_dir / f"manifest.{manifest_format}"
+        manifest_path = output_dir / f"manifest.npz"
         return cls(manifest_path=manifest_path, audio_dir=output_dir, **kwargs)

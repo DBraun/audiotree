@@ -21,7 +21,6 @@ class AudioWriter:
         output_dir: Directory where audio files will be written
         pattern: Filename pattern with {index} placeholder for sequential numbering
         sample_rate: Optional target sample rate for resampling all audio
-        manifest_format: Format for manifest file ("npz" or None to disable)
         include_timestamp: Whether to include timestamps in manifest entries
         compress_manifest: Whether to compress NPZ manifest files (only applies to npz format)
         write_audio: Whether to write audio files to disk (default True). When False,
@@ -50,7 +49,6 @@ class AudioWriter:
         output_dir: Union[str, Path] = ".",
         pattern: str = "audio_{index:04d}.wav",
         sample_rate: Optional[int] = None,
-        manifest_format: Optional[Literal["npz"]] = "npz",
         include_timestamp: bool = False,
         compress_manifest: bool = True,
         write_audio: bool = True,
@@ -63,7 +61,6 @@ class AudioWriter:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.pattern = pattern
         self.sample_rate = sample_rate
-        self.manifest_format = manifest_format
         self.include_timestamp = include_timestamp
         self.compress_manifest = compress_manifest
         self.write_audio = write_audio
@@ -121,9 +118,8 @@ class AudioWriter:
             paths.append(filepath)
 
             # Collect manifest entry
-            if self.manifest_format:
-                entry = self._create_manifest_entry(tree, i, filename, tags)
-                self.manifest_data.append(entry)
+            entry = self._create_manifest_entry(tree, i, filename, tags)
+            self.manifest_data.append(entry)
 
             self.index += 1
 
@@ -221,22 +217,19 @@ class AudioWriter:
         """Save the manifest file to disk.
 
         Returns:
-            Path to the saved manifest file, or None if manifest is disabled
+            Path to the saved manifest file
         """
-        if not self.manifest_format or not self.manifest_data:
-            return None
 
-        manifest_path = self.output_dir / f"manifest.{self.manifest_format}"
+        manifest_path = self.output_dir / f"manifest.npz"
 
-        if self.manifest_format == "npz":
-            # Convert manifest data to arrays for efficient NPZ storage
-            arrays_dict = self._manifest_to_arrays()
+        # Convert manifest data to arrays for efficient NPZ storage
+        arrays_dict = self._manifest_to_arrays()
 
-            # Save as compressed or uncompressed NPZ
-            if self.compress_manifest:
-                np.savez_compressed(manifest_path, **arrays_dict)
-            else:
-                np.savez(manifest_path, **arrays_dict)
+        # Save as compressed or uncompressed NPZ
+        if self.compress_manifest:
+            np.savez_compressed(manifest_path, **arrays_dict)
+        else:
+            np.savez(manifest_path, **arrays_dict)
 
         return manifest_path
 
@@ -354,7 +347,6 @@ class AudioWriter:
         stats = {
             'total_files': len(self.written_paths),
             'output_directory': str(self.output_dir),
-            'manifest_format': self.manifest_format,
             'current_index': self.index,
             'write_audio': self.write_audio
         }
@@ -375,8 +367,7 @@ class AudioWriter:
 
     def close(self):
         """Manually close the writer, save manifest, and close progress bar."""
-        if self.manifest_format:
-            self.save_manifest()
+        self.save_manifest()
 
         # Close progress bar if requested
         if self.pbar is not None and self.close_pbar:

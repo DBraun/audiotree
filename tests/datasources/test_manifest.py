@@ -26,7 +26,7 @@ def test_round_trip_npz_manifest():
         )
 
         # Write with AudioWriter
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             paths = writer.write(tree, tags={"dataset": "test", "version": 1})
 
         # Read back with ManifestDataSource
@@ -71,7 +71,7 @@ def test_filter_function():
                            loudness=np.array([-18.0])),
         ]
 
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             for tree in trees:
                 writer.write(tree)
 
@@ -93,7 +93,7 @@ def test_filter_by_tag():
         output_dir = Path(tmpdir)
 
         # Write data with different tags
-        writer = AudioWriter(output_dir, manifest_format="npz")
+        writer = AudioWriter(output_dir)
 
         for i, category in enumerate(["A", "B", "A", "C"]):
             tree = AudioTree.create(np.random.randn(1, 1, 8000), sample_rate=8000)
@@ -120,7 +120,7 @@ def test_filter_by_loudness():
 
         # Create data with varying loudness
         loudness_values = [-30.0, -20.0, -15.0, -10.0, -5.0]
-        writer = AudioWriter(output_dir, manifest_format="npz")
+        writer = AudioWriter(output_dir)
 
         for lufs in loudness_values:
             tree = AudioTree.create(
@@ -148,11 +148,11 @@ def test_from_writer_output():
 
         # Write some data
         tree = AudioTree.create(np.random.randn(2, 1, 8000), sample_rate=8000)
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             writer.write(tree)
 
         # Use convenience constructor
-        source = ManifestDataSource.from_writer_output(output_dir, manifest_format="npz")
+        source = ManifestDataSource.from_writer_output(output_dir)
         assert len(source) == 2
         assert source[0].audio_data.shape == (1, 1, 8000)
 
@@ -164,7 +164,7 @@ def test_num_records_limit():
 
         # Write 5 items
         tree = AudioTree.create(np.random.randn(5, 1, 8000), sample_rate=8000)
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             writer.write(tree)
 
         # Load only first 3
@@ -182,7 +182,7 @@ def test_resampling():
 
         # Write at 44100 Hz
         tree = AudioTree.create(np.random.randn(1, 1, 44100), sample_rate=44100)
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             writer.write(tree)
 
         # Read and resample to 16000 Hz
@@ -203,7 +203,7 @@ def test_mono_conversion():
 
         # Write stereo audio
         tree = AudioTree.create(np.random.randn(1, 2, 8000), sample_rate=8000)
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             writer.write(tree)
 
         # Read as mono
@@ -226,7 +226,7 @@ def test_get_entry():
             sample_rate=8000,
             loudness=np.array([-20.0, -18.0])
         )
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             writer.write(tree, tags={"test": True})
 
         source = ManifestDataSource(output_dir / "manifest.npz")
@@ -245,7 +245,7 @@ def test_grain_integration():
 
         # Write test data
         tree = AudioTree.create(np.random.randn(8, 1, 8000), sample_rate=8000)
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             writer.write(tree)
 
         # Use as grain RandomAccessDataSource
@@ -285,11 +285,11 @@ def test_grain_dataloader_with_batch_transform():
         )
 
         # Write with NPZ manifest
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             writer.write(tree)
 
         # Load with ManifestDataSource
-        source = ManifestDataSource.from_writer_output(output_dir, manifest_format="npz")
+        source = ManifestDataSource.from_writer_output(output_dir)
 
         # Load all items from ManifestDataSource
         items = [source[i] for i in range(len(source))]
@@ -349,11 +349,11 @@ def test_manifest_metadata_with_batch_transform():
         )
 
         # Write with NPZ manifest (metadata will be saved)
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             writer.write(tree)
 
         # Load data back with metadata
-        source = ManifestDataSource.from_writer_output(output_dir, manifest_format="npz")
+        source = ManifestDataSource.from_writer_output(output_dir)
 
         # Load items and check metadata is present
         items = []
@@ -405,11 +405,11 @@ def test_manifest_with_batch_transform():
         )
 
         # Write with NPZ manifest
-        with AudioWriter(output_dir, manifest_format="npz") as writer:
+        with AudioWriter(output_dir) as writer:
             writer.write(tree)
 
         # Load data back
-        source = ManifestDataSource.from_writer_output(output_dir, manifest_format="npz")
+        source = ManifestDataSource.from_writer_output(output_dir)
 
         # Manually load items and batch them
         # (avoiding grain.DataLoader which seems to have issues in test environment)

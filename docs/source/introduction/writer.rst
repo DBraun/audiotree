@@ -49,7 +49,7 @@ NPZ is the recommended format for all use cases, especially for large datasets:
 .. code-block:: python
 
     # NPZ format - best for large datasets
-    with AudioWriter("output", manifest_format="npz") as writer:
+    with AudioWriter("output") as writer:
         writer.write(audio_tree)
     # Creates output/manifest.npz with efficient binary storage
 
@@ -60,17 +60,6 @@ NPZ is the recommended format for all use cases, especially for large datasets:
 - **Precision**: Maintains exact numeric types without conversion
 - **Scalability**: Efficient storage for datasets with thousands of files
 
-No Manifest
-~~~~~~~~~~~
-
-You can also write audio files without generating a manifest:
-
-.. code-block:: python
-
-    # No manifest - just write audio files
-    with AudioWriter("output", manifest_format=None) as writer:
-        writer.write(audio_tree)
-
 NPZ Compression Options
 -----------------------
 
@@ -79,10 +68,10 @@ Control NPZ file compression for different trade-offs:
 .. code-block:: python
 
     # Compressed NPZ (default) - smaller files, slightly slower writing
-    writer = AudioWriter("output", manifest_format="npz", compress_manifest=True)
+    writer = AudioWriter("output", compress_manifest=True)
 
     # Uncompressed NPZ - faster writing, larger files
-    writer = AudioWriter("output", manifest_format="npz", compress_manifest=False)
+    writer = AudioWriter("output", compress_manifest=False)
 
 Compression is recommended for most cases as the size savings (often 5-10x) outweigh the minimal performance impact.
 
@@ -260,11 +249,11 @@ Use :class:`~audiotree.datasources.manifest.ManifestDataSource` to read AudioWri
     from audiotree.datasources import ManifestDataSource
 
     # Write some data
-    with AudioWriter("output", manifest_format="npz") as writer:
+    with AudioWriter("output") as writer:
         writer.write(audio_tree, tags={"split": "train"})
 
     # Read it back
-    source = ManifestDataSource.from_writer_output("output", manifest_format="npz")
+    source = ManifestDataSource.from_writer_output("output")
 
     # Access individual items
     loaded_tree = source[0]
@@ -333,7 +322,7 @@ Here's how metadata flows through AudioTree transformations and into the manifes
     120
 
     # Write with additional tags
-    with AudioWriter("output", manifest_format="npz") as writer:
+    with AudioWriter("output") as writer:
         writer.write(processed, tags={"processed": True, "version": 2})
 
     # When read back, all metadata is available
@@ -398,7 +387,6 @@ Here's a complete example of creating a training dataset with AudioWriter:
         with AudioWriter(
             output_dir,
             pattern="train_{index:06d}.wav",
-            manifest_format="npz",
             sample_rate=16_000,  # Standardize to 16 kHz
             compress_manifest=True,
             pbar=pbar,

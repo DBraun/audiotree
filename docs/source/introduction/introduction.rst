@@ -482,7 +482,7 @@ Basic Example
     )
 
     # Write to disk with automatic manifest
-    with AudioWriter("output", manifest_format="npz") as writer:
+    with AudioWriter("output") as writer:
         paths = writer.write(audio_tree, tags={"dataset": "train"})
 
     >>> len(paths)
