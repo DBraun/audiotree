@@ -193,13 +193,6 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         """
         entry = self.entries[int(record_key)]
 
-        # Construct audio file path
-        filename = entry['filename']
-        audio_path = self.audio_dir / filename
-
-        if not audio_path.exists():
-            raise FileNotFoundError(f"Audio file not found: {audio_path}")
-
         # Prepare metadata from manifest
         metadata = {}
 
@@ -219,22 +212,60 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                     # Convert scalar to array with batch dim
                     metadata[metadata_key] = np.array([value])
 
-        # Build kwargs for AudioTree.from_file with all available fields
-        tree_kwargs = {
-            'sample_rate': self.sample_rate or entry.get('sample_rate'),
-            'duration': self.duration,
-            'mono': self.mono,
-            'pad_mode': self.pad_mode if self.duration else None,
-            'metadata': metadata,  # Pass metadata back
-        }
+        # Check if audio files were actually written
+        files_written = entry.get('files_written', True)
 
-        # Add AudioTree fields dynamically from manifest
-        for field_name in _AUDIOTREE_FIELDS:
-            if field_name in entry:
-                tree_kwargs[field_name] = entry[field_name]
+        if files_written:
+            # Audio files exist - load from disk
+            filename = entry['filename']
+            audio_path = self.audio_dir / filename
 
-        # Load audio file with all properties
-        tree = AudioTree.from_file(audio_path, **tree_kwargs)
+            if not audio_path.exists():
+                raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+            # Build kwargs for AudioTree.from_file with all available fields
+            tree_kwargs = {
+                'sample_rate': self.sample_rate or entry.get('sample_rate'),
+                'duration': self.duration,
+                'mono': self.mono,
+                'pad_mode': self.pad_mode if self.duration else None,
+                'metadata': metadata,
+            }
+
+            # Add AudioTree fields dynamically from manifest
+            for field_name in _AUDIOTREE_FIELDS:
+                if field_name in entry:
+                    tree_kwargs[field_name] = entry[field_name]
+
+            # Load audio file with all properties
+            tree = AudioTree.from_file(audio_path, **tree_kwargs)
+        else:
+            # No audio files - create AudioTree from manifest metadata only
+            sample_rate = self.sample_rate or entry.get('sample_rate')
+            channels = entry.get('channels', 1)
+            samples = entry.get('samples', 0)
+
+            # Create zero audio data with correct shape
+            audio_data = np.zeros((1, channels, samples), dtype=np.float32)
+
+            # Build kwargs for AudioTree.create
+            tree_kwargs = {
+                'sample_rate': sample_rate,
+                'metadata': metadata,
+            }
+
+            # Add AudioTree fields dynamically from manifest
+            for field_name in _AUDIOTREE_FIELDS:
+                if field_name in entry:
+                    # Wrap scalar values in array with batch dimension
+                    value = entry[field_name]
+                    if isinstance(value, (np.ndarray, list)):
+                        tree_kwargs[field_name] = np.array([value])
+                    else:
+                        tree_kwargs[field_name] = np.array([value])
+
+            # Create AudioTree with zero audio data
+            tree = AudioTree.create(audio_data, **tree_kwargs)
 
         return tree
 

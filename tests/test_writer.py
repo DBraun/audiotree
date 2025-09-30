@@ -774,6 +774,181 @@ def test_metadata_different_batch_sizes():
             assert loaded_tree.loudness.shape == (1,), f"Item {idx}: loudness shape mismatch"
 
 
+def test_audiotree_from_manifest():
+    """Test AudioTree.from_manifest loads all items into a single AudioTree."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        # Create multiple trees with different batch sizes
+        tree1 = AudioTree.create(
+            np.random.randn(2, 2, 8000),
+            sample_rate=8000,
+            loudness=np.array([-20.0, -18.0]),
+            pitch=np.array([60.0, 62.0]),
+        )
+        tree1 = tree1.replace(metadata={
+            "params": np.random.randn(2, 10).astype(np.float32),
+            "frame_id": np.array([100, 200], dtype=np.int32)
+        })
+
+        tree2 = AudioTree.create(
+            np.random.randn(3, 2, 8000),
+            sample_rate=8000,
+            loudness=np.array([-15.0, -22.0, -19.0]),
+            pitch=np.array([64.0, 66.0, 68.0]),
+        )
+        tree2 = tree2.replace(metadata={
+            "params": np.random.randn(3, 10).astype(np.float32),
+            "frame_id": np.array([300, 400, 500], dtype=np.int32)
+        })
+
+        # Write to manifest
+        with AudioWriter(output_dir) as writer:
+            writer.write(tree1)
+            writer.write(tree2)
+
+        # Load all at once into single AudioTree
+        combined = AudioTree.from_manifest(output_dir / "manifest.npz")
+
+        # Should have 2 + 3 = 5 items in batch dimension
+        assert combined.audio_data.shape == (5, 2, 8000)
+        assert combined.sample_rate == 8000
+
+        # AudioTree fields should be concatenated
+        assert combined.loudness.shape == (5,)
+        assert np.allclose(combined.loudness, [-20.0, -18.0, -15.0, -22.0, -19.0])
+        assert combined.pitch.shape == (5,)
+        assert np.allclose(combined.pitch, [60.0, 62.0, 64.0, 66.0, 68.0])
+
+        # Metadata arrays should be concatenated
+        assert combined.metadata['params'].shape == (5, 10)
+        assert combined.metadata['frame_id'].shape == (5,)
+        np.testing.assert_array_equal(
+            combined.metadata['frame_id'],
+            [100, 200, 300, 400, 500]
+        )
+
+
+def test_audiotree_from_manifest_without_audio_files():
+    """Test AudioTree.from_manifest with manifest-only (no audio files)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        # Create AudioTree
+        tree = AudioTree.create(
+            np.random.randn(3, 2, 16000),
+            sample_rate=16000,
+            loudness=np.array([-20.0, -15.0, -25.0]),
+            velocity=np.array([64, 80, 45], dtype=np.int16),
+        )
+
+        # Write manifest only
+        with AudioWriter(output_dir, write_audio=False) as writer:
+            writer.write(tree)
+
+        # Load from manifest without audio files
+        combined = AudioTree.from_manifest(output_dir / "manifest.npz")
+
+        # Should have correct shape with zero audio data
+        assert combined.audio_data.shape == (3, 2, 16000)
+        assert np.all(combined.audio_data == 0.0)
+
+        # Metadata should be preserved
+        assert combined.loudness.shape == (3,)
+        assert np.allclose(combined.loudness, [-20.0, -15.0, -25.0])
+        assert combined.velocity.shape == (3,)
+        np.testing.assert_array_equal(combined.velocity, [64, 80, 45])
+
+
+def test_audiotree_from_manifest_with_filter():
+    """Test AudioTree.from_manifest with filter function."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        # Create AudioTree with varying loudness
+        tree = AudioTree.create(
+            np.random.randn(5, 1, 8000),
+            sample_rate=8000,
+            loudness=np.array([-30.0, -18.0, -25.0, -15.0, -22.0]),
+        )
+
+        # Write to manifest
+        with AudioWriter(output_dir) as writer:
+            writer.write(tree)
+
+        # Load only items louder than -20 LUFS
+        filtered = AudioTree.from_manifest(
+            output_dir / "manifest.npz",
+            filter_fn=lambda entry: entry.get('loudness', -float('inf')) > -20.0
+        )
+
+        # Should only have 2 items: -18.0 and -15.0
+        assert filtered.audio_data.shape == (2, 1, 8000)
+        assert filtered.loudness.shape == (2,)
+        assert np.allclose(filtered.loudness, [-18.0, -15.0])
+
+
+def test_manifest_datasource_without_audio_files():
+    """Test that ManifestDataSource works with manifest-only (no audio files)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        # Create AudioTree with metadata
+        audio_data = np.random.randn(3, 2, 16000)
+        tree = AudioTree.create(
+            audio_data,
+            sample_rate=16000,
+            loudness=np.array([-20.0, -15.0, -25.0]),
+            pitch=np.array([60.0, 62.0, 58.0]),
+            velocity=np.array([64, 80, 45], dtype=np.int16),
+        )
+        tree = tree.replace(metadata={
+            "params": np.random.randn(3, 10).astype(np.float32),
+            "frame_id": np.array([100, 200, 300], dtype=np.int32)
+        })
+
+        # Write manifest only (no audio files)
+        with AudioWriter(output_dir, write_audio=False) as writer:
+            writer.write(tree, tags={"experiment": "no_audio"})
+
+        # Verify no audio files exist
+        wav_files = list(output_dir.glob("*.wav"))
+        assert len(wav_files) == 0, "No WAV files should exist"
+
+        # Load with ManifestDataSource - should work without audio files
+        source = ManifestDataSource.from_writer_output(output_dir)
+        assert len(source) == 3
+
+        # Check loaded items
+        for idx in range(3):
+            loaded_tree = source[idx]
+
+            # Should have correct sample rate
+            assert loaded_tree.sample_rate == 16000
+
+            # Audio data should be zeros with correct shape
+            assert loaded_tree.audio_data.shape == (1, 2, 16000)
+            assert np.all(loaded_tree.audio_data == 0.0)
+
+            # Metadata should be preserved
+            assert loaded_tree.loudness is not None
+            assert loaded_tree.pitch is not None
+            assert loaded_tree.velocity is not None
+
+            # Check metadata arrays
+            assert 'params' in loaded_tree.metadata
+            assert loaded_tree.metadata['params'].shape == (1, 10)
+            assert 'frame_id' in loaded_tree.metadata
+            assert loaded_tree.metadata['frame_id'].shape == (1,)
+
+        # Verify specific values for first item
+        first_tree = source[0]
+        assert np.allclose(first_tree.loudness, [-20.0])
+        assert np.allclose(first_tree.pitch, [60.0])
+        assert np.allclose(first_tree.velocity, [64])
+        assert first_tree.metadata['frame_id'][0] == 100
+
+
 if __name__ == "__main__":
     # Run tests
     test_basic_sequential_writing()
@@ -799,4 +974,9 @@ if __name__ == "__main__":
     test_manifest_only_with_write_audio_true()
     test_manifest_only_multiple_writes()
     test_field_validation()
+    test_metadata_different_batch_sizes()
+    test_audiotree_from_manifest()
+    test_audiotree_from_manifest_without_audio_files()
+    test_audiotree_from_manifest_with_filter()
+    test_manifest_datasource_without_audio_files()
     print("All tests passed!")

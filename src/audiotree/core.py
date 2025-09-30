@@ -329,6 +329,129 @@ class AudioTree:
             latents=wrap_if_scalar(latents),
         )
 
+    @classmethod
+    def from_manifest(
+        cls,
+        manifest_path: Union[str, Path],
+        audio_dir: Optional[Union[str, Path]] = None,
+        filter_fn: Optional[callable] = None,
+    ) -> Self:
+        """Create an AudioTree by loading all items from a manifest file.
+
+        This loads all entries from a manifest file created by AudioWriter and
+        creates a single AudioTree with all items in the batch dimension.
+
+        Args:
+            manifest_path: Path to the manifest file (NPZ format)
+            audio_dir: Optional directory containing audio files. If None, uses manifest directory
+            filter_fn: Optional function to filter entries. Should accept a dict entry and return bool.
+
+        Returns:
+            AudioTree with all manifest entries concatenated along batch dimension
+
+        Example:
+            >>> # Load all items from manifest
+            >>> tree = AudioTree.from_manifest("output/manifest.npz")
+            >>> tree.audio_data.shape
+            (100, 2, 44100)  # 100 items, stereo, 1 second each
+
+            >>> # Load with filtering
+            >>> tree = AudioTree.from_manifest(
+            ...     "output/manifest.npz",
+            ...     filter_fn=lambda entry: entry.get('loudness', -float('inf')) > -20
+            ... )
+        """
+        manifest_path = Path(manifest_path)
+
+        # Load manifest data
+        manifest_data = np.load(manifest_path, allow_pickle=True)
+
+        # Determine audio directory
+        if audio_dir is None:
+            audio_dir = manifest_path.parent
+        else:
+            audio_dir = Path(audio_dir)
+
+        # Convert to list of entry dictionaries for filtering
+        num_entries = len(manifest_data['index'])
+
+        if filter_fn is not None:
+            # Create a lazy dict-like object for filtering
+            class LazyEntry:
+                def __init__(self, data, idx):
+                    self.data = data
+                    self.idx = idx
+
+                def get(self, key, default=None):
+                    if key in self.data:
+                        return self.data[key][self.idx]
+                    return default
+
+                def __getitem__(self, key):
+                    return self.data[key][self.idx]
+
+            # Build mask using filter function
+            mask = np.array([filter_fn(LazyEntry(manifest_data, i)) for i in range(num_entries)])
+            indices = np.where(mask)[0]
+
+            if len(indices) == 0:
+                raise ValueError(f"No entries match filter in manifest: {manifest_path}")
+        else:
+            indices = np.arange(num_entries)
+
+        # Get metadata for reconstruction
+        sample_rate = int(manifest_data['sample_rate'][indices[0]])
+        channels = int(manifest_data['channels'][indices[0]])
+        samples = int(manifest_data['samples'][indices[0]])
+        files_written = manifest_data.get('files_written', np.ones(num_entries, dtype=bool))[indices[0]]
+
+        # Check if audio files exist
+        if files_written:
+            # Load audio from files
+            audio_data = []
+            for idx in indices:
+                filename = manifest_data['filename'][idx]
+                audio_path = audio_dir / filename
+
+                if not audio_path.exists():
+                    raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+                data, sr = librosa.load(str(audio_path), sr=sample_rate, mono=False)
+                assert sr == sample_rate
+
+                if data.ndim == 1:
+                    data = data[None, :]  # Add channel dimension
+                elif data.ndim == 2:
+                    pass  # Already (channels, samples)
+
+                audio_data.append(data)
+
+            audio_data = np.stack(audio_data, axis=0)  # (batch, channels, samples)
+        else:
+            # No audio files - create zeros
+            audio_data = np.zeros((len(indices), channels, samples), dtype=np.float32)
+
+        # Build metadata dictionary
+        metadata = {}
+        for key in manifest_data.keys():
+            if key.startswith('metadata_'):
+                # Extract metadata field
+                metadata_key = key[9:]  # Remove 'metadata_' prefix
+                metadata[metadata_key] = manifest_data[key][indices]
+
+        # Build AudioTree kwargs
+        tree_kwargs = {
+            'sample_rate': sample_rate,
+            'metadata': metadata,
+        }
+
+        # Add AudioTree fields from manifest
+        from audiotree.writer import _AUDIOTREE_FIELDS
+        for field_name in _AUDIOTREE_FIELDS:
+            if field_name in manifest_data:
+                tree_kwargs[field_name] = manifest_data[field_name][indices]
+
+        return cls.create(audio_data, **tree_kwargs)
 
     @classmethod
     def excerpt(
