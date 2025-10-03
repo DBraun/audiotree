@@ -110,66 +110,76 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         return entries
 
     def _load_npz_manifest(self) -> List[Dict]:
-        """Load manifest from NPZ format.
+        """Load manifest from NPZ format using vectorized operations.
 
         Returns:
             List of manifest entry dictionaries
         """
         data = np.load(self.manifest_path, allow_pickle=True)
-        entries = []
 
-        # Get the number of entries from the first array
-        num_entries = 0
+        # Pre-classify keys outside the loop - O(k) instead of O(n×k)
+        regular_keys = []
+        metadata_keys = []
+        tag_keys = []
+
         for key in data.keys():
-            if not key.startswith('tags_'):
-                num_entries = len(data[key])
-                break
+            if key.startswith('tags_'):
+                tag_keys.append(key)
+            elif key.startswith('metadata_'):
+                metadata_keys.append(key)
+            else:
+                regular_keys.append(key)
 
-        # Reconstruct entries from arrays
+        # Get number of entries
+        if not regular_keys:
+            return []
+        num_entries = len(data[regular_keys[0]])
+
+        # Pre-fetch all arrays - single numpy operation per key
+        regular_arrays = {k: data[k] for k in regular_keys}
+        metadata_arrays = {k: data[k] for k in metadata_keys}
+        tag_arrays = {k: data[k] for k in tag_keys}
+
+        # Build entries efficiently
+        entries = []
         for i in range(num_entries):
             entry = {}
 
             # Process regular fields
-            for key in data.keys():
-                if key.startswith('tags_'):
-                    # Handle tag fields separately
-                    continue
-
-                value = data[key][i]
+            for key in regular_keys:
+                value = regular_arrays[key][i]
 
                 # Handle missing values
                 if isinstance(value, (np.integer, int)) and value == -1:
-                    continue  # Skip missing integer values
+                    continue
                 elif isinstance(value, (np.floating, float)) and np.isnan(value):
-                    continue  # Skip NaN values
+                    continue
                 elif isinstance(value, (str, np.str_)) and value == '':
-                    continue  # Skip empty strings
+                    continue
 
-                # Handle metadata fields - keep them as numpy arrays for batching
-                if key.startswith('metadata_'):
-                    # Keep metadata arrays as-is for proper batching
-                    entry[key] = value
+                # Convert scalar arrays and numpy types
+                if isinstance(value, np.ndarray) and value.size == 1:
+                    value = value.item()
+
+                if isinstance(value, np.integer):
+                    entry[key] = int(value)
+                elif isinstance(value, np.floating):
+                    entry[key] = float(value)
                 else:
-                    # Convert regular fields
-                    if isinstance(value, np.ndarray) and value.size == 1:
-                        value = value.item()  # Convert scalar arrays to Python types
+                    entry[key] = value
 
-                    # Convert numpy types to Python types
-                    if isinstance(value, np.integer):
-                        entry[key] = int(value)
-                    elif isinstance(value, np.floating):
-                        entry[key] = float(value)
-                    else:
-                        entry[key] = value
+            # Process metadata fields - keep as-is for batching
+            for key in metadata_keys:
+                value = metadata_arrays[key][i]
+                entry[key] = value
 
             # Process tag fields
             tags = {}
-            for key in data.keys():
-                if key.startswith('tags_'):
-                    tag_key = key[5:]  # Remove 'tags_' prefix
-                    value = data[key][i]
-                    if value is not None and value != '':
-                        tags[tag_key] = value
+            for key in tag_keys:
+                tag_key = key[5:]  # Remove 'tags_' prefix
+                value = tag_arrays[key][i]
+                if value is not None and value != '':
+                    tags[tag_key] = value
 
             if tags:
                 entry['tags'] = tags
