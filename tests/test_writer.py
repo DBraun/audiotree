@@ -17,11 +17,11 @@ def test_basic_sequential_writing():
 
         # Create test AudioTree with batch of 3
         audio_data = np.random.randn(3, 2, 44100)  # 3 batch, 2 channels, 1 second
-        tree = AudioTree.create(audio_data, sample_rate=44100)
+        audio_tree = AudioTree.create(audio_data, sample_rate=44100)
 
         # Write with AudioWriter
         with AudioWriter(output_dir, pattern="test_{index:03d}.wav") as writer:
-            paths = writer.write(tree)
+            paths = writer.write(audio_tree)
 
         # Check files were created
         assert len(paths) == 3
@@ -70,11 +70,11 @@ def test_resampling():
         output_dir = Path(tmpdir)
 
         # Create AudioTree at 44100 Hz
-        tree = AudioTree.create(np.random.randn(1, 1, 44100), sample_rate=44100)
+        audio_tree = AudioTree.create(np.random.randn(1, 1, 44100), sample_rate=44100)
 
         # Write with resampling to 16000 Hz
         writer = AudioWriter(output_dir, sample_rate=16000)
-        paths = writer.write(tree)
+        paths = writer.write(audio_tree)
 
         # Check output sample rate
         data, sr = soundfile.read(paths[0])
@@ -88,8 +88,8 @@ def test_context_manager():
 
         # Use context manager
         with AudioWriter(output_dir) as writer:
-            tree = AudioTree.create(np.random.randn(1, 1, 8000), sample_rate=8000)
-            writer.write(tree)
+            audio_tree = AudioTree.create(np.random.randn(1, 1, 8000), sample_rate=8000)
+            writer.write(audio_tree)
 
             # Manifest should not exist yet
             manifest_path = output_dir / "manifest.npz"
@@ -105,8 +105,8 @@ def test_manual_save_manifest():
         output_dir = Path(tmpdir)
 
         writer = AudioWriter(output_dir)
-        tree = AudioTree.create(np.random.randn(1, 1, 8000), sample_rate=8000)
-        writer.write(tree)
+        audio_tree = AudioTree.create(np.random.randn(1, 1, 8000), sample_rate=8000)
+        writer.write(audio_tree)
 
         # Manually save manifest
         manifest_path = writer.save_manifest()
@@ -124,8 +124,8 @@ def test_directory_creation():
         writer = AudioWriter(output_dir)
         assert output_dir.exists()  # Should be created
 
-        tree = AudioTree.create(np.random.randn(1, 1, 8000), sample_rate=8000)
-        paths = writer.write(tree)
+        audio_tree = AudioTree.create(np.random.randn(1, 1, 8000), sample_rate=8000)
+        paths = writer.write(audio_tree)
         assert paths[0].exists()
 
 
@@ -135,10 +135,10 @@ def test_mono_audio():
         output_dir = Path(tmpdir)
 
         # Create mono audio
-        tree = AudioTree.create(np.random.randn(1, 1, 16000), sample_rate=16000)
+        audio_tree = AudioTree.create(np.random.randn(1, 1, 16000), sample_rate=16000)
 
         writer = AudioWriter(output_dir)
-        paths = writer.write(tree)
+        paths = writer.write(audio_tree)
 
         # Check output
         data, sr = soundfile.read(paths[0])
@@ -151,10 +151,10 @@ def test_stereo_audio():
         output_dir = Path(tmpdir)
 
         # Create stereo audio
-        tree = AudioTree.create(np.random.randn(1, 2, 16000), sample_rate=16000)
+        audio_tree = AudioTree.create(np.random.randn(1, 2, 16000), sample_rate=16000)
 
         writer = AudioWriter(output_dir)
-        paths = writer.write(tree)
+        paths = writer.write(audio_tree)
 
         # Check output
         data, sr = soundfile.read(paths[0])
@@ -168,7 +168,7 @@ def test_npz_manifest():
 
         # Create AudioTree with metadata
         audio_data = np.random.randn(3, 1, 44100)
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             audio_data,
             sample_rate=44100,
             loudness=np.array([-20.0, -15.0, -18.0]),
@@ -180,7 +180,7 @@ def test_npz_manifest():
 
         # Write with NPZ manifest
         with AudioWriter(output_dir) as writer:
-            writer.write(tree, tags={"dataset": "test", "version": 1})
+            writer.write(audio_tree, tags={"dataset": "test", "version": 1})
 
         # Check manifest file
         manifest_path = output_dir / "manifest.npz"
@@ -216,7 +216,7 @@ def test_npz_manifest_compressed():
         output_dir = Path(tmpdir)
 
         # Create AudioTree
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             np.random.randn(2, 1, 22050),
             sample_rate=22050,
             loudness=np.array([-18.0, -22.0])
@@ -224,7 +224,7 @@ def test_npz_manifest_compressed():
 
         # Write with compressed NPZ manifest
         with AudioWriter(output_dir, compress_manifest=True) as writer:
-            writer.write(tree)
+            writer.write(audio_tree)
 
         # Check NPZ file exists
         manifest_path = output_dir / "manifest.npz"
@@ -242,7 +242,7 @@ def test_npz_manifest_uncompressed():
         output_dir = Path(tmpdir)
 
         # Create AudioTree
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             np.random.randn(2, 1, 22050),
             sample_rate=22050,
             loudness=np.array([-18.0, -22.0])
@@ -250,7 +250,7 @@ def test_npz_manifest_uncompressed():
 
         # Write with uncompressed NPZ manifest
         with AudioWriter(output_dir, compress_manifest=False) as writer:
-            writer.write(tree)
+            writer.write(audio_tree)
 
         # Check NPZ file exists
         manifest_path = output_dir / "manifest.npz"
@@ -267,14 +267,14 @@ def test_npz_manifest_no_timestamp():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             np.random.randn(2, 1, 22050),
             sample_rate=22050
         )
 
         # Write without timestamps
         with AudioWriter(output_dir, include_timestamp=False) as writer:
-            writer.write(tree)
+            writer.write(audio_tree)
 
         # Load manifest
         data = np.load(output_dir / "manifest.npz", allow_pickle=True)
@@ -288,14 +288,14 @@ def test_npz_manifest_with_timestamp():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             np.random.randn(2, 1, 22050),
             sample_rate=22050
         )
 
         # Write with timestamps
         with AudioWriter(output_dir, include_timestamp=True) as writer:
-            writer.write(tree)
+            writer.write(audio_tree)
 
         # Load manifest
         data = np.load(output_dir / "manifest.npz", allow_pickle=True)
@@ -345,7 +345,7 @@ def test_internal_progress_bar():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        tree = AudioTree.create(np.random.randn(3, 1, 8000), 8000)
+        audio_tree = AudioTree.create(np.random.randn(3, 1, 8000), 8000)
 
         # Try to create with internal progress bar
         # This will work if tqdm is installed, otherwise silently continue
@@ -354,7 +354,7 @@ def test_internal_progress_bar():
             show_progress=True,
             progress_desc="Test progress",
         ) as writer:
-            writer.write(tree)
+            writer.write(audio_tree)
 
         # Should have written files regardless of tqdm availability
         assert len(list(output_dir.glob("*.wav"))) == 3
@@ -378,11 +378,11 @@ def test_progress_bar_no_close():
                 self.closed = True
 
         mock_pbar = MockProgressBar()
-        tree = AudioTree.create(np.random.randn(2, 1, 8000), 8000)
+        audio_tree = AudioTree.create(np.random.randn(2, 1, 8000), 8000)
 
         # Write with close_pbar=False (default)
         with AudioWriter(output_dir, pbar=mock_pbar, close_pbar=False) as writer:
-            writer.write(tree)
+            writer.write(audio_tree)
 
         # Progress bar should be updated but not closed
         assert mock_pbar.total_updates == 2
@@ -396,7 +396,7 @@ def test_manifest_datasource_npz():
 
         # Create and write AudioTree with metadata
         audio_data = np.random.randn(3, 2, 16000)
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             audio_data,
             sample_rate=16000,
             loudness=np.array([-20.0, -15.0, -25.0]),
@@ -407,7 +407,7 @@ def test_manifest_datasource_npz():
 
         # Write with NPZ manifest
         with AudioWriter(output_dir) as writer:
-            paths = writer.write(tree, tags={"experiment": "test_npz"})
+            paths = writer.write(audio_tree, tags={"experiment": "test_npz"})
 
         # Read back with ManifestDataSource
         source = ManifestDataSource.from_writer_output(output_dir)
@@ -433,7 +433,7 @@ def test_dtype_preservation():
         output_dir = Path(tmpdir)
 
         # Create test data with specific dtypes
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             np.random.randn(4, 1, 1000).astype(np.float32),
             sample_rate=44100,
             loudness=np.array([-20.0, -18.0, -22.0, -15.0], dtype=np.float32),
@@ -444,7 +444,7 @@ def test_dtype_preservation():
 
         # Write with NPZ manifest
         with AudioWriter(output_dir, compress_manifest=False) as writer:
-            writer.write(tree)
+            writer.write(audio_tree)
 
         # Load the NPZ manifest directly
         manifest_data = np.load(output_dir / "manifest.npz")
@@ -477,13 +477,13 @@ def test_metadata_array_preservation():
         param_dim = 185
 
         # Create AudioTree with metadata containing arrays
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             np.random.randn(batch_size, 2, 1000).astype(np.float32),
             sample_rate=44100,
         )
 
         # Add metadata with arrays
-        tree = tree.replace(metadata={
+        audio_tree = audio_tree.replace(metadata={
             "params": np.random.randn(batch_size, param_dim).astype(np.float32),
             "frame_indices": np.array([10, 20, 30], dtype=np.int32),
             "confidence": np.array([0.9, 0.85, 0.95], dtype=np.float32),
@@ -491,7 +491,7 @@ def test_metadata_array_preservation():
 
         # Write with NPZ manifest
         with AudioWriter(output_dir) as writer:
-            writer.write(tree)
+            writer.write(audio_tree)
 
         # Load the NPZ manifest directly
         manifest_data = np.load(output_dir / "manifest.npz")
@@ -522,7 +522,7 @@ def test_manifest_only_generation():
 
         # Create AudioTree with metadata
         audio_data = np.random.randn(3, 2, 22050)
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             audio_data,
             sample_rate=22050,
             loudness=np.array([-20.0, -18.0, -22.0]),
@@ -533,7 +533,7 @@ def test_manifest_only_generation():
 
         # Write manifest only (no audio files)
         with AudioWriter(output_dir, write_audio=False) as writer:
-            paths = writer.write(tree, tags={"dataset": "test", "version": 1})
+            paths = writer.write(audio_tree, tags={"dataset": "test", "version": 1})
 
         # Check that audio files were NOT created
         for path in paths:
@@ -573,11 +573,11 @@ def test_manifest_only_with_write_audio_true():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        tree = AudioTree.create(np.random.randn(2, 1, 8000), sample_rate=8000)
+        audio_tree = AudioTree.create(np.random.randn(2, 1, 8000), sample_rate=8000)
 
         # Write with audio files (default behavior)
         with AudioWriter(output_dir, write_audio=True) as writer:
-            paths = writer.write(tree)
+            paths = writer.write(audio_tree)
 
         # Check that audio files WERE created
         for path in paths:
@@ -643,7 +643,7 @@ def test_field_validation():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        # First tree has loudness and pitch
+        # First audio_tree has loudness and pitch
         tree1 = AudioTree.create(
             np.random.randn(2, 1, 8000),
             sample_rate=8000,
@@ -651,14 +651,14 @@ def test_field_validation():
             pitch=np.array([60.0, 62.0])
         )
 
-        # Second tree only has loudness (missing pitch)
+        # Second audio_tree only has loudness (missing pitch)
         tree2 = AudioTree.create(
             np.random.randn(2, 1, 8000),
             sample_rate=8000,
             loudness=np.array([-15.0, -22.0])
         )
 
-        # Third tree has loudness, pitch, and velocity (extra field)
+        # Third audio_tree has loudness, pitch, and velocity (extra field)
         tree3 = AudioTree.create(
             np.random.randn(2, 1, 8000),
             sample_rate=8000,
@@ -835,7 +835,7 @@ def test_audiotree_from_manifest_without_audio_files():
         output_dir = Path(tmpdir)
 
         # Create AudioTree
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             np.random.randn(3, 2, 16000),
             sample_rate=16000,
             loudness=np.array([-20.0, -15.0, -25.0]),
@@ -844,7 +844,7 @@ def test_audiotree_from_manifest_without_audio_files():
 
         # Write manifest only
         with AudioWriter(output_dir, write_audio=False) as writer:
-            writer.write(tree)
+            writer.write(audio_tree)
 
         # Load from manifest without audio files
         combined = AudioTree.from_manifest(output_dir / "manifest.npz")
@@ -866,7 +866,7 @@ def test_audiotree_from_manifest_with_filter():
         output_dir = Path(tmpdir)
 
         # Create AudioTree with varying loudness
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             np.random.randn(5, 1, 8000),
             sample_rate=8000,
             loudness=np.array([-30.0, -18.0, -25.0, -15.0, -22.0]),
@@ -874,7 +874,7 @@ def test_audiotree_from_manifest_with_filter():
 
         # Write to manifest
         with AudioWriter(output_dir) as writer:
-            writer.write(tree)
+            writer.write(audio_tree)
 
         # Load only items louder than -20 LUFS
         filtered = AudioTree.from_manifest(
@@ -895,21 +895,21 @@ def test_manifest_datasource_without_audio_files():
 
         # Create AudioTree with metadata
         audio_data = np.random.randn(3, 2, 16000)
-        tree = AudioTree.create(
+        audio_tree = AudioTree.create(
             audio_data,
             sample_rate=16000,
             loudness=np.array([-20.0, -15.0, -25.0]),
             pitch=np.array([60.0, 62.0, 58.0]),
             velocity=np.array([64, 80, 45], dtype=np.int16),
         )
-        tree = tree.replace(metadata={
+        audio_tree = audio_tree.replace(metadata={
             "params": np.random.randn(3, 10).astype(np.float32),
             "frame_id": np.array([100, 200, 300], dtype=np.int32)
         })
 
         # Write manifest only (no audio files)
         with AudioWriter(output_dir, write_audio=False) as writer:
-            writer.write(tree, tags={"experiment": "no_audio"})
+            writer.write(audio_tree, tags={"experiment": "no_audio"})
 
         # Verify no audio files exist
         wav_files = list(output_dir.glob("*.wav"))
@@ -949,6 +949,191 @@ def test_manifest_datasource_without_audio_files():
         assert first_tree.metadata['frame_id'][0] == 100
 
 
+def test_write_empty_audiotree():
+    """Test writing an empty AudioTree (batch_size=0)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        empty_tree = AudioTree.create(
+            np.zeros((0, 2, 44100)),
+            sample_rate=44100,
+            loudness=np.array([])
+        )
+
+        with AudioWriter(output_dir) as writer:
+            paths = writer.write(empty_tree)
+
+        assert len(paths) == 0
+        manifest_path = output_dir / "manifest.npz"
+        assert not manifest_path.exists()
+
+
+def test_write_empty_audiotree_first():
+    """Test writing an empty AudioTree first, then non-empty trees."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        with AudioWriter(output_dir) as writer:
+            empty_tree = AudioTree.create(
+                np.zeros((0, 1, 8000)),
+                sample_rate=8000,
+                loudness=np.array([])
+            )
+            paths1 = writer.write(empty_tree)
+            assert len(paths1) == 0
+
+            nonempty_tree = AudioTree.create(
+                np.random.randn(2, 1, 8000),
+                sample_rate=8000,
+                loudness=np.array([-20.0, -18.0])
+            )
+            paths2 = writer.write(nonempty_tree)
+            assert len(paths2) == 2
+
+        manifest_path = output_dir / "manifest.npz"
+        assert manifest_path.exists()
+
+        data = np.load(manifest_path, allow_pickle=True)
+        assert len(data['index']) == 2
+        assert np.allclose(data['loudness'], [-20.0, -18.0])
+
+
+def test_write_empty_audiotree_after_nonempty():
+    """Test writing non-empty trees first, then an empty audio_tree."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        with AudioWriter(output_dir) as writer:
+            nonempty_tree = AudioTree.create(
+                np.random.randn(2, 1, 8000),
+                sample_rate=8000,
+                loudness=np.array([-20.0, -18.0])
+            )
+            paths1 = writer.write(nonempty_tree)
+            assert len(paths1) == 2
+
+            empty_tree = AudioTree.create(
+                np.zeros((0, 1, 8000)),
+                sample_rate=8000,
+                loudness=np.array([])
+            )
+            paths2 = writer.write(empty_tree)
+            assert len(paths2) == 0
+
+        manifest_path = output_dir / "manifest.npz"
+        assert manifest_path.exists()
+
+        data = np.load(manifest_path, allow_pickle=True)
+        assert len(data['index']) == 2
+        assert np.allclose(data['loudness'], [-20.0, -18.0])
+
+
+def test_write_filtered_empty_audiotree():
+    """Test filtering an AudioTree to empty, then writing the result."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        audio_data = np.random.randn(3, 2, 44100)
+        audio_tree = AudioTree.create(
+            audio_data,
+            sample_rate=44100,
+            loudness=np.array([-20.0, -15.0, -18.0])
+        )
+
+        filtered_tree = audio_tree.filter(lambda x: False)
+
+        assert filtered_tree.audio_data.shape[0] == 0
+        assert filtered_tree.loudness.shape[0] == 0
+
+        with AudioWriter(output_dir) as writer:
+            paths = writer.write(filtered_tree)
+
+        assert len(paths) == 0
+        manifest_path = output_dir / "manifest.npz"
+        assert not manifest_path.exists()
+
+
+def test_write_empty_with_metadata_arrays():
+    """Test writing empty AudioTree with metadata arrays."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        empty_tree = AudioTree.create(
+            np.zeros((0, 2, 44100)),
+            sample_rate=44100,
+            loudness=np.array([])
+        )
+        empty_tree = empty_tree.replace(metadata={
+            "params": np.zeros((0, 10), dtype=np.float32),
+            "frame_id": np.array([], dtype=np.int32)
+        })
+
+        assert empty_tree.audio_data.shape == (0, 2, 44100)
+        assert empty_tree.metadata['params'].shape == (0, 10)
+        assert empty_tree.metadata['frame_id'].shape == (0,)
+
+        with AudioWriter(output_dir) as writer:
+            paths = writer.write(empty_tree)
+
+        assert len(paths) == 0
+        manifest_path = output_dir / "manifest.npz"
+        assert not manifest_path.exists()
+
+
+def test_filter_with_partial_match():
+    """Test filtering AudioTree where some items match."""
+    audio_data = np.random.randn(5, 1, 8000)
+    audio_tree = AudioTree.create(
+        audio_data,
+        sample_rate=8000,
+        loudness=np.array([-30.0, -18.0, -25.0, -15.0, -22.0])
+    )
+    audio_tree = audio_tree.replace(metadata={
+        "params": np.random.randn(5, 10).astype(np.float32)
+    })
+
+    filtered = audio_tree.filter(lambda x: x.loudness[0] > -20.0)
+
+    assert filtered.audio_data.shape[0] == 2
+    assert filtered.loudness.shape[0] == 2
+    assert np.allclose(filtered.loudness, [-18.0, -15.0])
+    assert filtered.metadata['params'].shape == (2, 10)
+
+
+def test_filter_with_no_match():
+    """Test filtering AudioTree where no items match."""
+    audio_data = np.random.randn(3, 1, 8000)
+    audio_tree = AudioTree.create(
+        audio_data,
+        sample_rate=8000,
+        loudness=np.array([-20.0, -18.0, -22.0])
+    )
+    audio_tree = audio_tree.replace(metadata={
+        "params": np.random.randn(3, 10).astype(np.float32)
+    })
+
+    filtered = audio_tree.filter(lambda x: x.loudness[0] > 0.0)
+
+    assert filtered.audio_data.shape[0] == 0
+    assert filtered.loudness.shape[0] == 0
+    assert filtered.metadata['params'].shape == (0, 10)
+
+
+def test_filter_with_all_match():
+    """Test filtering AudioTree where all items match."""
+    audio_data = np.random.randn(3, 1, 8000)
+    audio_tree = AudioTree.create(
+        audio_data,
+        sample_rate=8000,
+        loudness=np.array([-20.0, -18.0, -22.0])
+    )
+
+    filtered = audio_tree.filter(lambda x: x.loudness[0] < 0.0)
+
+    assert filtered.audio_data.shape[0] == 3
+    assert np.allclose(filtered.loudness, [-20.0, -18.0, -22.0])
+
+
 if __name__ == "__main__":
     # Run tests
     test_basic_sequential_writing()
@@ -979,4 +1164,12 @@ if __name__ == "__main__":
     test_audiotree_from_manifest_without_audio_files()
     test_audiotree_from_manifest_with_filter()
     test_manifest_datasource_without_audio_files()
+    test_write_empty_audiotree()
+    test_write_empty_audiotree_first()
+    test_write_empty_audiotree_after_nonempty()
+    test_write_filtered_empty_audiotree()
+    test_write_empty_with_metadata_arrays()
+    test_filter_with_partial_match()
+    test_filter_with_no_match()
+    test_filter_with_all_match()
     print("All tests passed!")

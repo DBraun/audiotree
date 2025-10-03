@@ -721,7 +721,15 @@ class AudioTree:
     def filter(self, filter_fn: Callable) -> Self:
         B = self.audio_data.shape[0]
         audio_trees = self.mini_batch_list(B)
-        audio_trees = filter(filter_fn, audio_trees)
+        audio_trees = list(filter(filter_fn, audio_trees))
+
+        if len(audio_trees) == 0:
+            numpy = np if isinstance(self.audio_data, np.ndarray) else jnp
+            return tree_util.tree_map(
+                lambda x: x[:0] if hasattr(x, 'shape') else x,
+                self
+            )
+
         numpy = np if isinstance(self.audio_data, np.ndarray) else jnp
         audio_trees = tree_util.tree_map(
             lambda *xs: numpy.concatenate(xs, axis=0),

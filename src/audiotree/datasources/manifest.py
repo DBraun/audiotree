@@ -238,7 +238,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                     tree_kwargs[field_name] = entry[field_name]
 
             # Load audio file with all properties
-            tree = AudioTree.from_file(audio_path, **tree_kwargs)
+            audio_tree = AudioTree.from_file(audio_path, **tree_kwargs)
         else:
             # No audio files - create AudioTree from manifest metadata only
             sample_rate = self.sample_rate or entry.get('sample_rate')
@@ -265,9 +265,9 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                         tree_kwargs[field_name] = np.array([value])
 
             # Create AudioTree with zero audio data
-            tree = AudioTree.create(audio_data, **tree_kwargs)
+            audio_tree = AudioTree.create(audio_data, **tree_kwargs)
 
-        return tree
+        return audio_tree
 
     def get_entry(self, index: int) -> Dict:
         """Get the raw manifest entry for a given index.

@@ -39,13 +39,13 @@ class AudioWriter:
         >>> from tqdm import tqdm
         >>> pbar = tqdm(total=100, desc="Processing")
         >>> with AudioWriter("output", pbar=pbar) as writer:
-        ...     for tree in audio_trees:
-        ...         writer.write(tree)
+        ...     for audio_tree in audio_trees:
+        ...         writer.write(audio_tree)
 
         >>> # With internal progress bar
         >>> with AudioWriter("output", show_progress=True) as writer:
-        ...     for tree in audio_trees:
-        ...         writer.write(tree)
+        ...     for audio_tree in audio_trees:
+        ...         writer.write(audio_tree)
     """
 
     def __init__(
@@ -258,8 +258,10 @@ class AudioWriter:
         """Save the manifest file to disk.
 
         Returns:
-            Path to the saved manifest file
+            Path to the saved manifest file, or None if no data to save
         """
+        if not self.manifest_data:
+            return None
 
         manifest_path = self.output_dir / f"manifest.npz"
 

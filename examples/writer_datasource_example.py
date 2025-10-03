@@ -39,7 +39,7 @@ def main():
                 pitch = None
 
             # Create AudioTree with metadata
-            tree = AudioTree.create(
+            audio_tree = AudioTree.create(
                 audio_data=audio.reshape(1, 1, -1),  # Shape: (batch=1, channels=1, samples)
                 sample_rate=44100,
                 pitch=np.array([pitch]) if pitch else None,
@@ -48,8 +48,8 @@ def main():
             )
 
             # Calculate loudness
-            tree = tree.replace_loudness()
-            trees.append(tree)
+            audio_tree = audio_tree.replace_loudness()
+            trees.append(audio_tree)
 
         print(f"  Created {len(trees)} AudioTree objects\n")
 
@@ -60,8 +60,8 @@ def main():
             output_dir,
             pattern="audio_{index:03d}.wav",
         ) as writer:
-            for i, tree in enumerate(trees):
-                paths = writer.write(tree, tags={
+            for i, audio_tree in enumerate(trees):
+                paths = writer.write(audio_tree, tags={
                     "category": "sine" if i < 2 else "noise",
                     "example_id": i
                 })
