@@ -526,7 +526,7 @@ class Batch(BatchOperation):
         super().__post_init__()
         self._display_deprecation_message = False
 
-    def _batch(self, input_records: Sequence[Any]):
+    def _default_batch_fn(self, input_records: Sequence[Any]):
         """Batches records together and copies Numpy arrays to Shared Memory."""
         self._validate_structure(input_records)
 

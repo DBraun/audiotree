@@ -298,8 +298,8 @@ def test_grain_dataloader_with_batch_transform():
         batch_op = Batch(batch_size=4)
 
         # Test that items from ManifestDataSource can be batched
-        batch1 = batch_op._batch(items[0:4])
-        batch2 = batch_op._batch(items[4:8])
+        batch1 = batch_op._default_batch_fn(items[0:4])
+        batch2 = batch_op._default_batch_fn(items[4:8])
 
         # Check first batch
         assert isinstance(batch1, AudioTree)
@@ -371,8 +371,8 @@ def test_manifest_metadata_with_batch_transform():
         batch_transform = Batch(batch_size=4)
 
         # Create batches
-        batch1 = batch_transform._batch(items[0:4])
-        batch2 = batch_transform._batch(items[4:8])
+        batch1 = batch_transform._default_batch_fn(items[0:4])
+        batch2 = batch_transform._default_batch_fn(items[4:8])
 
         # Check batched metadata
         assert "params" in batch1.metadata
@@ -425,11 +425,11 @@ def test_manifest_with_batch_transform():
 
         # Create first batch
         batch1_items = items[0:4]
-        batch1 = batch_transform._batch(batch1_items)
+        batch1 = batch_transform._default_batch_fn(batch1_items)
 
         # Create second batch
         batch2_items = items[4:8]
-        batch2 = batch_transform._batch(batch2_items)
+        batch2 = batch_transform._default_batch_fn(batch2_items)
 
         # Check first batch
         assert isinstance(batch1, AudioTree)
