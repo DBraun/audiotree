@@ -483,7 +483,7 @@ class AudioTree:
 
         if search_function is None:
             search_function = partial(
-                SaliencyParams.search_uniform, attempts=0, max_attempts=1
+                SaliencyParams.search_uniform, attempt=0, max_attempts=1
             )
 
         random_offset = search_function(rng, offset, duration, total_duration)
