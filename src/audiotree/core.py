@@ -19,10 +19,15 @@ class SaliencyParams:
     """
     The parameters for saliency detection.
 
+    When enabled, this controls how audio excerpts are selected from files. If loudness_cutoff is None
+    or enabled is False, a random offset is used without loudness-based filtering.
+
     Args:
-        enabled (bool): Whether to enable saliency detection.
+        enabled (bool): Whether to enable saliency detection. If False, uses a random offset.
         num_tries (int): Maximum number of attempts to find a salient section of audio (default 8).
+            Only used when loudness_cutoff is not None.
         loudness_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
+            If None, uses a random offset without loudness filtering.
         search_function (Union[Callable, str]): The search function for determining the random offset. The default is
             ``SaliencyParams.search_uniform``. Another option is ``SaliencyParams.search_bias_early`` which gradually
             searches earlier in the file as more attempts are made.
@@ -522,7 +527,6 @@ class AudioTree:
         if (
             not saliency_params.enabled
             or saliency_params.loudness_cutoff is None
-            or np.isnan(saliency_params.loudness_cutoff)
         ):
             excerpt = cls.excerpt(audio_path, rng=rng, **kwargs)
         else:
@@ -551,7 +555,8 @@ class AudioTree:
 
         # todo: revisit whether casting to numpy here actually prevents any slowdown with grain.
         excerpt = excerpt.replace(
-            audio_data=np.array(excerpt.audio_data), loudness=np.array(excerpt.loudness)
+            audio_data=np.array(excerpt.audio_data),
+            loudness=np.array(excerpt.loudness) if excerpt.loudness is not None else None
         )
         return excerpt
 

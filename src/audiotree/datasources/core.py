@@ -59,25 +59,38 @@ class AudioDataSourceMixin:
 
     def load_audio(self, file_path, record_key: SupportsIndex) -> AudioTree:
 
-        if self.saliency_params is not None and self.saliency_params.enabled:
-            saliency_params = self.saliency_params
-            return AudioTree.salient_excerpt(
+        saliency_params: SaliencyParams = self.saliency_params
+
+        if saliency_params is not None and saliency_params.enabled:
+            if saliency_params.loudness_cutoff is not None:
+                # Use salient_excerpt with loudness filtering
+                return AudioTree.salient_excerpt(
+                    file_path,
+                    np.random.default_rng(int(record_key)),
+                    saliency_params=saliency_params,
+                    sample_rate=self.sample_rate,
+                    duration=self.duration,
+                    mono=self.mono,
+                )
+            else:
+                # Use excerpt for random offset without loudness filtering
+                return AudioTree.excerpt(
+                    file_path,
+                    rng=np.random.default_rng(int(record_key)),
+                    duration=self.duration,
+                    sample_rate=self.sample_rate,
+                    mono=self.mono,
+                )
+        else:
+            # Load from beginning (deterministic)
+            return AudioTree.from_file(
                 file_path,
-                np.random.default_rng(int(record_key)),
-                saliency_params=saliency_params,
                 sample_rate=self.sample_rate,
+                offset=0,
                 duration=self.duration,
                 mono=self.mono,
+                pad_mode=self.pad_mode,
             )
-
-        return AudioTree.from_file(
-            file_path,
-            sample_rate=self.sample_rate,
-            offset=0,
-            duration=self.duration,
-            mono=self.mono,
-            pad_mode=self.pad_mode,
-        )
 
 
 class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
@@ -92,7 +105,8 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         duration (float): The requested duration of the audio.
         pad_mode (str): The requested padding mode.
         extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
-        saliency_params (SaliencyParams): Saliency parameters to use.
+        saliency_params (SaliencyParams): Saliency parameters to use. Defaults to None, meaning AudioTree.from_file
+            will be used. If not None, either AudioTree.salient_excerpt will be used or AudioTree.excerpt will be used.
     """
 
     def __init__(
