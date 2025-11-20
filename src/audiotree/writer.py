@@ -149,6 +149,7 @@ class AudioWriter:
 
         for i in range(batch_size):
             # Generate filename
+            # todo: need a way to pass more kwargs to this formatter
             filename = self.pattern.format(index=self.index)
             filepath = self.output_dir / filename
 
