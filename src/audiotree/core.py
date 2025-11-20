@@ -177,12 +177,11 @@ class AudioTree:
                 lufs = loudness.integrated_loudness(audio_item, self.sample_rate)
                 loudness_values.append(lufs)
             loudness_array = np.array(loudness_values, dtype=np.float32)
-            return self.replace(loudness=loudness_array)
         else:
             loudness_array = jit_integrated_loudness(
                 jnp.array(self.audio_data), self.sample_rate, zeros=512
             )
-            return self.replace(loudness=loudness_array)
+        return self.replace(loudness=loudness_array)
 
     @staticmethod
     def _encode_string(s: str) -> np.ndarray:
