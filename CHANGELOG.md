@@ -4,6 +4,7 @@
 
 * **Breaking change**: `InvertPhase` and `SwapStereo` now inherit from `BaseRandomTransform` instead of `BaseMapTransform`. Use `.random_map(audio_tree, rng)` instead of `.map(audio_tree)`. These transforms now support the `prob` parameter for probabilistic application.
 * **Breaking change**: Removed `AudioTree.from_array()` method. Use `AudioTree.create()` instead for enhanced functionality.
+* `AudioTree.replace_loudness()` now uses the `loudness` library for numpy arrays and `jaxloudnorm` for JAX arrays, improving performance for numpy-based workflows.
 * Added `AudioTree.create()` classmethod with automatic audio dimensionality handling (1D→3D, 2D→3D) and `filepaths` parameter support.
 * `filepaths` is now a kwarg to `AudioTree.create()` and `AudioTree.from_file()`.
 * The kwarg `pad_mode="constant"` has been added to `AudioTree.from_file(...)`. Other useful choices include `None` (don't pad), and `wrap` (loop audio).

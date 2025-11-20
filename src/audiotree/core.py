@@ -7,6 +7,7 @@ from typing_extensions import Self
 from flax import struct
 from jax import numpy as jnp, tree_util
 import librosa
+import loudness
 import numpy as np
 import soundfile
 
@@ -27,7 +28,7 @@ class SaliencyParams:
         num_tries (int): Maximum number of attempts to find a salient section of audio (default 8).
             Only used when loudness_cutoff is not None.
         loudness_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
-            If None, uses a random offset without loudness filtering.
+            If loudness_cutoff is None but SaliencyParams is enabled, uses a random offset without loudness filtering.
         search_function (Union[Callable, str]): The search function for determining the random offset. The default is
             ``SaliencyParams.search_uniform``. Another option is ``SaliencyParams.search_bias_early`` which gradually
             searches earlier in the file as more attempts are made.
@@ -71,6 +72,7 @@ class SaliencyParams:
         return rng.uniform(lower_bound, upper_bound)
 
 
+# todo: configure when initializing an AudioTree instance?
 _str_max_length = 256
 
 
@@ -168,10 +170,19 @@ class AudioTree:
 
             Will raise ValueError if audio has more than 5 channels.
         """
-        loudness = jit_integrated_loudness(
-            jnp.array(self.audio_data), self.sample_rate, zeros=512
-        )
-        return self.replace(loudness=loudness)
+        if isinstance(self.audio_data, np.ndarray):
+            audio_transposed = np.transpose(self.audio_data, (0, 2, 1)) # [B, T, C]
+            loudness_values = []
+            for audio_item in audio_transposed:
+                lufs = loudness.integrated_loudness(audio_item, self.sample_rate)
+                loudness_values.append(lufs)
+            loudness_array = np.array(loudness_values, dtype=np.float32)
+            return self.replace(loudness=loudness_array)
+        else:
+            loudness_array = jit_integrated_loudness(
+                jnp.array(self.audio_data), self.sample_rate, zeros=512
+            )
+            return self.replace(loudness=loudness_array)
 
     @staticmethod
     def _encode_string(s: str) -> np.ndarray:
@@ -271,6 +282,10 @@ class AudioTree:
         """
         audio_path = Path(audio_path)
 
+        target_length = None
+        if duration is not None and sample_rate is not None:
+            target_length = round(duration * sample_rate)
+
         data, sr = librosa.load(
             str(audio_path), sr=sample_rate, offset=offset, duration=duration, mono=mono
         )
@@ -281,11 +296,11 @@ class AudioTree:
             data = data[None, :, :]  # Add batch dimension
 
         if (
-            duration is not None
+            target_length is not None
             and pad_mode is not None
-            and data.shape[-1] < round(duration * sample_rate)
+            and data.shape[-1] < target_length
         ):
-            pad_right = round(duration * sample_rate) - data.shape[-1]
+            pad_right = target_length - data.shape[-1]
             data = np.pad(
                 data, pad_width=((0, 0), (0, 0), (0, pad_right)), mode=pad_mode
             )
