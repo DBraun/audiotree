@@ -126,15 +126,18 @@ class RescaleAudio(BaseMapTransform):
         return _rescale_audio_transform(audio_tree).replace(loudness=None)
 
 
-class InvertPhase(BaseMapTransform):
+class InvertPhase(BaseRandomTransform):
     """
     Invert the phase of all channels of audio.
 
+    For data augmentation, it's common to use prob=0.5 to apply this transform
+    probabilistically:
+
     .. code-block:: python
 
-        @staticmethod
-        def get_default_config() -> Dict[str, Any]:
-            return {}
+        rng = np.random.default_rng(0)
+        transform = InvertPhase(prob=0.5)
+        audio_tree = transform.random_map(audio_tree, rng=rng)
     """
 
     @staticmethod
@@ -142,18 +145,22 @@ class InvertPhase(BaseMapTransform):
         return {}
 
     @staticmethod
-    def _apply_transform(audio_tree: AudioTree) -> AudioTree:
+    def _apply_transform(audio_tree: AudioTree, rng: jax.Array) -> AudioTree:
         return _invert_phase_audio_transform(audio_tree)
 
 
-class SwapStereo(BaseMapTransform):
-    """Swap the channels of stereo audio.
+class SwapStereo(BaseRandomTransform):
+    """
+    Swap the channels of stereo audio.
+
+    For data augmentation, it's common to use prob=0.5 to apply this transform
+    probabilistically:
 
     .. code-block:: python
 
-        @staticmethod
-        def get_default_config() -> Dict[str, Any]:
-            return {}
+        rng = np.random.default_rng(0)
+        transform = SwapStereo(prob=0.5)
+        audio_tree = transform.random_map(audio_tree, rng=rng)
     """
 
     @staticmethod
@@ -161,7 +168,7 @@ class SwapStereo(BaseMapTransform):
         return {}
 
     @staticmethod
-    def _apply_transform(audio_tree: AudioTree) -> AudioTree:
+    def _apply_transform(audio_tree: AudioTree, rng: jax.Array) -> AudioTree:
         return _swap_stereo_audio_transform(audio_tree)
 
 
