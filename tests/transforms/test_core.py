@@ -306,9 +306,9 @@ def test_transforms():
     VolumeNorm(prob=prob).random_map(audio_tree, rng=rng)
     ShiftPhase(prob=prob).random_map(audio_tree, rng=rng)
     CorruptPhase(prob=prob).random_map(audio_tree, rng=rng)
-    SwapStereo().map(audio_tree)
+    SwapStereo(prob=prob).random_map(audio_tree, rng=rng)
+    InvertPhase(prob=prob).random_map(audio_tree, rng=rng)
     RescaleAudio().map(audio_tree)
-    InvertPhase().map(audio_tree)
     Identity().map(audio_tree)
 
 
