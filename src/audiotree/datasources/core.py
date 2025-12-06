@@ -1,11 +1,12 @@
 import glob
 import math
 import os
+import warnings
 from random import Random
-from typing import AnyStr, List, Mapping, SupportsIndex
+from typing import AnyStr, List, Mapping, Optional, SupportsIndex, Union
 
 from grain._src.python.dataset.transformations.mix import MixedIterDataset
-from grain import python as grain
+import grain
 import numpy as np
 
 from audiotree import AudioTree
@@ -93,7 +94,7 @@ class AudioDataSourceMixin:
             )
 
 
-class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
+class AudioDataSimpleSource(grain.sources.RandomAccessDataSource, AudioDataSourceMixin):
     """A Data Source that aggregates all source files and weights them equally.
 
     Args:
@@ -166,8 +167,12 @@ class AudioDataSimpleSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
         return self.load_audio(file_path, record_key)
 
 
-class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin):
+class AudioDataBalancedSource(grain.sources.RandomAccessDataSource, AudioDataSourceMixin):
     """A Data Source that equally weights multiple sources, where each source is a list of directories.
+
+    .. deprecated::
+        Use :func:`create_balanced_audio_dataset` instead, which uses grain's
+        public MapDataset.mix() API and supports custom weights.
 
     Args:
         sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
@@ -181,13 +186,6 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         saliency_params (SaliencyParams): Saliency parameters to use.
     """
 
-    # todo: make this algorithm work if the user specifies weights for the groups.
-    #  Right now the groups are balanced uniformly.
-    #  Eventually the __init__ should just take a list of ``AudioDataSimpleSource`` and
-    #  the corresponding weights.
-    #  AudioDataBalancedDataset accomplishes this, but since it's an IterDataset it doesn't have all the features
-    #  of a plain RandomAccessDataSource.
-
     def __init__(
         self,
         sources: Mapping[str, List[str]],
@@ -199,6 +197,12 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
         extensions: List[str] = None,
         saliency_params: SaliencyParams = None,
     ):
+        warnings.warn(
+            "AudioDataBalancedSource is deprecated. Use create_balanced_audio_dataset() "
+            "instead, which uses grain's public MapDataset.mix() API and supports custom weights.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         self.sample_rate = sample_rate
         self.mono = bool(mono)
@@ -266,6 +270,11 @@ class AudioDataBalancedSource(grain.RandomAccessDataSource, AudioDataSourceMixin
 class AudioDataBalancedDataset(MixedIterDataset):
     """A Data Source that equally weights multiple sources, where each source is a list of directories.
 
+    .. deprecated::
+        Use :func:`create_balanced_audio_dataset` instead, which uses grain's
+        public MapDataset.mix() API and returns a MapDataset with random access.
+        This class uses internal grain APIs (MixedIterDataset) that may change.
+
     Args:
         sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
             expressions involving a file extension.
@@ -289,6 +298,14 @@ class AudioDataBalancedDataset(MixedIterDataset):
         saliency_params: SaliencyParams = None,
         weights: Mapping[str, float] = None,
     ):
+        warnings.warn(
+            "AudioDataBalancedDataset is deprecated. Use create_balanced_audio_dataset() "
+            "instead, which uses grain's public MapDataset.mix() API and returns a "
+            "MapDataset with random access.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         self.sample_rate = sample_rate
         self.mono = bool(mono)
         self.duration = duration
@@ -325,3 +342,113 @@ class AudioDataBalancedDataset(MixedIterDataset):
             proportions.append(weight * 1000)
 
         super().__init__(datasets, proportions=proportions)
+
+
+def create_balanced_audio_dataset(
+    sources: Mapping[str, List[str]],
+    num_records: int,
+    weights: Optional[Mapping[str, float]] = None,
+    shuffle: bool = True,
+    seed: int = 0,
+    sample_rate: int = 44_100,
+    mono: int = 1,
+    duration: float = 1.0,
+    pad_mode: str = "constant",
+    extensions: Optional[List[str]] = None,
+    saliency_params: Optional[SaliencyParams] = None,
+) -> grain.MapDataset:
+    """Create a balanced MapDataset from multiple audio groups.
+
+    This function creates a grain MapDataset that samples from multiple audio
+    source groups with specified weights. It uses grain's public MapDataset.mix()
+    API for weighted mixing.
+
+    Args:
+        sources: A dictionary mapping group names to lists of directories or
+            glob expressions for audio files.
+        num_records: Total number of records in the resulting dataset.
+        weights: Optional dictionary mapping group names to sampling weights.
+            Weights are normalized to sum to 1.0. Groups not in the dict
+            default to weight 1.0. If None, all groups are weighted equally.
+        shuffle: Whether to shuffle files within each group. Set to False for
+            deterministic iteration (e.g., pre-rendering).
+        seed: Random seed for shuffling. Each group uses seed + group_index
+            for independent shuffling.
+        sample_rate: Target sample rate for audio files.
+        mono: Whether to convert audio to mono (0 or 1).
+        duration: Duration in seconds to load from each file.
+        pad_mode: Padding mode for files shorter than duration.
+        extensions: List of audio file extensions to search for.
+        saliency_params: Optional saliency parameters for excerpt selection.
+
+    Returns:
+        A grain.MapDataset with length num_records that samples from the
+        source groups according to the specified weights.
+
+    Example:
+        >>> # Equal weighting (default)
+        >>> ds = create_balanced_audio_dataset(
+        ...     sources={"speech": ["/data/speech"], "music": ["/data/music"]},
+        ...     num_records=10000,
+        ...     sample_rate=44100,
+        ...     duration=3.0,
+        ... )
+
+        >>> # Custom weights: 70% speech, 30% music
+        >>> ds = create_balanced_audio_dataset(
+        ...     sources={"speech": ["/data/speech"], "music": ["/data/music"]},
+        ...     num_records=10000,
+        ...     weights={"speech": 0.7, "music": 0.3},
+        ...     sample_rate=44100,
+        ...     duration=3.0,
+        ... )
+
+        >>> # For pre-rendering (deterministic, no shuffle)
+        >>> ds = create_balanced_audio_dataset(
+        ...     sources={"speech": ["/data/speech"], "music": ["/data/music"]},
+        ...     num_records=72000,
+        ...     weights={"speech": 0.5, "music": 0.5},
+        ...     shuffle=False,
+        ...     seed=42,
+        ...     sample_rate=44100,
+        ...     duration=3.0,
+        ... )
+    """
+    if extensions is None:
+        extensions = _default_extensions
+
+    datasets = []
+    proportions = []
+    group_names = list(sources.keys())
+
+    for i, group_name in enumerate(group_names):
+        folders = sources[group_name]
+
+        # Create a simple source for this group
+        source = AudioDataSimpleSource(
+            sources={group_name: folders},
+            num_records=None,  # Load all files in group
+            sample_rate=sample_rate,
+            mono=mono,
+            duration=duration,
+            pad_mode=pad_mode,
+            extensions=extensions,
+            saliency_params=saliency_params,
+        )
+
+        # Wrap in MapDataset with optional shuffle and repeat
+        ds = grain.MapDataset.source(source)
+        if shuffle:
+            ds = ds.shuffle(seed=seed + i)
+        ds = ds.repeat()
+        datasets.append(ds)
+
+        # Get weight for this group (default to 1.0)
+        weight = 1.0
+        if weights is not None:
+            weight = weights.get(group_name, 1.0)
+        proportions.append(weight)
+
+    # Mix datasets with weights and slice to num_records
+    mixed = grain.MapDataset.mix(datasets, weights=proportions)
+    return mixed.slice(slice(0, num_records))

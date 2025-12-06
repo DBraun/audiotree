@@ -98,6 +98,9 @@ class AudioTree:
         latents (jnp.ndarray, optional): The latent representations of the audio.
         metadata (dict): Any extra metadata can be placed here.
         filepaths (Union[str, Path, List[Union[str, Path]]] | None): List of filepaths for the batch of audio.
+
+    Note:
+        If new fields are added to this class, update ``_AUDIOTREE_FIELDS`` in ``audiotree/writer.py``.
     """
 
     audio_data: np.ndarray

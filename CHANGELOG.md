@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* New `create_balanced_audio_dataset()` function for weighted mixing of multiple audio groups using grain's public `MapDataset.mix()` API. Supports custom weights, optional shuffling, and returns a `MapDataset` with random access.
+* New `MemmapWriter` class for writing large datasets to memory-mapped binary files with manifest generation.
+* New `MemmapDataSource` for efficient random access to memmap datasets without loading into RAM. Supports train/val/test splits via `split`, `split_ratios`, and `split_seed` parameters.
+* **Deprecated**: `AudioDataBalancedSource` and `AudioDataBalancedDataset`. Use `create_balanced_audio_dataset()` instead.
 * **Breaking change**: `InvertPhase` and `SwapStereo` now inherit from `BaseRandomTransform` instead of `BaseMapTransform`. Use `.random_map(audio_tree, rng)` instead of `.map(audio_tree)`. These transforms now support the `prob` parameter for probabilistic application.
 * **Breaking change**: Removed `AudioTree.from_array()` method. Use `AudioTree.create()` instead for enhanced functionality.
 * `AudioTree.replace_loudness()` now uses the `loudness` library for numpy arrays and `jaxloudnorm` for JAX arrays, improving performance for numpy-based workflows.
