@@ -188,7 +188,7 @@ class AudioTree:
 
     @staticmethod
     def _encode_string(s: str) -> np.ndarray:
-        """Encode a single filepath *s* to an array of ASCII codes.
+        """Encode a single filepath *s* to an array of Unicode code points.
 
         The returned array is shaped ``(1, _str_max_length)`` so that multiple
         rows (filepaths) can be concatenated along *axis=0*.
@@ -196,7 +196,7 @@ class AudioTree:
         s = str(s)
         encoded = [ord(char) for char in s[:_str_max_length]]
         encoded += [0] * (_str_max_length - len(encoded))
-        return np.array([encoded], dtype=np.int16)  # [1, _str_max_length]
+        return np.array([encoded], dtype=np.int32)  # [1, _str_max_length]
 
     @classmethod
     def _encode_filepaths(
