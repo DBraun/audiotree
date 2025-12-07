@@ -451,6 +451,12 @@ def create_balanced_audio_dataset(
             weight = weights.get(group_name, 1.0)
         proportions.append(weight)
 
-    # Mix datasets with weights and slice to num_records
+    # Mix datasets with weights, shuffle to break alternating pattern, then slice
+    # The shuffle after mix is critical: without it, mix() produces a strict
+    # alternating pattern (A, B, A, B, ...) which causes problems with striped
+    # worker sharding in DataLoader (even-numbered workers see only source A,
+    # odd-numbered workers see only source B).
     mixed = grain.MapDataset.mix(datasets, weights=proportions)
+    if shuffle:
+        mixed = mixed.shuffle(seed=seed)
     return mixed.slice(slice(0, num_records))
