@@ -72,6 +72,7 @@ class AudioDataSourceMixin:
                     sample_rate=self.sample_rate,
                     duration=self.duration,
                     mono=self.mono,
+                    pad_mode=self.pad_mode,
                 )
             else:
                 # Use excerpt for random offset without loudness filtering
@@ -81,6 +82,7 @@ class AudioDataSourceMixin:
                     duration=self.duration,
                     sample_rate=self.sample_rate,
                     mono=self.mono,
+                    pad_mode=self.pad_mode,
                 )
         else:
             # Load from beginning (deterministic)
