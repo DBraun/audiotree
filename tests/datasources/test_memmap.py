@@ -486,3 +486,111 @@ def test_get_slice_not_supported_with_split():
 
         with pytest.raises(NotImplementedError, match="not supported when using splits"):
             source.get_slice(0, 5)
+
+
+# === load_into_memory tests ===
+
+
+def test_load_into_memory_basic():
+    """Test basic loading with load_into_memory=True."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir, audio_data, params_data, labels = _create_test_dataset(tmpdir)
+
+        source = MemmapDataSource(
+            output_dir / "manifest.json",
+            load_into_memory=True,
+        )
+
+        assert len(source) == 10
+
+        sample = source[0]
+        assert "audio" in sample
+        assert "params" in sample
+        assert "label" in sample
+
+        # Check shapes (batch dimension added)
+        assert sample["audio"].shape == (1, 2, 100)
+        assert sample["params"].shape == (1, 5)
+        assert sample["label"].shape == (1,)
+
+
+def test_load_into_memory_data_matches_memmap():
+    """Test that in-memory data matches memmap data exactly."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir, audio_data, params_data, labels = _create_test_dataset(tmpdir)
+
+        memmap_source = MemmapDataSource(output_dir / "manifest.json")
+        memory_source = MemmapDataSource(
+            output_dir / "manifest.json",
+            load_into_memory=True,
+        )
+
+        for i in range(10):
+            memmap_sample = memmap_source[i]
+            memory_sample = memory_source[i]
+
+            np.testing.assert_array_equal(
+                memmap_sample["audio"], memory_sample["audio"]
+            )
+            np.testing.assert_array_equal(
+                memmap_sample["params"], memory_sample["params"]
+            )
+            np.testing.assert_array_equal(
+                memmap_sample["label"], memory_sample["label"]
+            )
+
+
+def test_load_into_memory_get_slice():
+    """Test get_slice with load_into_memory=True."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir, audio_data, params_data, labels = _create_test_dataset(tmpdir)
+
+        source = MemmapDataSource(
+            output_dir / "manifest.json",
+            load_into_memory=True,
+        )
+
+        batch = source.get_slice(2, 5)
+        assert batch["audio"].shape == (3, 2, 100)
+        assert batch["params"].shape == (3, 5)
+        assert batch["label"].shape == (3,)
+
+        np.testing.assert_array_almost_equal(batch["audio"], audio_data[2:5], decimal=5)
+
+
+def test_load_into_memory_with_split():
+    """Test load_into_memory combined with splits."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir, _, _, _ = _create_test_dataset(tmpdir, num_samples=100)
+
+        train_memmap = MemmapDataSource(
+            output_dir / "manifest.json",
+            split="train",
+            split_ratios=(0.8, 0.1, 0.1),
+        )
+        train_memory = MemmapDataSource(
+            output_dir / "manifest.json",
+            split="train",
+            split_ratios=(0.8, 0.1, 0.1),
+            load_into_memory=True,
+        )
+
+        assert len(train_memmap) == len(train_memory) == 80
+
+        # Data should match
+        for i in range(len(train_memmap)):
+            np.testing.assert_array_equal(
+                train_memmap[i]["label"], train_memory[i]["label"]
+            )
+
+
+def test_load_into_memory_from_directory():
+    """Test load_into_memory with from_directory constructor."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir, _, _, _ = _create_test_dataset(tmpdir)
+
+        source = MemmapDataSource.from_directory(output_dir, load_into_memory=True)
+        assert len(source) == 10
+
+        sample = source[0]
+        assert "audio" in sample

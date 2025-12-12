@@ -23,6 +23,8 @@ class MemmapDataSource(RandomAccessDataSource):
         split: Which split to use ("train", "val", "test", or None for all data)
         split_ratios: Tuple of (train, val, test) ratios, must sum to 1.0
         split_seed: Random seed for reproducible split assignment
+        load_into_memory: If True, load entire dataset into RAM at init time.
+            Faster access but uses more memory. Default False.
 
     Example:
         >>> source = MemmapDataSource("peace_prerendered/manifest.json")
@@ -63,6 +65,7 @@ class MemmapDataSource(RandomAccessDataSource):
         split: Optional[Literal["train", "val", "test"]] = None,
         split_ratios: Tuple[float, float, float] = (0.8, 0.1, 0.1),
         split_seed: int = 42,
+        load_into_memory: bool = False,
     ):
         self.manifest_path = Path(manifest_path)
         self.data_dir = self.manifest_path.parent
@@ -140,6 +143,20 @@ class MemmapDataSource(RandomAccessDataSource):
                 with open(json_path) as f:
                     self._string_data[name] = json.load(f)
 
+        # Optionally load all data into memory for faster access
+        self._load_into_memory = load_into_memory
+        self._in_memory_data = {}
+        if load_into_memory:
+            for name, info in self._field_info.items():
+                mm = np.memmap(
+                    info["filepath"],
+                    dtype=info["dtype"],
+                    mode="r",
+                    shape=info["shape"],
+                )
+                self._in_memory_data[name] = np.array(mm)
+                del mm
+
     def __len__(self) -> int:
         """Return the number of records in the dataset."""
         return self._num_samples
@@ -168,17 +185,22 @@ class MemmapDataSource(RandomAccessDataSource):
 
         sample = {}
 
-        for name, info in self._field_info.items():
-            # Recreate memmap to avoid memory leak
-            mm = np.memmap(
-                info["filepath"],
-                dtype=info["dtype"],
-                mode="r",
-                shape=info["shape"],
-            )
-            # Copy data to regular ndarray and add batch dimension
-            sample[name] = np.array(mm[actual_idx])[np.newaxis, ...]
-            del mm
+        if self._load_into_memory:
+            # Use preloaded in-memory data
+            for name in self._field_info:
+                sample[name] = self._in_memory_data[name][actual_idx][np.newaxis, ...]
+        else:
+            # Recreate memmap on each access to avoid memory leak
+            for name, info in self._field_info.items():
+                mm = np.memmap(
+                    info["filepath"],
+                    dtype=info["dtype"],
+                    mode="r",
+                    shape=info["shape"],
+                )
+                # Copy data to regular ndarray and add batch dimension
+                sample[name] = np.array(mm[actual_idx])[np.newaxis, ...]
+                del mm
 
         # Add string data
         for name, str_list in self._string_data.items():
@@ -234,15 +256,18 @@ class MemmapDataSource(RandomAccessDataSource):
             if name not in self._field_info:
                 raise ValueError(f"Unknown field: {name}")
 
-            info = self._field_info[name]
-            mm = np.memmap(
-                info["filepath"],
-                dtype=info["dtype"],
-                mode="r",
-                shape=info["shape"],
-            )
-            sample[name] = np.array(mm[start:end])
-            del mm
+            if self._load_into_memory:
+                sample[name] = self._in_memory_data[name][start:end]
+            else:
+                info = self._field_info[name]
+                mm = np.memmap(
+                    info["filepath"],
+                    dtype=info["dtype"],
+                    mode="r",
+                    shape=info["shape"],
+                )
+                sample[name] = np.array(mm[start:end])
+                del mm
 
         # Add string data slice
         for name, str_list in self._string_data.items():
