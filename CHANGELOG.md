@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* New `AudioTree.source` property that returns the source group name for each item in the batch. When using `AudioDataSimpleSource` or `AudioDataBalancedSource` with `sources={"music": [...], "speech": [...]}`, each loaded AudioTree now tracks which source group it came from.
 * New `create_balanced_audio_dataset()` function for weighted mixing of multiple audio groups using grain's public `MapDataset.mix()` API. Supports custom weights, optional shuffling, and returns a `MapDataset` with random access.
 * New `MemmapWriter` class for writing large datasets to memory-mapped binary files with manifest generation.
 * New `MemmapDataSource` for efficient random access to memmap datasets without loading into RAM. Supports train/val/test splits via `split`, `split_ratios`, and `split_seed` parameters. Use `load_into_memory=True` to load the entire dataset into RAM for faster access.

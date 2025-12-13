@@ -217,6 +217,59 @@ class TestCreateBalancedAudioDataset:
             item = ds[0]
             assert isinstance(item, AudioTree)
 
+    def test_source_property(self):
+        """Test that AudioTree items have the source property set correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            group1_dir = _create_test_audio_files(tmpdir, "music", 5)
+            group2_dir = _create_test_audio_files(tmpdir, "speech", 5)
+
+            ds = create_balanced_audio_dataset(
+                sources={"music": [group1_dir], "speech": [group2_dir]},
+                num_records=20,
+                shuffle=False,
+                sample_rate=44100,
+                duration=0.5,
+            )
+
+            # Check that each item has a source property
+            sources_found = set()
+            for i in range(len(ds)):
+                item = ds[i]
+                source = item.source
+                assert len(source) == 1, "Each item should have exactly one source"
+                assert source[0] in ["music", "speech"], f"Source should be 'music' or 'speech', got {source[0]}"
+                sources_found.add(source[0])
+
+            # Both sources should be represented
+            assert sources_found == {"music", "speech"}, "Both source groups should be present"
+
+    def test_source_property_batched(self):
+        """Test that source property works correctly after batching with Batch transform."""
+        from audiotree.transforms import Batch
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            group1_dir = _create_test_audio_files(tmpdir, "music", 5)
+            group2_dir = _create_test_audio_files(tmpdir, "speech", 5)
+
+            ds = create_balanced_audio_dataset(
+                sources={"music": [group1_dir], "speech": [group2_dir]},
+                num_records=20,
+                shuffle=False,
+                sample_rate=44100,
+                duration=0.5,
+            )
+
+            # Use AudioTree's Batch transform (concatenates properly)
+            batch_transform = Batch(batch_size=4)
+            items = [ds[i] for i in range(4)]
+            batch = batch_transform._default_batch_fn(items)
+
+            # Check source property
+            sources = batch.source
+            assert len(sources) == 4, f"Batch should have 4 sources, got {len(sources)}"
+            for src in sources:
+                assert src in ["music", "speech"], f"Source should be 'music' or 'speech', got {src}"
+
 
 class TestDeprecationWarnings:
     """Test that deprecated classes emit warnings."""

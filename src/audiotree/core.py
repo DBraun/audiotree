@@ -236,6 +236,22 @@ class AudioTree:
             return []
         return [self._decode_string(data) for data in self.metadata["filepath"]]
 
+    @property
+    def source(self) -> List[str]:
+        """Return the decoded source names stored in ``metadata['source']``.
+
+        Source names indicate which data source group each item in the batch came from.
+        For example, if an AudioDataSimpleSource was created with
+        ``sources={"music": [...], "speech": [...]}``, this property might return
+        ``["music", "music", "speech", "music"]`` for a batch of 4 items.
+
+        An empty list is returned if the AudioTree does not contain any source
+        metadata.
+        """
+        if "source" not in self.metadata:
+            return []
+        return [self._decode_string(data) for data in self.metadata["source"]]
+
     @classmethod
     def from_file(
         cls,
@@ -246,6 +262,7 @@ class AudioTree:
         mono: bool = False,
         pad_mode: Literal["constant"] | None = "constant",
         filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
+        source: str | None = None,
         metadata: Optional[Dict[str, Any]] = None,
         # AudioTree properties
         loudness: Optional[np.ndarray] = None,
@@ -270,6 +287,8 @@ class AudioTree:
                 ``None`` results in no padding. Another useful choice is "wrap" to loop the audio.
             filepaths (Union[str, Path, List[str | Path]], optional): One or more filepaths to store in the returned
                 ``AudioTree``'s metadata. If *None* (default) the provided ``audio_path`` will be used.
+            source (str, optional): The source group name for this audio file (e.g., "music", "speech").
+                This is stored in metadata and accessible via the ``source`` property.
             metadata (dict, optional): Additional metadata to include in the AudioTree. This metadata is merged with
                 automatically generated fields (offset, note_duration, filepath).
             loudness (np.ndarray, optional): Loudness values to assign to the AudioTree.
@@ -326,6 +345,9 @@ class AudioTree:
                 filepaths_to_store = list(filepaths)
 
         combined_metadata["filepath"] = cls._encode_filepaths(filepaths_to_store)
+
+        if source is not None:
+            combined_metadata["source"] = cls._encode_filepaths([source])
 
         # Wrap scalar properties in arrays with batch dimension
         # This ensures consistency - all AudioTree properties should have batch dimension

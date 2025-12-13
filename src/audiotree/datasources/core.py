@@ -58,8 +58,19 @@ def _find_files_with_extensions(
 
 class AudioDataSourceMixin:
 
-    def load_audio(self, file_path, record_key: SupportsIndex) -> AudioTree:
+    def load_audio(
+        self, file_path, record_key: SupportsIndex, source: str = None
+    ) -> AudioTree:
+        """Load audio from a file path.
 
+        Args:
+            file_path: Path to the audio file.
+            record_key: Index used for seeding random number generator.
+            source: Optional source group name (e.g., "music", "speech") to store in metadata.
+
+        Returns:
+            AudioTree with the loaded audio data.
+        """
         saliency_params: SaliencyParams = self.saliency_params
 
         if saliency_params is not None and saliency_params.enabled:
@@ -73,6 +84,7 @@ class AudioDataSourceMixin:
                     duration=self.duration,
                     mono=self.mono,
                     pad_mode=self.pad_mode,
+                    source=source,
                 )
             else:
                 # Use excerpt for random offset without loudness filtering
@@ -83,6 +95,7 @@ class AudioDataSourceMixin:
                     sample_rate=self.sample_rate,
                     mono=self.mono,
                     pad_mode=self.pad_mode,
+                    source=source,
                 )
         else:
             # Load from beginning (deterministic)
@@ -93,6 +106,7 @@ class AudioDataSourceMixin:
                 duration=self.duration,
                 mono=self.mono,
                 pad_mode=self.pad_mode,
+                source=source,
             )
 
 
@@ -133,6 +147,7 @@ class AudioDataSimpleSource(grain.sources.RandomAccessDataSource, AudioDataSourc
         self.saliency_params = saliency_params
 
         filepaths = []
+        source_names = []
         for group_name, folders in sources.items():
             filepaths_in_group = []
             for _folder in folders:
@@ -146,6 +161,7 @@ class AudioDataSimpleSource(grain.sources.RandomAccessDataSource, AudioDataSourc
 
             if filepaths_in_group:
                 filepaths += filepaths_in_group
+                source_names += [group_name] * len(filepaths_in_group)
             else:
                 raise RuntimeError(
                     f"Group '{group_name}' is empty. "
@@ -155,8 +171,10 @@ class AudioDataSimpleSource(grain.sources.RandomAccessDataSource, AudioDataSourc
 
         if num_records is not None:
             filepaths = filepaths[:num_records]
+            source_names = source_names[:num_records]
 
         self.filepaths = filepaths
+        self.source_names = source_names
 
         self._length = len(filepaths)
         assert self._length > 0
@@ -166,7 +184,8 @@ class AudioDataSimpleSource(grain.sources.RandomAccessDataSource, AudioDataSourc
 
     def __getitem__(self, record_key: SupportsIndex):
         file_path = self.filepaths[record_key]
-        return self.load_audio(file_path, record_key)
+        source_name = self.source_names[record_key]
+        return self.load_audio(file_path, record_key, source=source_name)
 
 
 class AudioDataBalancedSource(grain.sources.RandomAccessDataSource, AudioDataSourceMixin):
@@ -215,6 +234,7 @@ class AudioDataBalancedSource(grain.sources.RandomAccessDataSource, AudioDataSou
         self.saliency_params = saliency_params
 
         groups = []
+        group_names = []
 
         for group_name, folders in sources.items():
             filepaths = []
@@ -229,6 +249,7 @@ class AudioDataBalancedSource(grain.sources.RandomAccessDataSource, AudioDataSou
 
             if filepaths:
                 groups.append(filepaths)
+                group_names.append(group_name)
             else:
                 raise RuntimeError(
                     f"Group '{group_name}' is empty. "
@@ -237,6 +258,7 @@ class AudioDataBalancedSource(grain.sources.RandomAccessDataSource, AudioDataSou
                 )
 
         self._num_groups = len(groups)
+        self._group_names = group_names
         self._length = num_records
 
         ideal_group_length = math.ceil(num_records / self._num_groups)
@@ -265,8 +287,9 @@ class AudioDataBalancedSource(grain.sources.RandomAccessDataSource, AudioDataSou
         idx = record_key // self._num_groups
 
         file_path = self._groups[group_idx][idx]
+        source_name = self._group_names[group_idx]
 
-        return self.load_audio(file_path, record_key)
+        return self.load_audio(file_path, record_key, source=source_name)
 
 
 class AudioDataBalancedDataset(MixedIterDataset):
