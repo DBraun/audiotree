@@ -8,6 +8,26 @@ import json
 
 import numpy as np
 
+# Avoid circular import: import AudioTree utilities lazily
+HAS_AUDIOTREE = False
+AudioTree = None
+AudioTreeFieldExtractor = None
+
+def _ensure_audiotree_imported():
+    """Lazy import to avoid circular dependency."""
+    global HAS_AUDIOTREE, AudioTree, AudioTreeFieldExtractor
+    if HAS_AUDIOTREE or AudioTree is not None:
+        return True
+    try:
+        from audiotree.core import AudioTree as _AudioTree
+        from audiotree.audiotree_utils import AudioTreeFieldExtractor as _Extractor
+        AudioTree = _AudioTree
+        AudioTreeFieldExtractor = _Extractor
+        HAS_AUDIOTREE = True
+        return True
+    except ImportError:
+        return False
+
 
 @dataclass
 class FieldSpec:
@@ -66,23 +86,28 @@ class MemmapWriter:
     def __init__(
         self,
         output_dir: Union[str, Path],
-        field_specs: List[FieldSpec],
-        expected_samples: int,
+        field_specs: Optional[List[FieldSpec]] = None,
+        expected_samples: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
         pbar: Optional[Any] = None,
         close_pbar: bool = False,
+        infer_schema: bool = True,
     ):
         self.output_dir = Path(output_dir)
-        self.field_specs = {spec.name: spec for spec in field_specs}
+        self.field_specs = {spec.name: spec for spec in field_specs} if field_specs else None
         self.expected_samples = expected_samples
         self.metadata = metadata or {}
         self.pbar = pbar
         self.close_pbar = close_pbar
+        # If field_specs are provided, don't infer schema
+        self.infer_schema = infer_schema if field_specs is None else False
 
         self._current_index = 0
         self._memmaps: Dict[str, np.memmap] = {}
         self._string_buffers: Dict[str, List[str]] = {}
         self._is_open = False
+        self._schema_inferred = False
+        self._audiotree_fields: Dict[str, bool] = {}
 
     def _create_memmaps(self):
         """Create memory-mapped files for all fields."""
@@ -99,6 +124,67 @@ class MemmapWriter:
                 shape=full_shape,
             )
 
+    def _infer_schema_from_batch(self, data: Dict):
+        """Infer schema from first batch.
+
+        Args:
+            data: First batch dict (may contain AudioTree objects)
+        """
+        _ensure_audiotree_imported()
+
+        if not HAS_AUDIOTREE:
+            raise RuntimeError("AudioTree not available but infer_schema=True with AudioTree data")
+
+        extracted = {}
+
+        # Extract AudioTree objects and track which keys are AudioTrees
+        for key, value in data.items():
+            if AudioTree is not None and isinstance(value, AudioTree):
+                self._audiotree_fields[key] = True
+                tree_fields = AudioTreeFieldExtractor.extract_fields(value, prefix=f"{key}_")
+                extracted.update(tree_fields)
+            elif isinstance(value, np.ndarray):
+                extracted[key] = value
+            # Strings are handled separately, skip for now
+
+        # Infer FieldSpec from extracted fields
+        field_specs_list = AudioTreeFieldExtractor.infer_field_specs(extracted)
+        self.field_specs = {spec.name: spec for spec in field_specs_list}
+
+        # Infer expected_samples from batch size if not provided
+        if self.expected_samples is None:
+            batch_size = next(iter(extracted.values())).shape[0]
+            raise ValueError(
+                "expected_samples must be provided when infer_schema=True. "
+                f"First batch has {batch_size} samples."
+            )
+
+        self._schema_inferred = True
+
+    def _extract_batch_arrays(self, data: Dict) -> Dict[str, np.ndarray]:
+        """Extract numpy arrays from batch, decomposing AudioTree objects.
+
+        Args:
+            data: Batch dict (may contain AudioTree objects and numpy arrays)
+
+        Returns:
+            Flat dict with only numpy arrays
+        """
+        _ensure_audiotree_imported()
+
+        extracted = {}
+
+        for key, value in data.items():
+            if AudioTree is not None and isinstance(value, AudioTree):
+                # Decompose AudioTree to flat fields
+                tree_fields = AudioTreeFieldExtractor.extract_fields(value, prefix=f"{key}_")
+                extracted.update(tree_fields)
+            elif isinstance(value, np.ndarray):
+                extracted[key] = value
+            # Skip non-array types (will be in strings dict)
+
+        return extracted
+
     def open(self) -> "MemmapWriter":
         """Open the writer and create memmap files.
 
@@ -107,19 +193,24 @@ class MemmapWriter:
         """
         if self._is_open:
             raise RuntimeError("Writer is already open")
-        self._create_memmaps()
+
+        # Only create memmaps if schema is already known
+        # If inferring, memmaps will be created on first write
+        if self.field_specs is not None:
+            self._create_memmaps()
+
         self._is_open = True
         return self
 
     def write_batch(
         self,
-        data: Dict[str, np.ndarray],
+        data: Dict[str, Union[np.ndarray, "AudioTree"]],
         strings: Optional[Dict[str, List[str]]] = None,
     ) -> int:
         """Write a batch of data to the memmap files.
 
         Args:
-            data: Dict mapping field names to numpy arrays with batch dimension
+            data: Dict mapping field names to numpy arrays or AudioTree objects
             strings: Optional dict mapping string field names to lists of strings
 
         Returns:
@@ -132,9 +223,21 @@ class MemmapWriter:
         if not self._is_open:
             raise RuntimeError("Writer is not open. Call open() first.")
 
+        # Infer schema on first write if needed
+        if self.infer_schema and not self._schema_inferred:
+            self._infer_schema_from_batch(data)
+            self._create_memmaps()  # Create memmaps after inferring schema
+
+        # Extract numpy arrays from AudioTree objects (only if inferring schema)
+        if self.infer_schema or self._audiotree_fields:
+            extracted_data = self._extract_batch_arrays(data)
+        else:
+            # Use data as-is (backward compatible with explicit field_specs)
+            extracted_data = data
+
         # Validate and write each field
         batch_size = None
-        for name, arr in data.items():
+        for name, arr in extracted_data.items():
             if name not in self._memmaps:
                 raise ValueError(f"Unknown field: {name}. Expected one of: {list(self._memmaps.keys())}")
 
@@ -245,6 +348,10 @@ class MemmapWriter:
             "fields": {},
             "string_fields": {},
         }
+
+        # Store AudioTree reconstruction info if any AudioTree objects were written
+        if self._audiotree_fields:
+            manifest["audiotree_fields"] = self._audiotree_fields
 
         for name, spec in self.field_specs.items():
             full_shape = (self._current_index,) + spec.shape_per_sample

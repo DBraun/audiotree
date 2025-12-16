@@ -7,6 +7,26 @@ from typing import Callable, Dict, List, Literal, Optional, SupportsIndex, Tuple
 import numpy as np
 from grain.sources import RandomAccessDataSource
 
+# Avoid circular import: import AudioTree utilities lazily
+HAS_AUDIOTREE = False
+AudioTree = None
+AudioTreeFieldExtractor = None
+
+def _ensure_audiotree_imported():
+    """Lazy import to avoid circular dependency."""
+    global HAS_AUDIOTREE, AudioTree, AudioTreeFieldExtractor
+    if HAS_AUDIOTREE or AudioTree is not None:
+        return True
+    try:
+        from audiotree.core import AudioTree as _AudioTree
+        from audiotree.audiotree_utils import AudioTreeFieldExtractor as _Extractor
+        AudioTree = _AudioTree
+        AudioTreeFieldExtractor = _Extractor
+        HAS_AUDIOTREE = True
+        return True
+    except ImportError:
+        return False
+
 
 class MemmapDataSource(RandomAccessDataSource):
     """A DataSource that reads from memory-mapped files created by MemmapWriter.
@@ -25,34 +45,48 @@ class MemmapDataSource(RandomAccessDataSource):
         split_seed: Random seed for reproducible split assignment
         load_into_memory: If True, load entire dataset into RAM at init time.
             Faster access but uses more memory. Default False.
+        reconstruct_audiotree: If True, automatically reconstruct AudioTree objects
+            from flat fields based on manifest metadata. Fields with matching prefixes
+            are grouped and assembled into AudioTree objects. Default True.
 
     Example:
-        >>> source = MemmapDataSource("peace_prerendered/manifest.json")
+        >>> # With AudioTree reconstruction (default)
+        >>> source = MemmapDataSource("dataset/manifest.json")
         >>> sample = source[0]
-        >>> print(sample["dry_audio"].shape)  # (1, 2, 132300) - includes batch dim
+        >>> print(type(sample["audio"]))  # <class 'AudioTree'>
+        >>> print(sample["audio"].audio_data.shape)  # (1, 2, 48000)
+        >>> print(sample["audio"].metadata.keys())  # dict_keys(['feature'])
+
+        >>> # Without AudioTree reconstruction (raw arrays)
+        >>> source = MemmapDataSource(
+        ...     "dataset/manifest.json",
+        ...     reconstruct_audiotree=False
+        ... )
+        >>> sample = source[0]
+        >>> print(sample["audio_audio_data"].shape)  # (1, 2, 48000) - flat fields
 
         >>> # With train/val/test split
         >>> train_source = MemmapDataSource(
-        ...     "peace_prerendered/manifest.json",
+        ...     "dataset/manifest.json",
         ...     split="train",
         ...     split_ratios=(0.8, 0.1, 0.1),
         ... )
         >>> val_source = MemmapDataSource(
-        ...     "peace_prerendered/manifest.json",
+        ...     "dataset/manifest.json",
         ...     split="val",
         ...     split_ratios=(0.8, 0.1, 0.1),
         ... )
 
-        >>> # With field filtering
+        >>> # With field filtering (load only specific fields)
         >>> source = MemmapDataSource(
-        ...     "peace_prerendered/manifest.json",
-        ...     fields=["wet_audio", "params"]
+        ...     "dataset/manifest.json",
+        ...     fields=["audio_audio_data", "labels"]
         ... )
 
         >>> # With transform
         >>> source = MemmapDataSource(
-        ...     "peace_prerendered/manifest.json",
-        ...     transform_fn=lambda x: {**x, "volume_scaled": x["audio"] * 0.5}
+        ...     "dataset/manifest.json",
+        ...     transform_fn=lambda x: {**x, "volume_scaled": x["audio"].audio_data * 0.5}
         ... )
     """
 
@@ -66,14 +100,20 @@ class MemmapDataSource(RandomAccessDataSource):
         split_ratios: Tuple[float, float, float] = (0.8, 0.1, 0.1),
         split_seed: int = 42,
         load_into_memory: bool = False,
+        reconstruct_audiotree: bool = True,
     ):
         self.manifest_path = Path(manifest_path)
         self.data_dir = self.manifest_path.parent
         self.transform_fn = transform_fn
+        self.reconstruct_audiotree = reconstruct_audiotree
 
         # Load manifest
         with open(self.manifest_path) as f:
             self.manifest = json.load(f)
+
+        # Load AudioTree metadata from manifest
+        self._audiotree_fields = self.manifest.get("audiotree_fields", {})
+        self._sample_rate = self.manifest.get("sample_rate", 48000)
 
         total_samples = self.manifest["num_samples"]
 
@@ -207,11 +247,53 @@ class MemmapDataSource(RandomAccessDataSource):
             if actual_idx < len(str_list):
                 sample[name] = str_list[actual_idx]
 
+        # Reconstruct AudioTree objects if requested
+        if self.reconstruct_audiotree and self._audiotree_fields:
+            sample = self._reconstruct_audiotrees(sample)
+
         # Apply transform if provided
         if self.transform_fn is not None:
             sample = self.transform_fn(sample)
 
         return sample
+
+    def _reconstruct_audiotrees(self, raw_sample: Dict) -> Dict:
+        """Reconstruct AudioTree objects from flat fields.
+
+        Args:
+            raw_sample: Dict with flat fields (AudioTree fields prefixed)
+
+        Returns:
+            Dict with AudioTree objects reconstructed and non-AudioTree fields preserved
+        """
+        _ensure_audiotree_imported()
+
+        if not HAS_AUDIOTREE:
+            return raw_sample
+
+        output = {}
+
+        # Reconstruct each AudioTree
+        for tree_name in self._audiotree_fields:
+            reconstructed = AudioTreeFieldExtractor.reconstruct_audiotree(
+                raw_sample,
+                tree_name,
+                self._sample_rate
+            )
+            output[tree_name] = reconstructed
+
+        # Add non-AudioTree fields (remove batch dimension)
+        for field_name, value in raw_sample.items():
+            # Skip if this field belongs to an AudioTree
+            if any(field_name.startswith(f"{tree}_") for tree in self._audiotree_fields):
+                continue
+            # Remove batch dimension for consistency
+            if isinstance(value, np.ndarray):
+                output[field_name] = value[0]
+            else:
+                output[field_name] = value
+
+        return output
 
     def get_slice(
         self,
