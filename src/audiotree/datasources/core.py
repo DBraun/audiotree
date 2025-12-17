@@ -153,11 +153,24 @@ class AudioDataSimpleSource(grain.sources.RandomAccessDataSource, AudioDataSourc
             for _folder in folders:
                 folder = os.path.expandvars(os.path.expanduser(_folder))
                 if os.path.isdir(folder):
-                    filepaths_in_group += _find_files_with_extensions(
+                    found_files = _find_files_with_extensions(
                         folder, extensions=extensions
                     )
+                    if not found_files:
+                        warnings.warn(
+                            f"No files found in directory '{folder}' for group '{group_name}' "
+                            f"with extensions {extensions}",
+                            UserWarning
+                        )
+                    filepaths_in_group += found_files
                 else:
-                    filepaths_in_group += list(glob.glob(folder, recursive=True))
+                    found_files = list(glob.glob(folder, recursive=True))
+                    if not found_files:
+                        warnings.warn(
+                            f"Glob pattern '{folder}' matched no files for group '{group_name}'",
+                            UserWarning
+                        )
+                    filepaths_in_group += found_files
 
             if filepaths_in_group:
                 filepaths += filepaths_in_group
@@ -241,11 +254,24 @@ class AudioDataBalancedSource(grain.sources.RandomAccessDataSource, AudioDataSou
             for _folder in folders:
                 folder = os.path.expandvars(os.path.expanduser(_folder))
                 if os.path.isdir(os.path.expandvars(os.path.expanduser(folder))):
-                    filepaths += _find_files_with_extensions(
+                    found_files = _find_files_with_extensions(
                         folder, extensions=extensions
                     )
+                    if not found_files:
+                        warnings.warn(
+                            f"No files found in directory '{folder}' for group '{group_name}' "
+                            f"with extensions {extensions}",
+                            UserWarning
+                        )
+                    filepaths += found_files
                 else:
-                    filepaths += list(glob.glob(folder))
+                    found_files = list(glob.glob(folder))
+                    if not found_files:
+                        warnings.warn(
+                            f"Glob pattern '{folder}' matched no files for group '{group_name}'",
+                            UserWarning
+                        )
+                    filepaths += found_files
 
             if filepaths:
                 groups.append(filepaths)
