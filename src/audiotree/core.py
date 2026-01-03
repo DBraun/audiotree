@@ -801,14 +801,14 @@ class AudioTree:
         audio_trees = self.mini_batch_list(B)
         audio_trees = list(filter(filter_fn, audio_trees))
 
+        numpy = np if isinstance(self.audio_data, np.ndarray) else jnp
+
         if len(audio_trees) == 0:
-            numpy = np if isinstance(self.audio_data, np.ndarray) else jnp
             return tree_util.tree_map(
                 lambda x: x[:0] if hasattr(x, 'shape') else x,
                 self
             )
 
-        numpy = np if isinstance(self.audio_data, np.ndarray) else jnp
         audio_trees = tree_util.tree_map(
             lambda *xs: numpy.concatenate(xs, axis=0),
             *audio_trees
@@ -816,7 +816,7 @@ class AudioTree:
         return audio_trees
 
 
-def batch_audiotrees(audio_trees: List[AudioTree]) -> AudioTree:
+def batch_audiotrees(audio_trees: List[AudioTree], backend=None) -> AudioTree:
     """Batch a list of AudioTrees into a single AudioTree.
 
     Concatenates all array fields along the batch axis (axis 0). Requires all
@@ -824,6 +824,8 @@ def batch_audiotrees(audio_trees: List[AudioTree]) -> AudioTree:
 
     Args:
         audio_trees: List of AudioTree objects to batch together.
+        backend: Array module to use for concatenation (np or jnp). If None,
+            inferred from the first AudioTree's audio_data type.
 
     Returns:
         Single AudioTree with all items batched along axis 0.
@@ -837,10 +839,11 @@ def batch_audiotrees(audio_trees: List[AudioTree]) -> AudioTree:
     if not audio_trees:
         raise ValueError("Cannot batch empty list of AudioTrees")
 
-    first = audio_trees[0]
-    numpy = np if isinstance(first.audio_data, np.ndarray) else jnp
+    if backend is None:
+        first = audio_trees[0]
+        backend = np if isinstance(first.audio_data, np.ndarray) else jnp
 
     return tree_util.tree_map(
-        lambda *xs: numpy.concatenate(xs, axis=0),
+        lambda *xs: backend.concatenate(xs, axis=0),
         *audio_trees
     )
