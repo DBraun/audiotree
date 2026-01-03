@@ -186,6 +186,40 @@ class AudioTree:
             )
         return self.replace(loudness=loudness_array)
 
+    def normalize_loudness(self, target_lufs: float) -> Self:
+        """Normalize audio to a target LUFS level.
+
+        Computes the current loudness (if not already set), then scales the audio
+        to achieve the target LUFS. The returned AudioTree has both updated
+        ``audio_data`` and ``loudness`` fields.
+
+        Args:
+            target_lufs: Target loudness in LUFS (e.g., -18.0 for broadcast standard).
+
+        Returns:
+            AudioTree with audio scaled to target LUFS and loudness updated.
+
+        Example:
+            >>> tree = AudioTree.load("audio.wav")
+            >>> normalized = tree.normalize_loudness(-18.0)
+            >>> print(normalized.loudness)  # Should be close to -18.0
+        """
+        # Ensure loudness is computed
+        if self.loudness is None:
+            tree = self.replace_loudness()
+        else:
+            tree = self
+
+        numpy = np if isinstance(self.audio_data, np.ndarray) else jnp
+        linear_gain = numpy.power(10.0, (target_lufs - tree.loudness) / 20.0)
+        # Expand gain for broadcasting: [B] -> [B, 1, 1] for [B, C, T] audio
+        linear_gain = linear_gain[:, None, None]
+        scaled_audio = tree.audio_data * linear_gain
+
+        # Update loudness to target (shape [B])
+        target_loudness = numpy.full(tree.loudness.shape, target_lufs, dtype=numpy.float32)
+        return tree.replace(audio_data=scaled_audio, loudness=target_loudness)
+
     @staticmethod
     def _encode_string(s: str) -> np.ndarray:
         """Encode a single filepath *s* to an array of Unicode code points.
@@ -780,3 +814,33 @@ class AudioTree:
             *audio_trees
         )
         return audio_trees
+
+
+def batch_audiotrees(audio_trees: List[AudioTree]) -> AudioTree:
+    """Batch a list of AudioTrees into a single AudioTree.
+
+    Concatenates all array fields along the batch axis (axis 0). Requires all
+    AudioTrees to have the same sample_rate and compatible shapes.
+
+    Args:
+        audio_trees: List of AudioTree objects to batch together.
+
+    Returns:
+        Single AudioTree with all items batched along axis 0.
+
+    Example:
+        >>> trees = [AudioTree(np.random.randn(1, 2, 48000), 48000) for _ in range(4)]
+        >>> batched = batch_audiotrees(trees)
+        >>> batched.audio_data.shape
+        (4, 2, 48000)
+    """
+    if not audio_trees:
+        raise ValueError("Cannot batch empty list of AudioTrees")
+
+    first = audio_trees[0]
+    numpy = np if isinstance(first.audio_data, np.ndarray) else jnp
+
+    return tree_util.tree_map(
+        lambda *xs: numpy.concatenate(xs, axis=0),
+        *audio_trees
+    )

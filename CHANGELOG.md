@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* New `AudioTree.normalize_loudness(target_lufs)` method to normalize audio to a target LUFS level. Computes loudness if not already set, scales audio, and updates the loudness field.
+* New `batch_audiotrees(audio_trees)` function to batch a list of AudioTrees into a single AudioTree. Uses `jax.tree_util.tree_map` to properly concatenate all fields including loudness, metadata, etc.
 * New `AudioTree.source` property that returns the source group name for each item in the batch. When using `AudioDataSimpleSource` or `AudioDataBalancedSource` with `sources={"music": [...], "speech": [...]}`, each loaded AudioTree now tracks which source group it came from.
 * New `create_balanced_audio_dataset()` function for weighted mixing of multiple audio groups using grain's public `MapDataset.mix()` API. Supports custom weights, optional shuffling, and returns a `MapDataset` with random access.
 * **Enhanced `MemmapWriter`**: Now supports AudioTree objects with automatic schema inference. Set `infer_schema=True` (default) to automatically detect and decompose AudioTree objects without manual `FieldSpec` creation. AudioTree fields and metadata are automatically flattened to memmap-compatible arrays. Metadata PyTrees (nested dicts) are preserved and can be reconstructed on read.
