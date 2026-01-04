@@ -212,6 +212,8 @@ class AudioTree:
 
         numpy = np if isinstance(self.audio_data, np.ndarray) else jnp
         linear_gain = numpy.power(10.0, (target_lufs - tree.loudness) / 20.0)
+        # Cast to audio dtype to avoid float64 promotion
+        linear_gain = linear_gain.astype(tree.audio_data.dtype)
         # Expand gain for broadcasting: [B] -> [B, 1, 1] for [B, C, T] audio
         linear_gain = linear_gain[:, None, None]
         scaled_audio = tree.audio_data * linear_gain
