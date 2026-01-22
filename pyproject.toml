@@ -24,3 +24,10 @@ Issues = "https://github.com/DBraun/audiotree/issues"
 
 [tool.setuptools.dynamic]
 version = {attr = "audiotree.__version__"}
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:.*aifc.*:DeprecationWarning:audioread.rawread",
+    "ignore:.*audioop.*:DeprecationWarning:audioread.rawread",
+    "ignore:.*sunau.*:DeprecationWarning:audioread.rawread",
+]

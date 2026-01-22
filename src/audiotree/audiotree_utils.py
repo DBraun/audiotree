@@ -1,6 +1,6 @@
 """Utilities for AudioTree field extraction and reconstruction."""
 
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import numpy as np
 
 from audiotree.core import AudioTree

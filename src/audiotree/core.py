@@ -1,8 +1,7 @@
 from dataclasses import field
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Union
-from typing_extensions import Self
+from typing import Any, Callable, Dict, List, Literal, Optional, Self, Union
 
 from flax import struct
 from jax import numpy as jnp, tree_util
@@ -296,7 +295,7 @@ class AudioTree:
         offset: float = 0.0,
         duration: float | None = None,
         mono: bool = False,
-        pad_mode: Literal["constant"] | None = "constant",
+        pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"] | None = "constant",
         filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
         source: str | None = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -319,8 +318,9 @@ class AudioTree:
                 necessary.
             mono (bool, optional): Whether to force the audio data to be single-channel.
             pad_mode (Literal): If duration is not None, and duration is less than the length of the audio, then
-                ``pad_mode`` controls how the audio is right-padded. The default is "constant" (zeros). A choice of
-                ``None`` results in no padding. Another useful choice is "wrap" to loop the audio.
+                ``pad_mode`` controls how the audio is right-padded (numpy.pad modes). Options:
+                "constant" (zeros, default), "edge" (repeat edge), "reflect" (mirror), "symmetric" (mirror with edge),
+                "wrap" (circular/loop), or None (no padding).
             filepaths (Union[str, Path, List[str | Path]], optional): One or more filepaths to store in the returned
                 ``AudioTree``'s metadata. If *None* (default) the provided ``audio_path`` will be used.
             source (str, optional): The source group name for this audio file (e.g., "music", "speech").
@@ -641,8 +641,28 @@ class AudioTree:
         Returns:
             AudioTree: An instance of ``AudioTree``.
         """
-        audio_data = self.audio_data.mean(axis=1, keepdims=True)
+        audio_data = self.audio_data
+        B, C, T = audio_data.shape
+        if C == 1:
+            return self
+        audio_data = audio_data.mean(axis=1, keepdims=True)
         return self.replace(audio_data=audio_data, loudness=None)
+
+    def to_stereo(self) -> Self:
+        """Make the ``audio_data`` stereo.
+
+        Returns:
+            AudioTree: An instance of ``AudioTree``.
+        """
+        audio_data = self.audio_data
+        B, C, T = audio_data.shape
+        if C == 1:
+            audio_data = np.tile(audio_data, (1, 2, 1))
+            return self.replace(audio_data=audio_data)
+        elif C == 2:
+            return self
+        else:
+            raise ValueError(f"Cannot make AudioTree stereo if it has {C} channels.")
 
     def resample(
         self,

@@ -1,9 +1,12 @@
 from functools import partial
+from pathlib import Path
 
 import numpy as np
 import jax.numpy as jnp
 import jax
+import librosa
 import pytest
+from scipy.io import wavfile
 
 from audiotree.resample import resample
 
@@ -40,29 +43,32 @@ def _resample(
 
     # todo: use the torch version of julius and confirm the outputs match.
     # (DBraun did this manually once but didn't automate it.)
-    # from scipy.io import wavfile
-    # if output_path is not None:
-    #     for i, audio in enumerate(y):
-    #         wavfile.write(f"{output_path}_{str(i).zfill(3)}.wav", new_sr, audio.T)
+
+    if output_path is not None:
+        for i, audio in enumerate(y):
+            wavfile.write(f"{output_path}_{str(i).zfill(3)}.wav", new_sr, audio.T)
 
 
-# def test_resample_001():
-#     filepaths = [
-#         "60988__folktelemetry__crash-fast-14.wav",
-#         "42v8.wav",
-#         "60v8.wav",
-#     ]
-#
-#     all_audio = []
-#     import librosa
-#     for filepath in filepaths:
-#         y, old_sr = librosa.load(filepath, sr=44_100, mono=False, duration=4)
-#         all_audio.append(jnp.array(y))
-#     y = jnp.stack(all_audio, axis=0)
-#
-#     new_sr = 96_000
-#
-#     _resample(y, int(old_sr), new_sr, "tmp_test_resample_001")
+def test_resample_001():
+    # Use test assets - stereo file loaded 3 times for batch testing
+    assets_dir = Path(__file__).parent / "assets"
+    filepath = str(assets_dir / "musdb18hq" / "train" / "A Classic Education - NightOwl" / "mixture.wav")
+
+    all_audio = []
+
+    # Load the same file 3 times with different offsets to create a batch
+    for offset in [0.0, 4.0, 8.0]:
+        y, old_sr = librosa.load(filepath, sr=44_100, mono=False, duration=4, offset=offset)
+        all_audio.append(jnp.array(y))
+    y = jnp.stack(all_audio, axis=0)
+
+    new_sr = 96_000
+
+    # Write to test_outputs directory
+    test_outputs_dir = Path(__file__).parent.parent / "test_outputs"
+    test_outputs_dir.mkdir(exist_ok=True)
+    output_path = test_outputs_dir / "test_resample_001"
+    _resample(y, int(old_sr), new_sr, str(output_path))
 
 
 @pytest.mark.parametrize("new_sr", [96_000])

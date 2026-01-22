@@ -30,7 +30,7 @@ def test_basic_sequential_writing():
             assert path.name == f"test_{i:03d}.wav"
 
             # Verify audio content
-            data, sr = soundfile.read(path)
+            data, sr = soundfile.read(str(path))
             assert sr == 44100
             assert data.shape == (44100, 2)  # (samples, channels)
 
@@ -77,7 +77,7 @@ def test_resampling():
         paths = writer.write(audio_tree)
 
         # Check output sample rate
-        data, sr = soundfile.read(paths[0])
+        data, sr = soundfile.read(str(paths[0]))
         assert sr == 16000
 
 
@@ -141,7 +141,7 @@ def test_mono_audio():
         paths = writer.write(audio_tree)
 
         # Check output
-        data, sr = soundfile.read(paths[0])
+        data, sr = soundfile.read(str(paths[0]))
         assert data.shape == (16000,)  # Mono is 1D array in soundfile
 
 
@@ -157,7 +157,7 @@ def test_stereo_audio():
         paths = writer.write(audio_tree)
 
         # Check output
-        data, sr = soundfile.read(paths[0])
+        data, sr = soundfile.read(str(paths[0]))
         assert data.shape == (16000, 2)  # Stereo is (samples, 2)
 
 

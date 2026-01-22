@@ -3,15 +3,8 @@ AudioTree documentation
 
 **AudioTree** is a `JAX <https://jax.readthedocs.io/en/latest/>`_ library for audio data loading and augmentations.
 The source code is `here <https://github.com/DBraun/audiotree>`_.
-AudioTree follows `Effort-based Versioning <https://jacobtomlinson.dev/effver/>`_.
 
-There is one requirement:
-
-.. code-block:: bash
-
-   pip install "git+https://github.com/DBraun/argbind.git@improve.subclasses"
-
-Then AudioTree can be installed with pip:
+AudioTree can be installed with pip:
 
 .. code-block:: bash
 
@@ -21,25 +14,44 @@ The namesake class :class:`~audiotree.core.AudioTree` is a `flax.struct.dataclas
 sample rate, on-demand data such as loudness, and optional data such as filepaths, MIDI pitch, velocity, and duration.
 An AudioTree can also store arrays for codebooks or latent embeddings.
 
-Although ``AudioTree`` is a specific class, we loosely refer to any combination of dictionaries and lists of
-``AudioTrees`` as also an ``AudioTree`` (check out the `Pytree`_ JAX docs).
-For example, in the code below, we consider ``batch`` to be an ``AudioTree``.
+AudioTree integrates with `Grain`_ to provide complete data pipelines. Load audio from directories,
+apply balanced sampling across groups, and chain augmentations:
 
 .. code-block:: python
 
-    from jax import numpy as jnp
-    from audiotree import AudioTree
-    sample_rate = 44_100
-    data = jnp.zeros((16, 2, sample_rate*10)) # dummy placeholder shaped (B, C, T)
-    audio_tree = AudioTree(data, sample_rate)
-    batch = {"src": [audio_tree, audio_tree], "target": audio_tree}
+    from audiotree.sources import create_balanced_audio_dataset
+    from audiotree.transforms import volume_norm, Batch
 
-The batch above can be used with `jax.tree.map`_ to create a new batch. That's essentially what the Transform classes in
-:mod:`~audiotree.transforms` do.
-They perform GPU-based `jax.jit`_-compatible augmentations on arbitrarily shaped AudioTrees.
-When used with `ArgBind`_, they are also highly configurable from the command-line, YAML and Python.
+    # Create dataset with balanced sampling across groups
+    ds = create_balanced_audio_dataset(
+        sources={"speech": ["/data/speech"], "music": ["/data/music"]},
+        weights={"speech": 0.7, "music": 0.3},
+        num_records=10000,
+        sample_rate=44100,
+        duration=3.0,
+    )
 
-Whether you're creating a data loader for training, validation, testing, or prompt generation, AudioTree can help.
+    # Chain transforms using Grain's API
+    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+
+    # Convert to iterable and batch
+    batch_size = 32
+    iter_ds = ds.to_iter_dataset().batch(batch_size, Batch(batch_size))
+
+    # Access batched AudioTrees
+    batch = next(iter(iter_ds))
+    print(batch.audio_data.shape)  # (32, channels, 132300)
+    print(batch.source)            # ["speech", "music", ...]
+
+Transforms work on any `Pytree`_ of AudioTrees, including dictionaries and lists.
+This enables patterns like ``{"dry": audio_tree, "wet": audio_tree}`` where you selectively augment
+specific keys using the ``scope`` parameter (see :ref:`dict_batches`).
+
+When used with `ArgBind`_, transforms are configurable from the command-line and YAML (see :ref:`argbind_guide`):
+
+.. code-block:: bash
+
+    python train.py --volume_norm.min_db=-25 --volume_norm.max_db=-15
 
 Content
 --------------------------
@@ -48,18 +60,29 @@ Content
    :caption: Introduction
 
    introduction/introduction
-   introduction/writer
    introduction/sources
+   introduction/balanced_datasets
    introduction/transforms
+   introduction/transform_chaining
+   introduction/dict_batches
+   introduction/argbind_guide
+   introduction/multiprocessing
+   introduction/writer
 
 .. toctree::
    :maxdepth: 1
    :caption: AudioTree API
 
    audiotree_api/core
-   audiotree_api/writer
    audiotree_api/sources
    audiotree_api/transforms
+   audiotree_api/writer
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Project
+
+   changelog
 
 Acknowledgments
 ---------------
@@ -81,6 +104,7 @@ Citation
    }
 
 .. _flax.struct.dataclass: https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass
+.. _Grain: https://github.com/google/grain
 .. _Pytree: https://jax.readthedocs.io/en/latest/pytrees.html
 .. _jax.tree.map: https://jax.readthedocs.io/en/latest/_autosummary/jax.tree.map.html#jax.tree.map
 .. _jax.jit: https://jax.readthedocs.io/en/latest/_autosummary/jax.jit.html

@@ -39,7 +39,7 @@ You can create an AudioTree directly from NumPy or JAX NumPy arrays:
     44100
 
 Automatic Dimensionality Handling
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The :meth:`~audiotree.core.AudioTree.create` method automatically handles arrays of different dimensions:
 
@@ -58,7 +58,7 @@ The :meth:`~audiotree.core.AudioTree.create` method automatically handles arrays
     (1, 2, 44100)  # Automatically adds batch dimension
 
 Loading Audio from Files
--------------------------
+------------------------
 
 AudioTree provides convenient methods for loading audio files:
 
@@ -94,7 +94,7 @@ AudioTree provides convenient methods for loading audio files:
     array([[0., 0., 0., 0.]])
 
 Manipulating AudioTree Objects
--------------------------------
+------------------------------
 
 Accessing Properties
 ~~~~~~~~~~~~~~~~~~~~
@@ -118,7 +118,7 @@ AudioTree objects have several key properties:
     {}
 
 Creating Modified Copies
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 AudioTree is immutable. Use :meth:`~audiotree.core.AudioTree.replace` to create modified copies:
 
@@ -210,7 +210,7 @@ The :meth:`~audiotree.core.AudioTree.mini_batch` method reshapes the batch dimen
     (12, 1, 44100)  # Back to original
 
 Splitting into Multiple Trees
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The :meth:`~audiotree.core.AudioTree.mini_batch_list` method splits a batch into separate AudioTree objects:
 
@@ -268,7 +268,7 @@ The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively ke
     Array([-15.69, -12.17, -9.67, -7.73, -6.15, -4.81, -3.65, -2.63, -1.71], dtype=float32)
 
 Processing Mini-Batches with nnx.scan
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can use Flax's :func:`nnx.scan` to efficiently process mini-batches with neural networks:
 
@@ -305,12 +305,12 @@ You can use Flax's :func:`nnx.scan` to efficiently process mini-batches with neu
     True  # All values were processed
 
 Working with JAX PyTrees
--------------------------
+------------------------
 
 AudioTree is a JAX pytree, which means it works seamlessly with JAX's audio_tree operations.
 
 Concatenating Trees with jax.audio_tree.map
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can use :func:`jax.audio_tree.map` to combine multiple AudioTree objects:
 
@@ -367,7 +367,7 @@ AudioTree objects can be organized in complex nested structures:
     0.0  # Scaled from 0.0 (remains 0)
 
 audio_tree Flattening and Unflattening
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 JAX can flatten AudioTree objects for operations requiring flat arrays:
 

@@ -9,12 +9,12 @@
 Transforms
 ======================
 
-..  
+..
 
 .. ---------------------------
 
 Transforms in ``audiotree.transforms`` are `Grain`_
-`transformations <https://github.com/google/grain/blob/754636534bb16b5b2dd74970043d03e24ea44d3f/docs/transformations.md>`_ that operate on batches.
+`transformations <https://github.com/google/grain/blob/main/docs/data_loader/transformations.md>`_ that operate on AudioTrees.
 Examples include:
 
    * GPU-based `volume normalization <https://github.com/DBraun/jaxloudnorm/>`_ to a LUFS value in a configurable uniformly sampled range
@@ -23,153 +23,279 @@ Examples include:
    * Randomly shifting or corrupting the phase(s) of a waveform
    * and more...
 
-Config
-------
-
-AudioTree is compatible with `ArgBind`_ but does not require it.
-For the examples directly below, some other setup is required, so consider this to be an overview.
-Before transformations, your data source might provide a single :class:`~audiotree.core.AudioTree` or a "tree" of :class:`~audiotree.core.AudioTree`:
+**Quick Start: Chaining with Datasets**
 
 .. code-block:: python
 
-    from jax import numpy as jnp
+    from audiotree.sources import create_audio_dataset
+    from audiotree.transforms import volume_norm, trim
+
+    # Create dataset
+    ds = create_audio_dataset(
+        sources="/data/audio",
+        num_records=1000,
+        sample_rate=44100,
+        duration=5.0,
+    )
+
+    # Chain transforms
+    ds = ds.random_map(
+        volume_norm(min_db=-20, max_db=-15),
+        seed=42,
+    )
+    ds = ds.map(trim(length=3.0))
+
+    # Access augmented audio
+    audio_tree = ds[0]
+
+For complete examples of chaining transforms, building augmentation pipelines, and performance
+optimization, see :ref:`transform_chaining`.
+
+**Quick Start: With ArgBind**
+
+.. code-block:: python
+
+    import argbind
+    from audiotree import transforms
+
+    # Bind transform function to argbind
+    VolumeNorm = argbind.bind(transforms.volume_norm)
+
+    # Config via YAML
+    args = argbind.parse_args()
+    with argbind.scope(args):
+        transform = VolumeNorm()  # Uses params from YAML
+        ds = ds.random_map(transform, seed=42)
+
+For a complete guide on using ArgBind with transforms, including scoped configurations, YAML syntax,
+and complete examples, see :ref:`argbind_guide`.
+
+Basic Usage
+-----------
+
+**Direct Python Usage**
+
+Transforms are functions that return transform instances:
+
+.. code-block:: python
+
+    from audiotree.transforms import volume_norm, volume_change, trim
     from audiotree import AudioTree
-    sample_rate = 44_100
-    data = jnp.zeros((16, 2, 441_000))  # dummy placeholder shaped (B, C, T)
-    audio_tree = AudioTree(data, sample_rate)
-    batch = {"src": [audio_tree, audio_tree], "target": audio_tree}
+    import jax
 
-Then from YAML you can write the following to get a 90% chance of a random volume change between -12 and 3 decibels on just the ``"src"`` :class:`~audiotree.core.AudioTree`:
+    # Create audio
+    audio_tree = AudioTree(...)
+    audio_tree = audio_tree.replace_loudness()
+
+    # Apply transforms
+    rng = jax.random.key(42)
+
+    # Random transforms need an RNG
+    transform1 = volume_norm(min_db=-20, max_db=-15)
+    audio_tree = transform1.random_map(audio_tree, rng)
+
+    # Deterministic transforms
+    transform2 = trim(length=3.0)
+    audio_tree = transform2.map(audio_tree)
+
+**With Dict Batches**
+
+Transforms work with dictionaries of AudioTrees:
+
+.. code-block:: python
+
+    batch = {"src": audio_tree1, "target": audio_tree2}
+
+    # Transform only 'src' using scope
+    transform = volume_change(
+        min_db=-12,
+        max_db=3,
+        prob=0.9,
+        scope={'src': {'scope': True}},
+    )
+    batch = transform.random_map(batch, rng)
+
+For complete information on Dict[str, AudioTree] batches, see :ref:`dict_batches`.
+
+**With ArgBind and YAML**
 
 .. code-block:: yaml
 
-    VolumeChange.prob:
-        0.9
-    VolumeChange.config:
-        min_db: -12
-        max_db: 3
-    VolumeChange.scope:
-        src:
-            scope: True
+    volume_change.min_db: -12
+    volume_change.max_db: 3
+    volume_change.prob: 0.9
+    volume_change.scope:
+      src:
+        scope: true
 
-Split Seed
-----------
+Transform Parameters
+--------------------
 
-By setting ``split_seed`` to False, you can apply the same augmentations to both the ``src`` and ``target``.
+All transforms support these parameters:
+
+**For random transforms:**
+
+- ``prob``: Probability of applying (0.0 to 1.0, default 1.0)
+- ``split_seed``: Use different RNG per leaf (default True)
+- ``scope``: Which PyTree leaves to transform (default None = all)
+- ``output_key``: Where to store output (default None = in-place)
+
+**For map transforms:**
+
+- ``scope``: Which PyTree leaves to transform (default None = all)
+- ``output_key``: Where to store output (default None = in-place)
+
+**Split Seed Example**
+
+By setting ``split_seed=False``, you can apply the same random augmentation to all items:
+
+.. code-block:: python
+
+    # Different augmentation per item (default)
+    transform = volume_change(min_db=-6, max_db=6, split_seed=True)
+
+    # Same augmentation for all items
+    transform = volume_change(min_db=-6, max_db=6, split_seed=False)
 
 .. code-block:: yaml
 
-    VolumeChange.split_seed: 0
-
-This would make the most sense if the waveforms in ``src`` and ``target`` have the same dimensions.
-For some transformations, having differently sized tensors would cause the augmentations to be different despite sharing the same ``jax.random.PRNGKey``.
+    volume_change.split_seed: false
 
 
 Output Key
 ----------
 
-You can specify an output key so that the result of the transformation is stored in a new sibling key:
-
-.. code-block:: yaml
-
-    VolumeChange.output_key: "src_modified"
-    VolumeChange.scope:
-        src:
-            scope: True
-
-The above will produce a batch *shaped* like this:
+You can specify an output key so that the result is stored in a new key instead of replacing the original:
 
 .. code-block:: python
 
-    {
-        "src": [audio_tree, audio_tree],
-        "src_modified": [audio_tree, audio_tree],
-        "target": audio_tree,
-    }
+    batch = {"src": audio_tree, "target": audio_tree}
+
+    transform = volume_change(
+        min_db=-12,
+        max_db=3,
+        scope={'src': {'scope': True}},
+        output_key='modified',
+    )
+    batch = transform.random_map(batch, rng)
+
+    # Result has original plus new key
+    # {"src": original, "target": original, "modified": transformed}
+
+.. code-block:: yaml
+
+    volume_change.output_key: "modified"
+    volume_change.scope:
+      src:
+        scope: true
 
 Scope
 -----
 
-Depending on the scope, we can end up with *multiple* new output leaves. Let's start with this batch:
+Use ``scope`` to selectively transform specific keys in a dictionary batch:
+
+.. code-block:: python
+
+    batch = {"dry": dry_audio, "wet": wet_audio, "reference": ref_audio}
+
+    # Transform only 'dry' and 'wet', not 'reference'
+    transform = volume_norm(
+        min_db=-20,
+        max_db=-15,
+        scope={
+            'dry': {'scope': True},
+            'wet': {'scope': True},
+        },
+    )
+    batch = transform.random_map(batch, rng)
+
+**Nested dictionaries** also work:
 
 .. code-block:: python
 
     batch = {
-        "src":
-        {
-            "GT": audio_tree
-        },
-        "target":
-        {
-            "GT": audio_tree
-        }
+        "input": {"dry": dry_audio, "wet": wet_audio},
+        "target": target_audio,
     }
 
-Then with a scope of ``None`` (default) and this YAML:
+    # Transform only input.dry
+    transform = volume_norm(
+        min_db=-20,
+        max_db=-15,
+        scope={'input': {'dry': {'scope': True}}},
+    )
+    batch = transform.random_map(batch, rng)
 
-.. code-block:: yaml
+For complete examples, see :ref:`dict_batches`.
 
-    VolumeChange.output_key: "modified"
+Available Transforms
+--------------------
 
-We can produce this shape:
+**Random Transforms** (use with ``.random_map()``):
+
+- ``volume_norm(min_db, max_db)`` - Normalize to random loudness
+- ``volume_change(min_db, max_db)`` - Random gain adjustment
+- ``invert_phase()`` - Invert audio phase
+- ``swap_stereo()`` - Swap stereo channels
+- ``corrupt_phase(amount, ...)`` - Corrupt phase spectrum
+- ``shift_phase(amount)`` - Shift phase spectrum
+- ``roll(min_seconds, max_seconds, mode)`` - Circular shift audio
+
+**Map Transforms** (use with ``.map()``):
+
+- ``trim(length, mode)`` - Trim or pad to fixed length
+- ``mono()`` - Convert to mono
+- ``stereo()`` - Convert to stereo
+- ``rescale_audio()`` - Rescale to [-1, 1] range
+- ``identity()`` - No-op transform
+
+**Special Transforms**:
+
+- ``choose(*transforms, c, weights, prob)`` - Randomly select from multiple transforms
+- ``encode_with_codec(encoder_fn, num_codebooks)`` - Encode with neural codec
+- ``encode_latents(encoder_fn)`` - Encode to latent space
+
+Creating Custom Transforms
+---------------------------
+
+Use decorators to create custom transforms:
 
 .. code-block:: python
 
-    {
-        "src":
-        {
-            "GT": audio_tree,
-            "modified": audio_tree
-        },
-        "target":
-        {
-            "GT": audio_tree,
-            "modified": audio_tree
-        }
-    }
+    from audiotree.transforms.decorators import random_transform, map_transform
+    import jax
 
-Inheritance
------------
+    @random_transform
+    def my_augmentation(audio_tree, rng, strength=1.0):
+        # Your augmentation logic here
+        noise = jax.random.normal(rng, audio_tree.audio_data.shape) * strength
+        audio_data = audio_tree.audio_data + noise
+        return audio_tree.replace(audio_data=audio_data)
 
-You can also make more powerful (but complex) configs and scopes:
+    # Use it
+    transform = my_augmentation(strength=0.1, prob=0.8)
+    ds = ds.random_map(transform, seed=42)
 
-.. code-block:: yaml
+    # Or with argbind
+    import argbind
+    MyAugmentation = argbind.bind(my_augmentation)
 
-    VolumeChange.config:
-        max_db: 3
-        src:
-            min_db: -12
-        target:
-            min_db: -2
+    # config.yml:
+    # my_augmentation.strength: 0.1
+    # my_augmentation.prob: 0.8
 
-Note that the ``max_db`` is inherited by both ``src`` and ``target``.
-This ability to inherit comes at the cost of potential name clashes between the keys of the config (e.g., ``"min_db"``, ``"max_db"``) and the keys in the AudioTree (``"src"``, ``"target"``, etc.).
-The user is expected to use a data source to create AudioTrees that avoid these clashes.
+See Also
+--------
 
-Without ArgBind
----------------
+For complete guides and examples:
 
-Above, we've been using ArgBind and YAML, but we can create transforms with just Python:
-
-
-.. code-block:: python
-
-    from audiotree.transforms import VolumeNorm
-
-    config = {
-        "max_db": -6,
-        "src": {"min_db": -20},
-        "target": {"min_db": -15},
-    }
-
-    transform = VolumeNorm(config=config, split_seed=True, prob=0.9, scope=None)
-    audio_tree = transform.random_map(audio_tree)
-
-Further examples
-----------------
-
-For now, the `tests/transforms/test_core.py <https://github.com/DBraun/audiotree/blob/main/tests/transforms/test_core.py>`_ is somewhat useful for thinking through the expected outputs.
-AudioTree is also used in `DAC-JAX`_, which `shows <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_ how to use `ArgBind`_ and data sources.
+- :ref:`transform_chaining` - Chaining transforms with datasets
+- :ref:`dict_batches` - Using Dict[str, AudioTree] batches
+- :ref:`argbind_guide` - Configuring transforms with ArgBind
+- :ref:`multiprocessing` - Parallel data loading
+- `argbind_augmentations examples <../../examples/argbind_augmentations/>`_ - Complete working examples
+- `tests/transforms/test_core.py <https://github.com/DBraun/audiotree/blob/main/tests/transforms/test_core.py>`_ - Test examples
+- `DAC-JAX`_ - Real-world usage in production
 
 .. _ArgBind: https://github.com/pseeth/argbind/
 .. _DAC-JAX: https://github.com/DBraun/DAC-JAX

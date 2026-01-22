@@ -1,0 +1,131 @@
+"""Tests for main2.py - advanced argbind usage with scoped transforms."""
+
+import subprocess
+import sys
+from typing import Dict
+
+import argbind
+from audiotree import AudioTree
+from audiotree import transforms as transforms_lib
+import jax
+from jax import random
+import numpy as np
+
+
+def test_main2_with_config():
+    """Test that main2.py runs successfully with config2.yml."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "examples/argbind_augmentations/main2.py",
+            "--args.load=examples/argbind_augmentations/config2.yml",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, f"Script failed with stderr: {result.stderr}"
+    assert "Training..." in result.stdout
+    assert "Validation..." in result.stdout
+    assert "Before:" in result.stdout
+    assert "After:" in result.stdout
+
+
+def test_main2_different_train_val_configs():
+    """Test that train and val scopes can have different configurations."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "examples/argbind_augmentations/main2.py",
+            "--args.load=examples/argbind_augmentations/config2.yml",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, f"Script failed with stderr: {result.stderr}"
+
+    lines = result.stdout.split("\n")
+
+    train_after_idx = None
+    val_after_idx = None
+
+    for i, line in enumerate(lines):
+        if "Training..." in line:
+            for j in range(i, min(i + 10, len(lines))):
+                if "After:" in lines[j]:
+                    train_after_idx = j
+                    break
+        if "Validation..." in line:
+            for j in range(i, min(i + 10, len(lines))):
+                if "After:" in lines[j]:
+                    val_after_idx = j
+                    break
+
+    assert train_after_idx is not None, "Could not find training 'After' line"
+    assert val_after_idx is not None, "Could not find validation 'After' line"
+
+
+def test_bind_module_with_filter():
+    """Test that bind_module correctly filters transforms."""
+
+    def filter_fn(fn):
+        """Only bind transform functions (excludes Batch and classes)."""
+        return callable(fn) and not isinstance(fn, type)
+
+    transforms_bound = argbind.bind_module(
+        transforms_lib, "test_train", "test_val", filter_fn=filter_fn
+    )
+
+    assert hasattr(transforms_bound, "volume_norm")
+    assert hasattr(transforms_bound, "trim")
+    assert hasattr(transforms_bound, "volume_change")
+    # Batch should be excluded by the filter
+    assert not hasattr(transforms_bound, "Batch")
+
+
+def test_scoped_augmentation():
+    """Test that bind_module correctly binds transforms for different scopes."""
+
+    def filter_fn(fn):
+        """Only bind transform functions (excludes Batch and classes)."""
+        return callable(fn) and not isinstance(fn, type)
+
+    transforms_bound = argbind.bind_module(
+        transforms_lib, "test_train", "test_val", filter_fn=filter_fn
+    )
+
+    B = 2
+    T = 44100
+
+    audio_tree = AudioTree(np.random.uniform(-1, 1, size=(B, 1, T)), sample_rate=44100)
+    audio_tree = audio_tree.replace_loudness()
+
+    train_args = {
+        "test_train/volume_norm.min_db": -25,
+        "test_train/volume_norm.max_db": -15,
+    }
+
+    val_args = {
+        "test_val/volume_norm.min_db": -20,
+        "test_val/volume_norm.max_db": -20,
+    }
+
+    rng = random.key(0)
+
+    with argbind.scope(train_args, "test_train"):
+        transform = transforms_bound.volume_norm()
+        train_audio = transform.random_map(audio_tree, rng)
+
+    with argbind.scope(val_args, "test_val"):
+        transform = transforms_bound.volume_norm()
+        val_audio = transform.random_map(audio_tree, rng)
+
+    assert train_audio.loudness is not None
+    assert val_audio.loudness is not None
+
+    assert np.all(train_audio.loudness >= -25 - 1)
+    assert np.all(train_audio.loudness <= -15 + 1)
+
+    assert np.all(val_audio.loudness >= -20 - 1)
+    assert np.all(val_audio.loudness <= -20 + 1)

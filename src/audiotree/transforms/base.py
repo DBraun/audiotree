@@ -1,3 +1,5 @@
+"""Base classes for transforms."""
+
 from typing import Any, Callable, Dict, List, Union
 import warnings
 
@@ -66,7 +68,6 @@ def merge_pytree(tree1, tree2):
     """Order matters!"""
 
     def is_leaf(leaf: dict):
-        # todo: ask JAX experts about this
         if not isinstance(leaf, dict):
             return False
         values = list(leaf.values())
@@ -99,14 +100,14 @@ class BaseTransformMixIn:
         return element
 
     @staticmethod
-    def _apply_transform(element, rng: jax.Array, **kwargs):
+    def _apply_transform(element, rng, **kwargs):
         """
         Apply the transformation to the given element.
 
         Args:
             element (Any): Element to be transformed.
-            rng (jax.Array): jax.random.PRNGKey
-            **kwargs: Additional type-annotated keyword arguments for the transformation.
+            rng: Random state (jax.Array or np.random.Generator depending on module)
+            **kwargs: Additional keyword arguments for the transformation.
 
         Returns:
             Any: The transformed element.
@@ -122,13 +123,12 @@ class BaseTransformMixIn:
         ), "You specified `output_key`, but the transformed element is not a dict."
 
         def is_leaf(x):
-            # todo: ask JAX experts about this
             if not isinstance(x, dict):
                 return False
             values = list(x.values())
             while isinstance(values, list):
                 values = values[0]
-            return isinstance(values, AudioTree)  # or values is None
+            return isinstance(values, AudioTree)
 
         # Use output_key to rename the nodes in the tree
         def rename_node(path: list[DictKey], leaf):
@@ -194,46 +194,40 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
 
         Args:
             element (Any): Input element to transform
-            rng (jax.Array): jax.random.PRNGKey or numpy random generator
+            rng: jax.random.PRNGKey (for JAX transforms) or np.random.Generator (for numpy transforms)
         Returns:
             Any: transformed element
         """
-
-        if isinstance(rng, jax.Array):
-            key = rng
+        # Detect if we're using numpy or JAX based on rng type
+        if isinstance(rng, np.random.Generator):
+            return self._random_map_numpy(element, rng)
         else:
-            # todo: is there a better way to seed jax.random from this numpy random Generator?
-            seed = rng.integers(2**63)
-            key = random.PRNGKey(seed)
+            return self._random_map_jax(element, rng)
+
+    def _random_map_jax(self, element: Any, key: jax.Array) -> Any:
+        """JAX implementation of random_map."""
 
         def is_leaf(leaf):
-            res = isinstance(leaf, AudioTree)  # todo: ask JAX experts about this
-            return res
+            return isinstance(leaf, AudioTree)
 
         def pre_transform_map_func(path: list[DictKey], leaf):
             if _is_in_scope(self.scope, path):
-                transformed_leaf = self._pre_transform(leaf)
-                return transformed_leaf
+                return self._pre_transform(leaf)
             return leaf
 
         def map_func(path: list[DictKey], leaf, rng: jax.Array, *config):
             if not is_leaf(leaf):
                 return leaf
             if _is_in_scope(self.scope, path):
-                transformed_leaf = self._apply_transform(leaf, rng, **config[0])
-                return transformed_leaf
+                return self._apply_transform(leaf, rng, **config[0])
             elif self.output_key is not None:
-                # The audiotree is not in scope, but output_key has been specified.
-                # We drop the leaf and return None instead.
-                # Then later when merging the new tree and the old tree, having None in the leaf helps us merge them
-                # more easily.
                 return None
             return leaf
 
         def map_use_default_config_val(path: list[DictKey], leaf):
             return {
-                key: _get_config_val(self.config, path, key, default)
-                for key, default in self.default_config.items()
+                k: _get_config_val(self.config, path, k, default)
+                for k, default in self.default_config.items()
             }
 
         element = map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
@@ -257,6 +251,55 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
             (lambda x, y: jax.numpy.where(mask_new, x, y)), new_tree, element
         )
         return selected
+
+    def _random_map_numpy(self, element: Any, rng: np.random.Generator) -> Any:
+        """NumPy implementation of random_map."""
+
+        def is_leaf(leaf):
+            return isinstance(leaf, AudioTree)
+
+        def pre_transform_map_func(path: list[DictKey], leaf):
+            if _is_in_scope(self.scope, path):
+                return self._pre_transform(leaf)
+            return leaf
+
+        def map_func(path: list[DictKey], leaf, leaf_rng: np.random.Generator, *config):
+            if not is_leaf(leaf):
+                return leaf
+            if _is_in_scope(self.scope, path):
+                return self._apply_transform(leaf, leaf_rng, **config[0])
+            elif self.output_key is not None:
+                return None
+            return leaf
+
+        def map_use_default_config_val(path: list[DictKey], leaf):
+            return {
+                k: _get_config_val(self.config, path, k, default)
+                for k, default in self.default_config.items()
+            }
+
+        element = map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
+
+        # Create separate RNGs for each leaf if split_seed is True
+        treedef = jax.tree.flatten(element, is_leaf=is_leaf)[1]
+        length = treedef.num_leaves
+        if self.split_seed:
+            sub_rngs = [np.random.Generator(np.random.PCG64(rng.integers(2**63))) for _ in range(length)]
+        else:
+            sub_rngs = [rng] * length
+        sub_rngs = jax.tree.unflatten(treedef, sub_rngs)
+
+        config = map_with_path(map_use_default_config_val, element, is_leaf=is_leaf)
+
+        new_tree = map_with_path(map_func, element, sub_rngs, config, is_leaf=is_leaf)
+        new_tree = self._post_process(element, new_tree)
+
+        # Determine if we should apply the transform
+        if self.prob == 1:
+            return new_tree
+        if rng.random() < self.prob:
+            return new_tree
+        return element
 
 
 class BaseMapTransform(BaseTransformMixIn, MapTransform):
@@ -288,7 +331,7 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
 
     def map(self, element: Any) -> Any:
         """
-        Apply the random mapping to the given element.
+        Apply the mapping to the given element.
 
         Args:
             element (Any): Input element to transform
@@ -298,28 +341,21 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
         """
 
         def is_leaf(leaf):
-            res = isinstance(leaf, AudioTree)  # todo: ask JAX experts about this
-            return res
+            return isinstance(leaf, AudioTree)
 
         def pre_transform_map_func(path: list[DictKey], leaf):
             if not is_leaf(leaf):
                 return leaf
             if _is_in_scope(self.scope, path):
-                transformed_leaf = self._pre_transform(leaf)
-                return transformed_leaf
+                return self._pre_transform(leaf)
             return leaf
 
         def map_func(path: list[DictKey], leaf, *config):
             if not is_leaf(leaf):
                 return leaf
             if _is_in_scope(self.scope, path):
-                transformed_leaf = self._apply_transform(leaf, **config[0])
-                return transformed_leaf
+                return self._apply_transform(leaf, **config[0])
             elif self.output_key is not None:
-                # The audiotree is not in scope, but output_key has been specified.
-                # We drop the leaf and return None instead.
-                # Then later when merging the new tree and the old tree, having None in the leaf helps us merge them
-                # more easily.
                 return None
             return leaf
 

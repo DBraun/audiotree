@@ -1,11 +1,8 @@
-import glob
-import math
+import functools
 import os
-import warnings
-from random import Random
-from typing import AnyStr, List, Mapping, Optional, SupportsIndex, Union
+from pathlib import Path
+from typing import AnyStr, List, Literal, Mapping, Optional
 
-from grain._src.python.dataset.transformations.mix import MixedIterDataset
 import grain
 import numpy as np
 
@@ -56,381 +53,240 @@ def _find_files_with_extensions(
     return matching_files
 
 
-class AudioDataSourceMixin:
+def _load_audio_with_saliency(
+    file_path: str,
+    rng: np.random.Generator,
+    sample_rate: int,
+    duration: float,
+    mono: bool = True,
+    pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"] | None = "reflect",
+    saliency_params: SaliencyParams | None = None,
+    source: str | None = None,
+) -> AudioTree:
+    """Load audio file with optional saliency-based excerpt selection.
 
-    def load_audio(
-        self, file_path, record_key: SupportsIndex, source: str = None
-    ) -> AudioTree:
-        """Load audio from a file path.
-
-        Args:
-            file_path: Path to the audio file.
-            record_key: Index used for seeding random number generator.
-            source: Optional source group name (e.g., "music", "speech") to store in metadata.
-
-        Returns:
-            AudioTree with the loaded audio data.
-        """
-        saliency_params: SaliencyParams = self.saliency_params
-
-        if saliency_params is not None and saliency_params.enabled:
-            if saliency_params.loudness_cutoff is not None:
-                # Use salient_excerpt with loudness filtering
-                return AudioTree.salient_excerpt(
-                    file_path,
-                    np.random.default_rng(int(record_key)),
-                    saliency_params=saliency_params,
-                    sample_rate=self.sample_rate,
-                    duration=self.duration,
-                    mono=self.mono,
-                    pad_mode=self.pad_mode,
-                    source=source,
-                )
-            else:
-                # Use excerpt for random offset without loudness filtering
-                return AudioTree.excerpt(
-                    file_path,
-                    rng=np.random.default_rng(int(record_key)),
-                    duration=self.duration,
-                    sample_rate=self.sample_rate,
-                    mono=self.mono,
-                    pad_mode=self.pad_mode,
-                    source=source,
-                )
-        else:
-            # Load from beginning (deterministic)
-            return AudioTree.from_file(
-                file_path,
-                sample_rate=self.sample_rate,
-                offset=0,
-                duration=self.duration,
-                mono=self.mono,
-                pad_mode=self.pad_mode,
-                source=source,
-            )
-
-
-class AudioDataSimpleSource(grain.sources.RandomAccessDataSource, AudioDataSourceMixin):
-    """A Data Source that aggregates all source files and weights them equally.
+    Uses the provided RNG for deterministic random selection.
+    This function is designed to work with grain's random_map.
 
     Args:
-        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
-            expressions involving a file extension.
-        num_records (int): The requested length of the data source.
-        sample_rate (int): The requested sample rate of the audio.
-        mono (bool): Whether to force the audio to be mono.
-        duration (float): The requested duration of the audio.
-        pad_mode (str): The requested padding mode.
-        extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
-        saliency_params (SaliencyParams): Saliency parameters to use. Defaults to None, meaning AudioTree.from_file
-            will be used. If not None, either AudioTree.salient_excerpt will be used or AudioTree.excerpt will be used.
+        file_path: Path to the audio file.
+        rng: Random number generator from grain's random_map.
+        sample_rate: Target sample rate for audio files.
+        duration: Duration in seconds to load from each file.
+        mono: Whether to convert audio to mono.
+        pad_mode: Padding mode for files shorter than duration (numpy.pad modes).
+            Options: "constant" (zeros), "edge" (repeat edge), "reflect" (mirror),
+            "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
+        saliency_params: Optional saliency parameters for excerpt selection.
+            If None or disabled: loads from beginning (deterministic)
+            If enabled without loudness_cutoff: random excerpt using RNG
+            If enabled with loudness_cutoff: multi-try saliency search for loud sections
+        source: Optional source group name (e.g., "music", "speech") to store in metadata.
+
+    Returns:
+        AudioTree with the loaded audio data.
     """
-
-    def __init__(
-        self,
-        sources: Mapping[str, List[str]],
-        num_records: int = None,
-        sample_rate: int = 44_100,
-        mono: int = 1,
-        duration: float = 1.0,
-        pad_mode: str = "constant",
-        extensions: List[str] = None,
-        saliency_params: SaliencyParams = None,
-    ):
-
-        self.sample_rate = sample_rate
-        self.mono = bool(mono)
-        self.duration = duration
-        self.pad_mode = pad_mode
-        if extensions is None:
-            extensions = _default_extensions
-        self.saliency_params = saliency_params
-
-        filepaths = []
-        source_names = []
-        for group_name, folders in sources.items():
-            filepaths_in_group = []
-            for _folder in folders:
-                folder = os.path.expandvars(os.path.expanduser(_folder))
-                if os.path.isdir(folder):
-                    found_files = _find_files_with_extensions(
-                        folder, extensions=extensions
-                    )
-                    if not found_files:
-                        warnings.warn(
-                            f"No files found in directory '{folder}' for group '{group_name}' "
-                            f"with extensions {extensions}",
-                            UserWarning
-                        )
-                    filepaths_in_group += found_files
-                else:
-                    found_files = list(glob.glob(folder, recursive=True))
-                    if not found_files:
-                        warnings.warn(
-                            f"Glob pattern '{folder}' matched no files for group '{group_name}'",
-                            UserWarning
-                        )
-                    filepaths_in_group += found_files
-
-            if filepaths_in_group:
-                filepaths += filepaths_in_group
-                source_names += [group_name] * len(filepaths_in_group)
-            else:
-                raise RuntimeError(
-                    f"Group '{group_name}' is empty. "
-                    f"The number of specified folders in the group was {len(folders)}. "
-                    f"The approved file extensions were {extensions}."
-                )
-
-        if num_records is not None:
-            filepaths = filepaths[:num_records]
-            source_names = source_names[:num_records]
-
-        self.filepaths = filepaths
-        self.source_names = source_names
-
-        self._length = len(filepaths)
-        assert self._length > 0
-
-    def __len__(self) -> int:
-        return self._length
-
-    def __getitem__(self, record_key: SupportsIndex):
-        file_path = self.filepaths[record_key]
-        source_name = self.source_names[record_key]
-        return self.load_audio(file_path, record_key, source=source_name)
-
-
-class AudioDataBalancedSource(grain.sources.RandomAccessDataSource, AudioDataSourceMixin):
-    """A Data Source that equally weights multiple sources, where each source is a list of directories.
-
-    .. deprecated::
-        Use :func:`create_balanced_audio_dataset` instead, which uses grain's
-        public MapDataset.mix() API and supports custom weights.
-
-    Args:
-        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
-            expressions involving a file extension.
-        num_records (int): The requested length of the data source.
-        sample_rate (int): The requested sample rate of the audio.
-        mono (bool): Whether to force the audio to be mono.
-        duration (float): The requested duration of the audio.
-        pad_mode (str): The requested padding mode.
-        extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
-        saliency_params (SaliencyParams): Saliency parameters to use.
-    """
-
-    def __init__(
-        self,
-        sources: Mapping[str, List[str]],
-        num_records: int,
-        sample_rate: int = 44_100,
-        mono: int = 1,
-        duration: float = 1.0,
-        pad_mode: str = "constant",
-        extensions: List[str] = None,
-        saliency_params: SaliencyParams = None,
-    ):
-        warnings.warn(
-            "AudioDataBalancedSource is deprecated. Use create_balanced_audio_dataset() "
-            "instead, which uses grain's public MapDataset.mix() API and supports custom weights.",
-            DeprecationWarning,
-            stacklevel=2,
+    # Deterministic load from beginning if saliency is disabled
+    if saliency_params is None or not saliency_params.enabled:
+        return AudioTree.from_file(
+            file_path,
+            sample_rate=sample_rate,
+            offset=0,
+            duration=duration,
+            mono=mono,
+            pad_mode=pad_mode,
+            source=source,
         )
 
-        self.sample_rate = sample_rate
-        self.mono = bool(mono)
-        self.duration = duration
-        self.pad_mode = pad_mode
-        if extensions is None:
-            extensions = _default_extensions
-        self.saliency_params = saliency_params
-
-        groups = []
-        group_names = []
-
-        for group_name, folders in sources.items():
-            filepaths = []
-            for _folder in folders:
-                folder = os.path.expandvars(os.path.expanduser(_folder))
-                if os.path.isdir(os.path.expandvars(os.path.expanduser(folder))):
-                    found_files = _find_files_with_extensions(
-                        folder, extensions=extensions
-                    )
-                    if not found_files:
-                        warnings.warn(
-                            f"No files found in directory '{folder}' for group '{group_name}' "
-                            f"with extensions {extensions}",
-                            UserWarning
-                        )
-                    filepaths += found_files
-                else:
-                    found_files = list(glob.glob(folder))
-                    if not found_files:
-                        warnings.warn(
-                            f"Glob pattern '{folder}' matched no files for group '{group_name}'",
-                            UserWarning
-                        )
-                    filepaths += found_files
-
-            if filepaths:
-                groups.append(filepaths)
-                group_names.append(group_name)
-            else:
-                raise RuntimeError(
-                    f"Group '{group_name}' is empty. "
-                    f"The number of specified folders in the group was {len(folders)}. "
-                    f"The approved file extensions were {extensions}."
-                )
-
-        self._num_groups = len(groups)
-        self._group_names = group_names
-        self._length = num_records
-
-        ideal_group_length = math.ceil(num_records / self._num_groups)
-        seed = 0
-        lengthened_groups = []
-        for group in groups:
-            num_loops = math.ceil(ideal_group_length / len(group))
-            lengthened_group = []
-            for _ in range(num_loops):
-                copied = group.copy()
-                Random(seed).shuffle(copied)
-                seed += 1
-                lengthened_group += copied
-            lengthened_groups.append(lengthened_group)
-        self._groups = lengthened_groups
-
-        assert self._length > 0
-
-    def __len__(self) -> int:
-        return self._length
-
-    def __getitem__(self, record_key: SupportsIndex):
-        record_key = int(record_key)
-
-        group_idx = record_key % self._num_groups
-        idx = record_key // self._num_groups
-
-        file_path = self._groups[group_idx][idx]
-        source_name = self._group_names[group_idx]
-
-        return self.load_audio(file_path, record_key, source=source_name)
-
-
-class AudioDataBalancedDataset(MixedIterDataset):
-    """A Data Source that equally weights multiple sources, where each source is a list of directories.
-
-    .. deprecated::
-        Use :func:`create_balanced_audio_dataset` instead, which uses grain's
-        public MapDataset.mix() API and returns a MapDataset with random access.
-        This class uses internal grain APIs (MixedIterDataset) that may change.
-
-    Args:
-        sources (Mapping[str, List[str]]): A dictionary mapping each source to a list of directories or glob
-            expressions involving a file extension.
-        sample_rate (int): The requested sample rate of the audio.
-        mono (bool): Whether to force the audio to be mono.
-        duration (float): The requested duration of the audio.
-        pad_mode (str): The requested padding mode.
-        extensions (List[str]): A list of file extensions to search for. Each extension should include a period.
-        saliency_params (SaliencyParams): Saliency parameters to use.
-        weights (Mapping[str, float]): A dictionary mapping each source to its proportion in the dataset.
-    """
-
-    def __init__(
-        self,
-        sources: Mapping[str, List[str]],
-        sample_rate: int = 44_100,
-        mono: int = 1,
-        duration: float = 1.0,
-        pad_mode: str = "constant",
-        extensions: List[str] = None,
-        saliency_params: SaliencyParams = None,
-        weights: Mapping[str, float] = None,
-    ):
-        warnings.warn(
-            "AudioDataBalancedDataset is deprecated. Use create_balanced_audio_dataset() "
-            "instead, which uses grain's public MapDataset.mix() API and returns a "
-            "MapDataset with random access.",
-            DeprecationWarning,
-            stacklevel=2,
+    # Multi-try saliency search: find loud sections using multiple random samples
+    if saliency_params.loudness_cutoff is not None:
+        return AudioTree.salient_excerpt(
+            file_path,
+            rng,
+            saliency_params=saliency_params,
+            sample_rate=sample_rate,
+            duration=duration,
+            mono=mono,
+            pad_mode=pad_mode,
+            source=source,
         )
 
-        self.sample_rate = sample_rate
-        self.mono = bool(mono)
-        self.duration = duration
-        self.pad_mode = pad_mode
-        if extensions is None:
-            extensions = _default_extensions
-        self.saliency_params = saliency_params
+    # Simple random excerpt: use RNG for random position, no loudness filtering
+    return AudioTree.excerpt(
+        file_path,
+        rng=rng,
+        sample_rate=sample_rate,
+        duration=duration,
+        mono=mono,
+        pad_mode=pad_mode,
+        source=source,
+    )
 
-        datasets = []
 
-        seed = 0
-        proportions = []
-        for group_name, folders in sources.items():
-            datasource = AudioDataSimpleSource(
-                sources={group_name: folders},
-                num_records=None,
-                sample_rate=sample_rate,
-                mono=mono,
-                duration=duration,
-                extensions=extensions,
-                saliency_params=saliency_params,
-            )
-            dataset = (
-                grain.MapDataset.source(datasource)
-                .shuffle(seed=seed)
-                .repeat()
-                .to_iter_dataset()
-            )
-            seed += 1
-            datasets.append(dataset)
-            weight = 1.0
-            if isinstance(weights, dict):
-                weight = weights.get(group_name, 1.0)
-            proportions.append(weight * 1000)
+def create_audio_dataset(
+    sources: List[str] | str,
+    num_records: int | None = None,
+    shuffle: bool = True,
+    repeat: bool = False,
+    seed: int = 0,
+    sample_rate: int = 44_100,
+    mono: bool = True,
+    duration: float = 1.0,
+    pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"] | None = "constant",
+    extensions: Optional[List[str]] = None,
+    saliency_params: Optional[SaliencyParams] = None,
+    source: str | None = None,
+) -> grain.MapDataset:
+    """Create a simple MapDataset from audio files.
 
-        super().__init__(datasets, proportions=proportions)
+    This function creates a grain MapDataset that loads audio files from one or more
+    directories. Unlike `create_balanced_audio_dataset`, this treats all files equally
+    without balancing across groups.
+
+    Args:
+        sources: A directory path or list of directory paths containing audio files.
+        num_records: Total number of records in the resulting dataset. If None and repeat=False,
+            uses all available files. If None and repeat=True, dataset is infinite.
+        shuffle: Whether to shuffle files.
+        repeat: Whether to repeat the dataset infinitely. Set to True for training,
+            False for validation/testing.
+        seed: Random seed for shuffling.
+        sample_rate: Target sample rate for audio files.
+        mono: Whether to convert audio to mono.
+        duration: Duration in seconds to load from each file.
+        pad_mode: Padding mode for files shorter than duration (numpy.pad modes).
+            Options: "constant" (zeros), "edge" (repeat edge), "reflect" (mirror),
+            "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
+        extensions: List of audio file extensions to search for. Defaults to [".wav", ".flac"].
+        saliency_params: Optional saliency parameters for excerpt selection.
+        source: Optional source group name (e.g., "music", "speech") to store in metadata.
+            If None, no source metadata is added.
+
+    Returns:
+        A grain.MapDataset that loads audio files using random_map for proper RNG seeding.
+
+    Example:
+        >>> # Load all files from a directory
+        >>> ds = create_audio_dataset(
+        ...     sources="/data/audio",
+        ...     sample_rate=44100,
+        ...     duration=3.0,
+        ... )
+
+        >>> # Training dataset: shuffle and repeat infinitely
+        >>> ds = create_audio_dataset(
+        ...     sources=["/data/train1", "/data/train2"],
+        ...     shuffle=True,
+        ...     repeat=True,
+        ...     sample_rate=44100,
+        ...     duration=3.0,
+        ... )
+
+        >>> # Validation dataset: deterministic, no repeat, limited records
+        >>> ds = create_audio_dataset(
+        ...     sources="/data/val",
+        ...     num_records=1000,
+        ...     shuffle=False,
+        ...     repeat=False,
+        ...     sample_rate=44100,
+        ...     duration=3.0,
+        ... )
+    """
+    if extensions is None:
+        extensions = _default_extensions
+
+    # Normalize sources to list
+    if isinstance(sources, str):
+        sources = [sources]
+
+    # Collect all filepaths
+    filepaths = []
+    for folder in sources:
+        folder_path = Path(folder)
+        folder_path = Path(os.path.expandvars(os.path.expanduser(str(folder_path))))
+        for ext in extensions:
+            # Remove leading dot if present
+            ext_clean = ext.lstrip('.')
+            found_files = folder_path.rglob(f"*.{ext_clean}")
+            filepaths.extend([str(p) for p in found_files])
+
+    if not filepaths:
+        raise RuntimeError(
+            f"No audio files found in sources {sources} with extensions {extensions}"
+        )
+
+    # Create dataset from list of filepaths
+    ds = grain.MapDataset.source(filepaths)
+
+    if shuffle:
+        ds = ds.shuffle(seed=seed)
+
+    if repeat:
+        ds = ds.repeat()
+
+    # Apply random_map for loading with saliency
+    load_fn = functools.partial(
+        _load_audio_with_saliency,
+        sample_rate=sample_rate,
+        duration=duration,
+        mono=mono,
+        pad_mode=pad_mode,
+        saliency_params=saliency_params,
+        source=source,
+    )
+    ds = ds.random_map(load_fn, seed=seed + 1000)
+
+    if num_records is not None:
+        ds = ds.slice(slice(0, num_records))
+
+    return ds
 
 
 def create_balanced_audio_dataset(
-    sources: Mapping[str, List[str]],
-    num_records: int,
+    sources: Mapping[str, List[str]] | None = None,
+    num_records: int = None,
     weights: Optional[Mapping[str, float]] = None,
+    datasets: Optional[Mapping[str, grain.MapDataset]] = None,
     shuffle: bool = True,
     seed: int = 0,
     sample_rate: int = 44_100,
     mono: int = 1,
     duration: float = 1.0,
-    pad_mode: str = "constant",
+    pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"] | None = "constant",
     extensions: Optional[List[str]] = None,
     saliency_params: Optional[SaliencyParams] = None,
 ) -> grain.MapDataset:
-    """Create a balanced MapDataset from multiple audio groups.
+    """Create a balanced MapDataset from multiple audio groups and/or pre-constructed datasets.
 
-    This function creates a grain MapDataset that samples from multiple audio
-    source groups with specified weights. It uses grain's public MapDataset.mix()
-    API for weighted mixing.
+    This function creates a grain MapDataset that samples from multiple sources
+    with specified weights. Sources can be either audio file directories or
+    pre-constructed grain MapDatasets. It uses grain's random_map for saliency-based
+    loading, ensuring infinite variety in RNG seeds even when files are repeated.
 
     Args:
-        sources: A dictionary mapping group names to lists of directories or
-            glob expressions for audio files.
-        num_records: Total number of records in the resulting dataset.
+        sources: Optional dictionary mapping group names to lists of directories for
+            audio files. At least one of `sources` or `datasets` must be provided.
+        num_records: Total number of records in the resulting dataset. Required if the
+            mixed dataset would be infinite.
         weights: Optional dictionary mapping group names to sampling weights.
             Weights are normalized to sum to 1.0. Groups not in the dict
             default to weight 1.0. If None, all groups are weighted equally.
-        shuffle: Whether to shuffle files within each group. Set to False for
-            deterministic iteration (e.g., pre-rendering).
-        seed: Random seed for shuffling. Each group uses seed + group_index
+            Group names can refer to keys in either `sources` or `datasets`.
+        datasets: Optional dictionary mapping group names to pre-constructed grain MapDatasets.
+            These datasets will be mixed with file-based sources. Useful for combining
+            different data sources or including pre-processed datasets.
+        shuffle: Whether to shuffle files within each file-based group. Set to False for
+            deterministic iteration (e.g., pre-rendering). Does not affect pre-constructed datasets.
+        seed: Random seed for shuffling. Each file-based group uses seed + group_index
             for independent shuffling.
-        sample_rate: Target sample rate for audio files.
-        mono: Whether to convert audio to mono (0 or 1).
-        duration: Duration in seconds to load from each file.
-        pad_mode: Padding mode for files shorter than duration.
-        extensions: List of audio file extensions to search for.
-        saliency_params: Optional saliency parameters for excerpt selection.
+        sample_rate: Target sample rate for audio files (only applies to file-based sources).
+        mono: Whether to convert audio to mono (only applies to file-based sources, 0 or 1).
+        duration: Duration in seconds to load from each file (only applies to file-based sources).
+        pad_mode: Padding mode for files shorter than duration (only applies to file-based sources).
+            Options: "constant" (zeros), "edge" (repeat edge), "reflect" (mirror),
+            "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
+        extensions: List of audio file extensions to search for (only applies to file-based sources).
+        saliency_params: Optional saliency parameters for excerpt selection (only applies to file-based sources).
 
     Returns:
         A grain.MapDataset with length num_records that samples from the
@@ -464,48 +320,74 @@ def create_balanced_audio_dataset(
         ...     sample_rate=44100,
         ...     duration=3.0,
         ... )
+
+        >>> # Mix file sources with a pre-constructed dataset
+        >>> preprocessed_ds = create_audio_dataset(sources="/data/preprocessed", repeat=True)
+        >>> ds = create_balanced_audio_dataset(
+        ...     sources={"speech": ["/data/speech"]},
+        ...     datasets={"preprocessed": preprocessed_ds},
+        ...     num_records=10000,
+        ...     weights={"speech": 0.7, "preprocessed": 0.3},
+        ... )
     """
-    if extensions is None:
-        extensions = _default_extensions
+    if sources is None and datasets is None:
+        raise ValueError("At least one of 'sources' or 'datasets' must be provided")
 
-    datasets = []
-    proportions = []
-    group_names = list(sources.keys())
+    all_datasets = []
+    all_proportions = []
+    dataset_index = 0
 
-    for i, group_name in enumerate(group_names):
-        folders = sources[group_name]
+    # Create datasets from file-based sources
+    if sources is not None:
+        group_names = list(sources.keys())
+        for i, group_name in enumerate(group_names):
+            folders = sources[group_name]
 
-        # Create a simple source for this group
-        source = AudioDataSimpleSource(
-            sources={group_name: folders},
-            num_records=None,  # Load all files in group
-            sample_rate=sample_rate,
-            mono=mono,
-            duration=duration,
-            pad_mode=pad_mode,
-            extensions=extensions,
-            saliency_params=saliency_params,
-        )
+            # Create dataset for this group with repeat=True (required for mixing)
+            ds = create_audio_dataset(
+                sources=folders,
+                num_records=None,  # Don't slice per-group, slice after mixing
+                shuffle=shuffle,
+                repeat=True,  # Always repeat before mixing
+                seed=seed + dataset_index,
+                sample_rate=sample_rate,
+                mono=bool(mono),
+                duration=duration,
+                pad_mode=pad_mode,
+                extensions=extensions,
+                saliency_params=saliency_params,
+                source=group_name,  # Set source metadata to group name
+            )
 
-        # Wrap in MapDataset with optional shuffle and repeat
-        ds = grain.MapDataset.source(source)
-        if shuffle:
-            ds = ds.shuffle(seed=seed + i)
-        ds = ds.repeat()
-        datasets.append(ds)
+            all_datasets.append(ds)
 
-        # Get weight for this group (default to 1.0)
-        weight = 1.0
-        if weights is not None:
-            weight = weights.get(group_name, 1.0)
-        proportions.append(weight)
+            # Get weight for this group (default to 1.0)
+            weight = 1.0
+            if weights is not None:
+                weight = weights.get(group_name, 1.0)
+            all_proportions.append(weight)
+            dataset_index += 1
+
+    # Add pre-constructed datasets
+    if datasets is not None:
+        for group_name, ds in datasets.items():
+            all_datasets.append(ds)
+
+            # Get weight for this group (default to 1.0)
+            weight = 1.0
+            if weights is not None:
+                weight = weights.get(group_name, 1.0)
+            all_proportions.append(weight)
 
     # Mix datasets with weights, shuffle to break alternating pattern, then slice
     # The shuffle after mix is critical: without it, mix() produces a strict
     # alternating pattern (A, B, A, B, ...) which causes problems with striped
     # worker sharding in DataLoader (even-numbered workers see only source A,
     # odd-numbered workers see only source B).
-    mixed = grain.MapDataset.mix(datasets, weights=proportions)
+    mixed = grain.MapDataset.mix(all_datasets, weights=all_proportions)
     if shuffle:
         mixed = mixed.shuffle(seed=seed)
-    return mixed.slice(slice(0, num_records))
+
+    if num_records is not None:
+        return mixed.slice(slice(0, num_records))
+    return mixed

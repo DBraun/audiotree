@@ -1,0 +1,3 @@
+`VCTK/p225_006_mic1.flac` is from `VCTK-Corpus-0.92`: https://datashare.ed.ac.uk/handle/10283/3443 (Creative Commons License: Attribution 4.0 International)
+
+`musdb18hq/train/A Classic Education - NightOwl/mixture.wav` is a 20-second excerpt from "A Classic Education - NightOwl" from the MUSDB18-HQ dataset: https://sigsep.github.io/datasets/musdb.html (Creative Commons License: Attribution-NonCommercial-ShareAlike 4.0 International)

@@ -1,0 +1,15 @@
+train/volume_norm.min_db: -25
+train/volume_norm.max_db: -15
+
+val/volume_norm.min_db: -20
+val/volume_norm.max_db: -20
+
+trim.length: 1.0
+
+train/augment_batch.transforms:
+  - volume_norm
+  - trim
+
+val/augment_batch.transforms:
+  - volume_norm
+  - trim

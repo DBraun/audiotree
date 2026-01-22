@@ -1,0 +1,4 @@
+volume_norm.min_db: -20
+volume_norm.max_db: -15
+
+trim.length: 1.0

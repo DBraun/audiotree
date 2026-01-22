@@ -9,64 +9,107 @@
 Data Sources
 =========================
 
-..  
+..
 
 .. ---------------------------
 
 Data Sources in ``audiotree.sources`` are `Grain`_ `data sources <https://github.com/google/grain/blob/main/docs/data_sources.md>`_
 that are specially designed for audio. Grain is a new library for dataset operations in JAX with no TensorFlow dependency.
 
-For now, there are only two types of Data Sources and one Data Set, but they fit many needs.
-You can take a look at DAC-JAX's `input_pipeline.py <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_ to see how they're used.
+The main functions are :func:`~audiotree.sources.create_audio_dataset` for simple loading and
+:func:`~audiotree.sources.create_balanced_audio_dataset` for balanced multi-group sampling.
 
-The three :class:`~audiotree.sources.core.AudioDataSimpleSource`, :class:`~audiotree.sources.core.AudioDataBalancedSource`, and :class:`~audiotree.sources.core.AudioDataBalancedDataset` are initialized with a dictionary of ``sources``.
-For example, with ArgBind, the YAML might be this (adapted from `DAC <https://github.com/descriptinc/descript-audio-codec/blob/main/conf/base.yml>`_):
+**Quick Start**
 
-.. code-block:: yaml
+.. code-block:: python
 
-    train/AudioDataBalancedSource.extensions:
-        - .wav
-        - .flac
-    train/AudioDataBalancedSource.sources:
-        speech_fb:
-            - /data/daps/train
-        speech_hq:
-            - /data/vctk
-            - /data/vocalset
-            - /data/read_speech
-            - /data/french_speech
-        speech_uq:
-            - /data/emotional_speech/
-            - /data/common_voice/
-            - /data/german_speech/
-            - /data/russian_speech/
-            - /data/spanish_speech/
-        music_hq:
-            - /data/musdb/train
-        music_uq:
-            - /data/jamendo
-        general:
-            - /data/audioset/data/unbalanced_train_segments/
-            - /data/audioset/data/balanced_train_segments/
+    from audiotree.sources import create_balanced_audio_dataset
 
-The folders can also be glob expressions (due to the balancing, the result is different from the above):
+    # Simple balanced dataset
+    ds = create_balanced_audio_dataset(
+        sources={
+            "speech": ["/data/speech"],
+            "music": ["/data/music"],
+        },
+        num_records=10000,
+        sample_rate=44100,
+        duration=3.0,
+    )
 
-.. code-block:: yaml
+For detailed information on balanced datasets, hierarchical directories, and weight-based sampling,
+see :ref:`balanced_datasets`.
 
-    train/AudioDataBalancedSource.sources:
-        speech:
-            - /data/*speech/**/*.wav
-            - /data/daps/train
-            - /data/vctk
-            - /data/vocalset
-            - /data/common_voice
-        music:
-            - /data/musdb/train
-            - /data/jamendo
+For parallel data loading with multiprocessing, see :ref:`multiprocessing`.
 
-The second thing to know is that :class:`~audiotree.sources.core.AudioDataSimpleSource`, :class:`~audiotree.sources.core.AudioDataBalancedSource`, and :class:`~audiotree.sources.core.AudioDataBalancedDataset`
-can be initialized with an instance of :class:`~audiotree.sources.core.SaliencyParams`. If :class:`~audiotree.sources.core.SaliencyParams` has ``enabled``
-set to ``True``, then a random section of an audio file will be selected until it meets a specified minimum loudness.
+Additional Features
+-------------------
+
+**Saliency-Based Loading**
+
+Use saliency to select louder sections of audio:
+
+.. code-block:: python
+
+    from audiotree.sources import create_balanced_audio_dataset
+    from audiotree.core import SaliencyParams
+
+    saliency_params = SaliencyParams(
+        enabled=True,
+        loudness_cutoff=-40,  # Only select sections above -40 LUFS
+        num_tries=10,
+    )
+
+    ds = create_balanced_audio_dataset(
+        sources={
+            "speech": ["/data/speech"],
+            "music": ["/data/music"],
+        },
+        num_records=10000,
+        saliency_params=saliency_params,
+        sample_rate=44100,
+        duration=3.0,
+    )
+
+**File Extensions**
+
+Customize which file types to load:
+
+.. code-block:: python
+
+    ds = create_balanced_audio_dataset(
+        sources={"audio": ["/data/audio"]},
+        num_records=1000,
+        extensions=[".wav", ".flac", ".mp3", ".ogg"],
+        sample_rate=44100,
+        duration=3.0,
+    )
+
+**Multiple Directories per Group**
+
+.. code-block:: python
+
+    ds = create_balanced_audio_dataset(
+        sources={
+            "speech": [
+                "/data/vctk",
+                "/data/librispeech",
+                "/data/common_voice",
+            ],
+            "music": [
+                "/data/musdb/train",
+                "/data/jamendo",
+            ],
+        },
+        num_records=10000,
+        weights={"speech": 0.7, "music": 0.3},
+        sample_rate=44100,
+        duration=3.0,
+    )
+
+External Examples
+-----------------
+
+For production usage examples, see `DAC-JAX's input_pipeline.py <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_.
 
 .. _ArgBind: https://github.com/pseeth/argbind/
 .. _DAC-JAX: https://github.com/DBraun/DAC-JAX

@@ -157,7 +157,7 @@ class AudioWriter:
             if self.write_audio:
                 # Convert to numpy and transpose for soundfile (channels, samples) -> (samples, channels)
                 audio = np.array(tree.audio_data[i].T)
-                soundfile.write(filepath, audio, tree.sample_rate)
+                soundfile.write(str(filepath), audio, tree.sample_rate)
                 self.written_paths.append(filepath)
 
             paths.append(filepath)

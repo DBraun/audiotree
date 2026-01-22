@@ -37,12 +37,10 @@ The codebase is organized into three main components:
 It includes metadata like sample rate and provides methods for loading files, resampling, and computing loudness.
 
 1. **Datasources (`audiotree.sources`)**: Provides integration with Google's Grain library for ML data pipelines.
-The key abstraction is `AudioDataSourceMixin` which other sources inherit from.
-Sources handle loading audio files and can balance sampling across multiple data sources.
+The key functions are `create_audio_dataset()` for simple loading and `create_balanced_audio_dataset()` for multi-group balanced sampling.
+Both use grain's `random_map` for proper RNG seeding. The `load_audio_with_saliency()` function handles saliency-based excerpt selection with infinite RNG variety even when files repeat.
 
-1. **Transforms (`audiotree.transforms`)**: A collection of audio augmentations that operate on AudioTree objects.
-Transforms can be applied in any order and include volume changes, phase manipulation, and neural codec encoding.
-All transforms follow a consistent interface inheriting from `BaseTransform`.
+1. **Transforms (`audiotree.transforms`)**: Audio augmentations with dual backends: NumPy (`audiotree.transforms`) for CPU grain pipelines using `np.random.Generator`, and JAX (`audiotree.transforms.jax`) for GPU/JIT training using `jax.random.key`.
 
 1. **Writer (`audiotree.writer`)**: The `AudioWriter` class provides sequential writing of AudioTree batches to disk with automatic manifest generation.
 Manifests can be saved as NPZ (default, best for large datasets), JSON, or CSV formats, tracking metadata like loudness, pitch, and file paths.
