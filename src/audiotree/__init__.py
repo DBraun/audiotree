@@ -1,4 +1,4 @@
-__version__ = "0.2.3"
+__version__ = "0.3.0"
 __author__ = "David Braun"
 # Effort-based versioning. Don't move the line above. It must be the first line due to `docs/source/conf.py`
 from .core import AudioTree
@@ -6,7 +6,7 @@ from .core import SaliencyParams
 from .core import batch_audiotrees
 from .writer import AudioWriter
 from .memmap_writer import MemmapWriter, FieldSpec
-from . import datasources
+from . import sources
 from . import transforms
 
 __all__ = [
@@ -16,6 +16,6 @@ __all__ = [
     "AudioWriter",
     "MemmapWriter",
     "FieldSpec",
-    "datasources",
+    "sources",
     "transforms",
 ]

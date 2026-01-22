@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* **Breaking change**: Renamed `audiotree.datasources` to `audiotree.sources` to match `grain.sources`.
 * New `AudioTree.normalize_loudness(target_lufs)` method to normalize audio to a target LUFS level. Computes loudness if not already set, scales audio, and updates the loudness field.
 * New `batch_audiotrees(audio_trees, backend=None)` function to batch a list of AudioTrees into a single AudioTree. Uses `jax.tree_util.tree_map` to properly concatenate all fields including loudness, metadata, etc. The `backend` kwarg allows explicit selection of `np` or `jnp` for concatenation; if `None`, it is inferred from the first AudioTree's `audio_data` type.
 * New `AudioTree.source` property that returns the source group name for each item in the batch. When using `AudioDataSimpleSource` or `AudioDataBalancedSource` with `sources={"music": [...], "speech": [...]}`, each loaded AudioTree now tracks which source group it came from.

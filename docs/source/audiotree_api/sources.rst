@@ -2,12 +2,12 @@
      :language: python
      :class: highlight
 
-audiotree.datasources
+audiotree.sources
 ===========================
 
 ..  
 
 .. ---------------------------
 
-.. automodule:: audiotree.datasources.core
+.. automodule:: audiotree.sources.core
    :members:

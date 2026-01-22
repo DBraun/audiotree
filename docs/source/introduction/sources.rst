@@ -4,7 +4,7 @@
 
 .. :tocdepth: 2
 
-.. _datasources:
+.. _sources:
 
 Data Sources
 =========================
@@ -13,13 +13,13 @@ Data Sources
 
 .. ---------------------------
 
-Data Sources in ``audiotree.datasources`` are `Grain`_ `data sources <https://github.com/google/grain/blob/main/docs/data_sources.md>`_
+Data Sources in ``audiotree.sources`` are `Grain`_ `data sources <https://github.com/google/grain/blob/main/docs/data_sources.md>`_
 that are specially designed for audio. Grain is a new library for dataset operations in JAX with no TensorFlow dependency.
 
 For now, there are only two types of Data Sources and one Data Set, but they fit many needs.
 You can take a look at DAC-JAX's `input_pipeline.py <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_ to see how they're used.
 
-The three :class:`~audiotree.datasources.core.AudioDataSimpleSource`, :class:`~audiotree.datasources.core.AudioDataBalancedSource`, and :class:`~audiotree.datasources.core.AudioDataBalancedDataset` are initialized with a dictionary of ``sources``.
+The three :class:`~audiotree.sources.core.AudioDataSimpleSource`, :class:`~audiotree.sources.core.AudioDataBalancedSource`, and :class:`~audiotree.sources.core.AudioDataBalancedDataset` are initialized with a dictionary of ``sources``.
 For example, with ArgBind, the YAML might be this (adapted from `DAC <https://github.com/descriptinc/descript-audio-codec/blob/main/conf/base.yml>`_):
 
 .. code-block:: yaml
@@ -64,8 +64,8 @@ The folders can also be glob expressions (due to the balancing, the result is di
             - /data/musdb/train
             - /data/jamendo
 
-The second thing to know is that :class:`~audiotree.datasources.core.AudioDataSimpleSource`, :class:`~audiotree.datasources.core.AudioDataBalancedSource`, and :class:`~audiotree.datasources.core.AudioDataBalancedDataset`
-can be initialized with an instance of :class:`~audiotree.datasources.core.SaliencyParams`. If :class:`~audiotree.datasources.core.SaliencyParams` has ``enabled``
+The second thing to know is that :class:`~audiotree.sources.core.AudioDataSimpleSource`, :class:`~audiotree.sources.core.AudioDataBalancedSource`, and :class:`~audiotree.sources.core.AudioDataBalancedDataset`
+can be initialized with an instance of :class:`~audiotree.sources.core.SaliencyParams`. If :class:`~audiotree.sources.core.SaliencyParams` has ``enabled``
 set to ``True``, then a random section of an audio file will be selected until it meets a specified minimum loudness.
 
 .. _ArgBind: https://github.com/pseeth/argbind/

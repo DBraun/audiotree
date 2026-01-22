@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from audiotree import MemmapWriter, FieldSpec
-from audiotree.datasources import MemmapDataSource
+from audiotree.sources import MemmapDataSource
 
 
 def test_basic_write():

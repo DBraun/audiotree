@@ -489,7 +489,7 @@ Basic Example
     3  # One file per batch item
 
     # Read the data back
-    from audiotree.datasources import ManifestDataSource
+    from audiotree.sources import ManifestDataSource
     source = ManifestDataSource.from_writer_output("output")
     >>> source[0].loudness  # Metadata is preserved
     array([-20.])
@@ -500,6 +500,6 @@ Next Steps
 Now that you understand the basics of AudioTree, explore:
 
 - :ref:`writer` - Learn how to write AudioTree objects to disk with manifests
-- :ref:`datasources` - Learn how to create data loaders for ML pipelines
+- :ref:`sources` - Learn how to create data loaders for ML pipelines
 - :ref:`transforms` - Discover audio augmentations and transformations
 - :class:`~audiotree.core.AudioTree` API reference for detailed documentation

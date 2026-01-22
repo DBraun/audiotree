@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from audiotree import AudioTree, AudioWriter
-from audiotree.datasources import ManifestDataSource
+from audiotree.sources import ManifestDataSource
 
 
 def main():

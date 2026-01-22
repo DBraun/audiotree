@@ -36,7 +36,7 @@ The codebase is organized into three main components:
 1. **Core (`audiotree.core`)**: The `AudioTree` dataclass is the central data structure, representing audio as JAX arrays with shape (batch × channels × samples).
 It includes metadata like sample rate and provides methods for loading files, resampling, and computing loudness.
 
-1. **Datasources (`audiotree.datasources`)**: Provides integration with Google's Grain library for ML data pipelines.
+1. **Datasources (`audiotree.sources`)**: Provides integration with Google's Grain library for ML data pipelines.
 The key abstraction is `AudioDataSourceMixin` which other sources inherit from.
 Sources handle loading audio files and can balance sampling across multiple data sources.
 

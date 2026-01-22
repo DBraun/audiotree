@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from audiotree.datasources import (
+from audiotree.sources import (
     create_balanced_audio_dataset,
     AudioDataBalancedSource,
     AudioDataBalancedDataset,

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from audiotree import MemmapWriter, FieldSpec
-from audiotree.datasources import MemmapDataSource
+from audiotree.sources import MemmapDataSource
 
 
 def _create_test_dataset(tmpdir, num_samples=10, include_strings=False):

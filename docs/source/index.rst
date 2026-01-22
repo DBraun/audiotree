@@ -49,7 +49,7 @@ Content
 
    introduction/introduction
    introduction/writer
-   introduction/datasources
+   introduction/sources
    introduction/transforms
 
 .. toctree::
@@ -58,7 +58,7 @@ Content
 
    audiotree_api/core
    audiotree_api/writer
-   audiotree_api/datasources
+   audiotree_api/sources
    audiotree_api/transforms
 
 Acknowledgments

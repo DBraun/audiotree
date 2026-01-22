@@ -242,11 +242,11 @@ The ``pattern`` parameter supports Python string formatting:
 Reading Written Data
 --------------------
 
-Use :class:`~audiotree.datasources.manifest.ManifestDataSource` to read AudioWriter output:
+Use :class:`~audiotree.sources.manifest.ManifestDataSource` to read AudioWriter output:
 
 .. code-block:: python
 
-    from audiotree.datasources import ManifestDataSource
+    from audiotree.sources import ManifestDataSource
 
     # Write some data
     with AudioWriter("output") as writer:
@@ -326,7 +326,7 @@ Here's how metadata flows through AudioTree transformations and into the manifes
         writer.write(processed, tags={"processed": True, "version": 2})
 
     # When read back, all metadata is available
-    from audiotree.datasources import ManifestDataSource
+    from audiotree.sources import ManifestDataSource
     source = ManifestDataSource.from_writer_output("output")
     loaded = source[0]
 
@@ -356,7 +356,7 @@ Here's a complete example of creating a training dataset with AudioWriter:
     import numpy as np
     from pathlib import Path
     from audiotree import AudioTree, AudioWriter
-    from audiotree.datasources import AudioDataSimpleSource
+    from audiotree.sources import AudioDataSimpleSource
     from audiotree.transforms import VolumeChange, RandomPhaseShift, Batch
     from tqdm import tqdm
 

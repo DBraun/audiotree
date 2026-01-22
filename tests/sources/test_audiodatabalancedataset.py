@@ -4,7 +4,7 @@ import numpy as np
 import soundfile
 
 import audiotree.transforms
-from audiotree.datasources import AudioDataBalancedDataset
+from audiotree.sources import AudioDataBalancedDataset
 
 
 def test_audiodatabalancedataset():

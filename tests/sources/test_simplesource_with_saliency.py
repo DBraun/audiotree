@@ -9,7 +9,7 @@ import grain
 
 from audiotree import AudioTree
 from audiotree.core import SaliencyParams
-from audiotree.datasources import AudioDataSimpleSource
+from audiotree.sources import AudioDataSimpleSource
 from audiotree.transforms import Batch
 
 

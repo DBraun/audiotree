@@ -7,7 +7,7 @@ import numpy as np
 import soundfile
 
 from audiotree import AudioTree, AudioWriter
-from audiotree.datasources import ManifestDataSource
+from audiotree.sources import ManifestDataSource
 
 
 def test_basic_sequential_writing():
