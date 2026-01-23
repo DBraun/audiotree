@@ -2,11 +2,12 @@ import numpy as np
 import grain
 
 import audiotree
+from audiotree import AudioTree
 import audiotree.transforms
 
 
-def test_batch_transform():
-    """Test that Batch transform properly batches AudioTree objects with filepath metadata."""
+def test_batch_transform_with_dataloader():
+    """Test that Batch transform works with grain.DataLoader API."""
 
     # Create a simple data source that yields AudioTree objects with filepath metadata
     audio_trees = []
@@ -61,8 +62,76 @@ def test_batch_transform():
 
     # We should have 3 batches total (10 items / 4 batch size = 2.5 -> 3 batches)
     assert batch_count == 3
-    print("Test passed!")
+
+
+def test_batch_fn_with_iter_dataset():
+    """Test that AudioTree.batch_fn works with IterDataset.batch() API."""
+
+    # Create a simple data source that yields AudioTree objects
+    audio_trees = []
+    sample_rate = 44100
+    duration = 0.1
+    num_samples = int(sample_rate * duration)
+
+    for i in range(10):
+        audio_data = np.random.randn(1, num_samples).astype(np.float32)
+        audio_tree = AudioTree.create(
+            audio_data=audio_data,
+            sample_rate=sample_rate,
+            filepaths=f"/fake/path/audio_{i:04d}.wav"
+        )
+        audio_trees.append(audio_tree)
+
+    # Create MapDataset and convert to IterDataset with batch_fn
+    ds = grain.MapDataset.source(audio_trees)
+    iter_ds = ds.to_iter_dataset().batch(4, batch_fn=AudioTree.batch_fn)
+
+    # Iterate and verify batching
+    batch_count = 0
+    for batch in iter_ds:
+        batch_count += 1
+
+        # Verify shape: should be (batch, channels, samples), not (batch, 1, channels, samples)
+        assert batch.audio_data.ndim == 3, f"Expected 3D array, got {batch.audio_data.ndim}D"
+
+        # Verify batch size
+        if batch_count < 3:
+            assert batch.audio_data.shape[0] == 4
+            assert len(batch.filepath) == 4
+        else:
+            assert batch.audio_data.shape[0] == 2
+            assert len(batch.filepath) == 2
+
+    assert batch_count == 3
+
+
+def test_batch_fn_drop_remainder():
+    """Test that AudioTree.batch_fn works with drop_remainder=True."""
+
+    audio_trees = []
+    sample_rate = 44100
+    num_samples = int(sample_rate * 0.1)
+
+    for i in range(10):
+        audio_data = np.random.randn(1, num_samples).astype(np.float32)
+        audio_tree = AudioTree.create(
+            audio_data=audio_data,
+            sample_rate=sample_rate,
+        )
+        audio_trees.append(audio_tree)
+
+    ds = grain.MapDataset.source(audio_trees)
+    iter_ds = ds.to_iter_dataset().batch(4, drop_remainder=True, batch_fn=AudioTree.batch_fn)
+
+    batches = list(iter_ds)
+
+    # With drop_remainder=True, 10 items / 4 batch size = 2 complete batches
+    assert len(batches) == 2
+    for batch in batches:
+        assert batch.audio_data.shape[0] == 4
 
 
 if __name__ == "__main__":
-    test_batch_transform()
+    test_batch_transform_with_dataloader()
+    test_batch_fn_with_iter_dataset()
+    test_batch_fn_drop_remainder()

@@ -19,8 +19,9 @@ apply balanced sampling across groups, and chain augmentations:
 
 .. code-block:: python
 
+    from audiotree import AudioTree
     from audiotree.sources import create_balanced_audio_dataset
-    from audiotree.transforms import volume_norm, Batch
+    from audiotree.transforms import volume_norm
 
     # Create dataset with balanced sampling across groups
     ds = create_balanced_audio_dataset(
@@ -35,8 +36,7 @@ apply balanced sampling across groups, and chain augmentations:
     ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
 
     # Convert to iterable and batch
-    batch_size = 32
-    iter_ds = ds.to_iter_dataset().batch(batch_size, Batch(batch_size))
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
 
     # Access batched AudioTrees
     batch = next(iter(iter_ds))

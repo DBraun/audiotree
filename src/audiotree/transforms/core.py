@@ -16,17 +16,28 @@ from grain.python import BatchOperation
 
 
 class Batch(BatchOperation):
-    """A special version of grain's BatchOperation that concatenates on the batch axis instead of stacking.
+    """Concatenates AudioTree objects along the batch axis instead of stacking.
 
-    This is kept as a class because it directly inherits from grain's BatchOperation
-    and has special batching logic.
+    Use this with grain's DataLoader API. For the IterDataset API, use
+    ``AudioTree.batch_fn`` instead.
 
     Example:
         from audiotree.transforms import Batch
+        import grain
 
-        batch_op = Batch(batch_size=32)
-        # Use with grain's .batch() method on IterDataset
-        iter_ds = ds.to_iter_dataset().batch(32)
+        dataloader = grain.DataLoader(
+            data_source=ds,
+            sampler=grain.samplers.IndexSampler(
+                num_records=len(ds),
+                shuffle=True,
+                seed=0,
+                shard_options=grain.NoSharding(),
+            ),
+            operations=[Batch(batch_size=32)],
+        )
+
+    See Also:
+        ``AudioTree.batch_fn``: For use with ``IterDataset.batch()``.
     """
 
     def __post_init__(self):

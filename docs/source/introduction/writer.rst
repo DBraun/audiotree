@@ -353,57 +353,57 @@ Here's a complete example of creating a training dataset with AudioWriter:
 
 .. code-block:: python
 
-    import numpy as np
-    from pathlib import Path
-    from audiotree import AudioTree, AudioWriter
-    from audiotree.sources import AudioDataSimpleSource
-    from audiotree.transforms import VolumeChange, RandomPhaseShift, Batch
+    from audiotree import AudioWriter
+    from audiotree.sources import create_audio_dataset
+    from audiotree.transforms import volume_change, shift_phase, choose
     from tqdm import tqdm
-
-    # todo: write a jitted augmentation pipeline.
 
     def create_training_dataset(
         source_directory,
-        output_dir = "precomputed_data",
+        output_dir="precomputed_data",
         augmentations_per_file: int = 3,
-        batch_size: int = 4,
     ):
         """Turn one dataset into another with augmentations."""
 
-        # Calculate total files to be created
-        data_source = AudioDataSimpleSource({"main": [source_directory]})
-        total_files = len(data_source) * augmentations_per_file
+        # First, get the number of source files
+        base_ds = create_audio_dataset(
+            sources=source_directory,
+            sample_rate=16_000,
+            duration=3.0,
+            shuffle=False,
+            repeat=False,
+        )
+        num_files = len(base_ds)
+        total_records = num_files * augmentations_per_file
 
-        data_loader = grain.DataLoader(
-            data_source,
-            num_records=len(data_source),
-            operations=[Batch(batch_size, drop_remainder=False)],
+        # Create dataset with repeat to generate multiple augmentations per file
+        ds = create_audio_dataset(
+            sources=source_directory,
+            num_records=total_records,
+            sample_rate=16_000,
+            duration=3.0,
+            shuffle=True,
+            repeat=True,
         )
 
-        pbar = tqdm(total=total_files, desc="Creating dataset")
+        # Chain augmentation transforms (random_map ensures different augmentations)
+        ds = ds.random_map(volume_change(min_db=-6, max_db=6), seed=42)
+        ds = ds.random_map(choose(shift_phase(), prob=0.5), seed=43)
 
-        rng = np.random.default_rng(0)
+        pbar = tqdm(total=total_records, desc="Creating dataset")
 
         with AudioWriter(
             output_dir,
             pattern="train_{index:06d}.wav",
-            sample_rate=16_000,  # Standardize to 16 kHz
+            sample_rate=16_000,
             compress_manifest=True,
             pbar=pbar,
             close_pbar=True
         ) as writer:
 
-            for audio_tree in data_source:
-                # Generate augmentations
-                for aug_idx in range(augmentations_per_file):
-                    # Apply random transformations
-                    augmented = audio_tree
-                    augmented = VolumeChange(config={"min_db": -6, "max_db": 6}).random_map(augmented, rng)
-                    augmented = RandomPhaseShift(prob=0.5).random_map(augmented, rng)
-
-                    # Compute loudness for the augmented audio
-                    augmented = augmented.replace_loudness()
-                    writer.write(augmented)
+            for audio_tree in ds:
+                augmented = audio_tree.replace_loudness()
+                writer.write(augmented)
 
         print(f"Created dataset with {writer.get_stats()['total_files']} files")
 

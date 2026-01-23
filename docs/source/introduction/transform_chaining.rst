@@ -282,8 +282,9 @@ Add batching as part of the transform chain:
 
 .. code-block:: python
 
+    from audiotree import AudioTree
     from audiotree.sources import create_balanced_audio_dataset
-    from audiotree.transforms import volume_norm, Batch
+    from audiotree.transforms import volume_norm
 
     # Create dataset
     ds = create_balanced_audio_dataset(
@@ -298,14 +299,8 @@ Add batching as part of the transform chain:
     # Apply augmentations
     ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
 
-    # Batch into groups of 32
-    batch_op = Batch(batch_size=32)
-
-    # For IterDataset, use .batch()
-    iter_ds = ds.to_iter_dataset().batch(32)
-
-    # Or for MapDataset with custom batching logic
-    ds_batched = ds.map(lambda items: batch_op._default_batch_fn(items))
+    # Convert to IterDataset and batch
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
 
     # Iterate over batches
     for batch in iter_ds:
@@ -441,6 +436,7 @@ Full pipeline with chained transforms, batching, and multiprocessing:
 
     import grain
     import jax
+    from audiotree import AudioTree
     from audiotree.sources import create_balanced_audio_dataset
     from audiotree.transforms import volume_norm, volume_change, trim, invert_phase
 
@@ -476,7 +472,7 @@ Full pipeline with chained transforms, batching, and multiprocessing:
 
     # Convert to IterDataset, batch, and add multiprocessing
     iter_ds = ds.to_iter_dataset()
-    iter_ds = iter_ds.batch(32)
+    iter_ds = iter_ds.batch(32, batch_fn=AudioTree.batch_fn)
 
     mp_options = grain.MultiprocessingOptions(
         num_workers=8,
