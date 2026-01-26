@@ -223,15 +223,50 @@ For I/O-bound workloads:
     # Aggressive (for network storage)
     read_options = grain.ReadOptions(num_threads=8)
 
+Batching
+--------
+
+Use ``AudioTree.batch_fn`` with ``IterDataset.batch()`` to batch AudioTree objects.
+This concatenates along axis 0 (the batch dimension) rather than stacking, which would
+add an extra dimension.
+
+.. code-block:: python
+
+    import grain
+    from audiotree import AudioTree
+    from audiotree.sources import create_audio_dataset
+
+    ds = create_audio_dataset("/data/audio", duration=1.0)
+
+    # Batch with AudioTree.batch_fn
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+
+    for batch in iter_ds:
+        print(batch.audio_data.shape)  # (32, channels, samples)
+
+``batch_fn`` also handles dict structures containing AudioTrees:
+
+.. code-block:: python
+
+    # If your dataset yields {"src": AudioTree, "tgt": AudioTree}
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+
+    for batch in iter_ds:
+        # batch is a dict with batched AudioTrees
+        print(batch["src"].audio_data.shape)  # (32, channels, samples)
+
+See :ref:`dict_batches` for more details on working with dict structures.
+
 Common Patterns
 ---------------
 
-**Training Loop with Multiprocessing**
+**Training Loop with Batching and Multiprocessing**
 
 .. code-block:: python
 
     import grain
     import jax
+    from audiotree import AudioTree
     from audiotree.sources import create_balanced_audio_dataset
 
     # Create dataset
@@ -244,20 +279,24 @@ Common Patterns
         duration=3.0,
     )
 
-    # Add multiprocessing
+    # Add batching and multiprocessing
     mp_options = grain.MultiprocessingOptions(
         num_workers=8,
         per_worker_buffer_size=4,
     )
-    iter_ds = ds.to_iter_dataset().mp_prefetch(options=mp_options)
+    iter_ds = (
+        ds.to_iter_dataset()
+        .batch(32, batch_fn=AudioTree.batch_fn)
+        .mp_prefetch(options=mp_options)
+    )
 
     # Training loop
-    for step, audio_tree in enumerate(iter_ds):
+    for step, batch in enumerate(iter_ds):
         if step >= max_steps:
             break
 
         # Convert to JAX array and train
-        audio_data = jnp.array(audio_tree.audio_data)
+        audio_data = jnp.array(batch.audio_data)  # (32, channels, samples)
         loss = train_step(audio_data)
 
 **Validation with Deterministic Order**
@@ -275,13 +314,17 @@ Common Patterns
         duration=3.0,
     )
 
-    # Add multiprocessing
+    # Add batching and multiprocessing
     mp_options = grain.MultiprocessingOptions(num_workers=4)
-    val_iter_ds = val_ds.to_iter_dataset().mp_prefetch(options=mp_options)
+    val_iter_ds = (
+        val_ds.to_iter_dataset()
+        .batch(32, batch_fn=AudioTree.batch_fn)
+        .mp_prefetch(options=mp_options)
+    )
 
     # Evaluate
-    for audio_tree in val_iter_ds:
-        metrics = evaluate(audio_tree)
+    for batch in val_iter_ds:
+        metrics = evaluate(batch)
 
 Worker Initialization
 ---------------------
@@ -375,12 +418,13 @@ If data loading is slow, check:
 Example: Full Pipeline
 ----------------------
 
-Complete example with all optimizations:
+Complete example with batching and all optimizations:
 
 .. code-block:: python
 
     import grain
     import jax
+    from audiotree import AudioTree
     from audiotree.sources import create_balanced_audio_dataset
     from audiotree.core import SaliencyParams
 
@@ -415,6 +459,9 @@ Complete example with all optimizations:
     )
     iter_ds = ds.to_iter_dataset(read_options=read_options)
 
+    # Batch with AudioTree.batch_fn
+    iter_ds = iter_ds.batch(32, batch_fn=AudioTree.batch_fn)
+
     # Multiprocessing for CPU-bound work
     mp_options = grain.MultiprocessingOptions(
         num_workers=8,
@@ -424,12 +471,12 @@ Complete example with all optimizations:
     iter_ds = iter_ds.mp_prefetch(options=mp_options)
 
     # Training loop
-    for step, audio_tree in enumerate(iter_ds):
+    for step, batch in enumerate(iter_ds):
         if step >= 100000:
             break
 
         # Your training code here
-        audio_data = jnp.array(audio_tree.audio_data)
+        audio_data = jnp.array(batch.audio_data)  # (32, channels, samples)
         loss = train_step(audio_data)
 
         if step % 1000 == 0:

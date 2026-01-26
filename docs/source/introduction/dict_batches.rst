@@ -728,10 +728,115 @@ Common Pitfalls
         'b': {'scope': True},
     }
 
+Batching Dict Structures
+-------------------------
+
+When using Grain's ``IterDataset.batch()`` API with dict structures containing AudioTrees,
+use ``AudioTree.batch_fn`` as the batch function. It handles both direct AudioTree sequences
+and nested structures like dicts.
+
+**Important**: ``batch_fn`` concatenates all arrays along axis 0. This means your data
+should already have a batch dimension (even if it's size 1), which is how AudioTree works
+by default with shape ``(batch, channels, samples)``.
+
+**Basic batching with AudioTrees:**
+
+.. code-block:: python
+
+    import grain
+    from audiotree import AudioTree
+    from audiotree.sources import create_audio_dataset
+
+    ds = create_audio_dataset("/data/audio", duration=1.0)
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+
+    for batch in iter_ds:
+        print(batch.audio_data.shape)  # (32, channels, samples)
+
+**Batching dict structures:**
+
+.. code-block:: python
+
+    import grain
+    from audiotree import AudioTree
+    from audiotree.sources import create_audio_dataset
+
+    # Create dataset that yields {"src": AudioTree, "tgt": AudioTree}
+    ds = create_audio_dataset("/data/audio", duration=1.0)
+
+    def create_pair(audio_tree):
+        return {"src": audio_tree, "tgt": audio_tree}
+
+    ds = ds.map(create_pair)
+
+    # batch_fn handles dict structures automatically
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+
+    for batch in iter_ds:
+        # batch is {"src": AudioTree, "tgt": AudioTree} with batched arrays
+        print(batch["src"].audio_data.shape)  # (32, channels, samples)
+        print(batch["tgt"].audio_data.shape)  # (32, channels, samples)
+
+**Nested structures:**
+
+``batch_fn`` uses JAX's tree utilities, so it handles arbitrarily nested structures:
+
+.. code-block:: python
+
+    # Works with nested dicts
+    {"input": {"clean": AudioTree, "noisy": AudioTree}, "target": AudioTree}
+
+    # Works with mixed structures (AudioTrees and regular arrays)
+    {"audio": AudioTree, "labels": np.array([...])}
+
+For regular arrays (non-AudioTree), ``batch_fn`` also concatenates along axis 0, so ensure
+they have a leading batch dimension.
+
+**Complete example with multiprocessing:**
+
+.. code-block:: python
+
+    import grain
+    from audiotree import AudioTree
+    from audiotree.sources import create_audio_dataset
+    from audiotree.transforms import volume_norm
+
+    # Create paired dataset
+    ds = create_audio_dataset("/data/audio", duration=3.0, shuffle=True, repeat=True)
+
+    def create_variants(audio_tree):
+        return {"clean": audio_tree, "augmented": audio_tree}
+
+    ds = ds.map(create_variants)
+
+    # Apply transforms with scope
+    ds = ds.random_map(
+        volume_norm(
+            min_db=-20,
+            max_db=-15,
+            scope={"augmented": {"scope": True}},
+        ),
+        seed=42,
+    )
+
+    # Batch and add multiprocessing
+    mp_options = grain.MultiprocessingOptions(num_workers=8)
+    iter_ds = (
+        ds.to_iter_dataset()
+        .batch(32, batch_fn=AudioTree.batch_fn)
+        .mp_prefetch(options=mp_options)
+    )
+
+    for batch in iter_ds:
+        clean = batch["clean"].audio_data      # (32, channels, samples)
+        augmented = batch["augmented"].audio_data  # (32, channels, samples)
+        # Train model...
+
 See Also
 --------
 
 - :ref:`transform_chaining` - Chaining transforms with datasets
 - :ref:`argbind_guide` - Configuring transforms with ArgBind
+- :ref:`multiprocessing` - Parallel data loading
 - :func:`~audiotree.transforms.volume_norm` - Volume normalization
 - :func:`~audiotree.transforms.volume_change` - Volume change

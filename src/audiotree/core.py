@@ -838,18 +838,23 @@ class AudioTree:
         return audio_trees
 
     @staticmethod
-    def batch_fn(audio_trees: Sequence["AudioTree"]) -> "AudioTree":
+    def batch_fn(items: Sequence[Any]) -> Any:
         """Batch function for use with grain's IterDataset.batch().
 
         Concatenates AudioTree objects along the batch axis (axis 0).
         Use this instead of grain's default batching, which would add
         an extra dimension since AudioTree already has shape (batch, channels, samples).
 
+        Supports arbitrary nested structures containing AudioTrees. All arrays
+        (including AudioTrees) are concatenated along axis 0, so data should have
+        a leading batch dimension.
+
         Args:
-            audio_trees: Sequence of AudioTree objects to batch.
+            items: Sequence of AudioTree objects, or structures (dicts, lists, etc.)
+                containing AudioTree objects.
 
         Returns:
-            Single AudioTree with all items concatenated along axis 0.
+            Batched structure with the same shape as the input items.
 
         Example:
             >>> from audiotree.sources import create_audio_dataset
@@ -858,7 +863,20 @@ class AudioTree:
             >>> for batch in iter_ds:
             ...     print(batch.audio_data.shape)  # (32, channels, samples)
         """
-        return batch_audiotrees(list(audio_trees))
+        items = list(items)
+
+        def batching_function(*args):
+            first_arg = args[0]
+            if isinstance(first_arg, AudioTree):
+                return batch_audiotrees(args)
+            return np.concatenate(args, axis=0)
+
+        return tree_util.tree_map(
+            batching_function,
+            items[0],
+            *items[1:],
+            is_leaf=lambda x: isinstance(x, AudioTree),
+        )
 
 
 def batch_audiotrees(audio_trees: Sequence[AudioTree], backend=None) -> AudioTree:

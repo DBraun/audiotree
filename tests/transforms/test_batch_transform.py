@@ -131,7 +131,63 @@ def test_batch_fn_drop_remainder():
         assert batch.audio_data.shape[0] == 4
 
 
+def test_batch_fn_with_dict_elements():
+    """Test that AudioTree.batch_fn works when iterator yields dicts containing AudioTrees."""
+
+    sample_rate = 44100
+    num_samples = int(sample_rate * 0.1)
+
+    # Create a data source that yields {"src": AudioTree, "tgt": AudioTree} dicts
+    dict_items = []
+    for i in range(10):
+        src_data = np.random.randn(1, num_samples).astype(np.float32)
+        tgt_data = np.random.randn(1, num_samples).astype(np.float32)
+
+        src_tree = AudioTree.create(
+            audio_data=src_data,
+            sample_rate=sample_rate,
+            filepaths=f"/fake/path/src_{i:04d}.wav",
+        )
+        tgt_tree = AudioTree.create(
+            audio_data=tgt_data,
+            sample_rate=sample_rate,
+            filepaths=f"/fake/path/tgt_{i:04d}.wav",
+        )
+        dict_items.append({"src": src_tree, "tgt": tgt_tree})
+
+    ds = grain.MapDataset.source(dict_items)
+    iter_ds = ds.to_iter_dataset().batch(4, batch_fn=AudioTree.batch_fn)
+
+    batch_count = 0
+    for batch in iter_ds:
+        batch_count += 1
+
+        # batch should be a dict with "src" and "tgt" keys
+        assert isinstance(batch, dict), f"Expected dict, got {type(batch)}"
+        assert "src" in batch
+        assert "tgt" in batch
+
+        # Each value should be a batched AudioTree
+        assert batch["src"].audio_data.ndim == 3, f"Expected 3D array, got {batch['src'].audio_data.ndim}D"
+        assert batch["tgt"].audio_data.ndim == 3, f"Expected 3D array, got {batch['tgt'].audio_data.ndim}D"
+
+        # Verify batch sizes
+        if batch_count < 3:
+            assert batch["src"].audio_data.shape[0] == 4
+            assert batch["tgt"].audio_data.shape[0] == 4
+            assert len(batch["src"].filepath) == 4
+            assert len(batch["tgt"].filepath) == 4
+        else:
+            assert batch["src"].audio_data.shape[0] == 2
+            assert batch["tgt"].audio_data.shape[0] == 2
+            assert len(batch["src"].filepath) == 2
+            assert len(batch["tgt"].filepath) == 2
+
+    assert batch_count == 3
+
+
 if __name__ == "__main__":
     test_batch_transform_with_dataloader()
     test_batch_fn_with_iter_dataset()
     test_batch_fn_drop_remainder()
+    test_batch_fn_with_dict_elements()

@@ -384,7 +384,7 @@ def create_balanced_audio_dataset(
     # alternating pattern (A, B, A, B, ...) which causes problems with striped
     # worker sharding in DataLoader (even-numbered workers see only source A,
     # odd-numbered workers see only source B).
-    mixed = grain.MapDataset.mix(all_datasets, weights=all_proportions)
+    mixed = grain.MapDataset.mix(all_datasets, weights=all_proportions).seed(seed + dataset_index)
     if shuffle:
         mixed = mixed.shuffle(seed=seed)
 
