@@ -17,7 +17,8 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 * **Removed deprecated classes**: `AudioDataSimpleSource`, `AudioDataBalancedSource`, `AudioDataBalancedDataset`, and `AudioDataSourceMixin`. Use `create_balanced_audio_dataset()` instead.
 * **Removed method**: `AudioTree.from_array()`. Use `AudioTree.create()` instead.
 * **Removed class**: `audiotree.transforms.ReduceBatchTransform`. Replaced with `audiotree.transforms.Batch`.
-* **Refactored `create_balanced_audio_dataset()`**: Now uses grain's `random_map` pattern for saliency-based audio loading. This fixes a critical bug where `record_key` was used as both an array index and RNG seed, severely limiting excerpt diversity when datasets were repeated. Now supports mixing pre-constructed grain MapDatasets via the `datasets` parameter. The `sources` parameter is now optional (at least one of `sources` or `datasets` must be provided). The `num_records` parameter is now optional when the result would be finite.
+* **Refactored `create_balanced_audio_dataset()`**: Now uses grain's `random_map` pattern for saliency-based audio loading. This fixes a critical bug where `record_key` was used as both an array index and RNG seed, severely limiting excerpt diversity when datasets were repeated. Now supports mixing pre-constructed grain MapDatasets via the `datasets` parameter. The `sources` parameter is now optional (at least one of `sources` or `datasets` must be provided).
+* **Removed `num_records` parameter**: The `num_records` parameter has been removed from `create_audio_dataset()` and `create_balanced_audio_dataset()`. Use `.slice(slice(0, N))` on the returned dataset instead. This simplifies the API and follows the principle of separation of concerns.
 
 ### New Features - Transforms
 

@@ -379,7 +379,6 @@ Here's a complete example of creating a training dataset with AudioWriter:
         # Create dataset with repeat to generate multiple augmentations per file
         ds = create_audio_dataset(
             sources=source_directory,
-            num_records=total_records,
             sample_rate=16_000,
             duration=3.0,
             shuffle=True,

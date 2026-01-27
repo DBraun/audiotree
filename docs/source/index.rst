@@ -27,7 +27,6 @@ apply balanced sampling across groups, and chain augmentations:
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"], "music": ["/data/music"]},
         weights={"speech": 0.7, "music": 0.3},
-        num_records=10000,
         sample_rate=44100,
         duration=3.0,
     )

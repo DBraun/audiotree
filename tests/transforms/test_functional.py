@@ -194,12 +194,11 @@ class TestDatasetChaining:
             # Create dataset
             ds = create_audio_dataset(
                 sources=tmpdir,
-                num_records=5,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
                 duration=5.0,
-            )
+            ).slice(slice(0, 5))
 
             # Chain transforms
             ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
@@ -220,12 +219,11 @@ class TestDatasetChaining:
             # Create dataset
             ds = create_audio_dataset(
                 sources=tmpdir,
-                num_records=5,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
                 duration=3.0,
-            )
+            ).slice(slice(0, 5))
 
             # Chain multiple random transforms
             ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
@@ -305,12 +303,11 @@ class TestArgBindIntegration:
             # Create dataset
             ds = create_audio_dataset(
                 sources=tmpdir,
-                num_records=5,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
                 duration=5.0,
-            )
+            ).slice(slice(0, 5))
 
             # Set args
             args = {

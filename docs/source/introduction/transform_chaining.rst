@@ -24,7 +24,6 @@ Apply transforms to a dataset using ``.random_map()`` or ``.map()``:
     # Create dataset
     ds = create_audio_dataset(
         sources="/data/audio",
-        num_records=1000,
         shuffle=True,
         repeat=True,
         sample_rate=44100,
@@ -70,7 +69,6 @@ Build complex augmentation pipelines:
             "speech": ["/data/speech"],
             "music": ["/data/music"],
         },
-        num_records=10000,
         weights={"speech": 0.7, "music": 0.3},
         shuffle=True,
         repeat=True,
@@ -137,7 +135,6 @@ Use ArgBind to configure transform chains from YAML:
                 "speech": ["/data/speech"],
                 "music": ["/data/music"],
             },
-            num_records=10000,
             shuffle=True,
             repeat=True,
             sample_rate=44100,
@@ -256,7 +253,6 @@ The order of transforms affects the result:
 
     ds = create_audio_dataset(
         sources="/data/audio",
-        num_records=100,
         sample_rate=44100,
         duration=5.0,
     )
@@ -289,7 +285,6 @@ Add batching as part of the transform chain:
     # Create dataset
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"]},
-        num_records=10000,
         shuffle=True,
         repeat=True,
         sample_rate=44100,
@@ -348,7 +343,6 @@ Combine datasets with different augmentation strategies:
     # Combine with balanced sampling
     mixed_ds = create_balanced_audio_dataset(
         datasets={"clean": clean_ds, "noisy": noisy_ds},
-        num_records=10000,
         weights={"clean": 0.3, "noisy": 0.7},
     )
 
@@ -361,7 +355,7 @@ Transforms are applied lazily when items are accessed:
 
 .. code-block:: python
 
-    ds = create_audio_dataset(sources="/data/audio", num_records=1000)
+    ds = create_audio_dataset(sources="/data/audio")
     ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
 
     # Nothing computed yet
@@ -382,7 +376,7 @@ For expensive transforms, consider pre-computing and using manifest datasets:
     from audiotree.transforms import volume_norm
 
     # Load and augment
-    ds = create_audio_dataset(sources="/data/audio", num_records=1000)
+    ds = create_audio_dataset(sources="/data/audio")
     ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
 
     # Pre-compute and write to disk
@@ -408,7 +402,6 @@ Chain transforms before adding multiprocessing:
     # Create dataset
     ds = create_audio_dataset(
         sources="/data/audio",
-        num_records=10000,
         shuffle=True,
         repeat=True,
         sample_rate=44100,
@@ -446,7 +439,6 @@ Full pipeline with chained transforms, batching, and multiprocessing:
             "speech": ["/data/speech"],
             "music": ["/data/music"],
         },
-        num_records=100000,
         weights={"speech": 0.6, "music": 0.4},
         shuffle=True,
         repeat=True,  # Infinite for training

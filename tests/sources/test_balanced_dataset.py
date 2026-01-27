@@ -37,10 +37,9 @@ class TestCreateBalancedAudioDataset:
 
             ds = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
-                num_records=20,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             assert len(ds) == 20
 
@@ -52,10 +51,9 @@ class TestCreateBalancedAudioDataset:
 
             ds = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
-                num_records=20,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             # Access in random order
             _ = ds[15]
@@ -71,12 +69,11 @@ class TestCreateBalancedAudioDataset:
 
             ds = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
-                num_records=100,
                 weights={"group1": 1.0, "group2": 1.0},
                 sample_rate=44100,
                 duration=0.5,
                 shuffle=False,
-            )
+            ).slice(slice(0, 100))
 
             assert len(ds) == 100
 
@@ -88,11 +85,10 @@ class TestCreateBalancedAudioDataset:
 
             ds = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
-                num_records=100,
                 weights={"group1": 0.7, "group2": 0.3},
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 100))
 
             assert len(ds) == 100
 
@@ -104,21 +100,19 @@ class TestCreateBalancedAudioDataset:
 
             ds1 = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
-                num_records=20,
                 shuffle=False,
                 seed=42,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             ds2 = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
-                num_records=20,
                 shuffle=False,
                 seed=42,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             # Same seed + no shuffle should give same data
             for i in range(10):
@@ -134,21 +128,19 @@ class TestCreateBalancedAudioDataset:
 
             ds1 = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
-                num_records=20,
                 shuffle=True,
                 seed=42,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             ds2 = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
-                num_records=20,
                 shuffle=True,
                 seed=123,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             # Different seeds should (very likely) give different orderings
             different = False
@@ -167,10 +159,9 @@ class TestCreateBalancedAudioDataset:
 
             ds = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir]},
-                num_records=20,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             assert len(ds) == 20
             _ = ds[0]  # Should work
@@ -189,11 +180,10 @@ class TestCreateBalancedAudioDataset:
                     "group2": [group2_dir],
                     "group3": [group3_dir],
                 },
-                num_records=30,
                 weights={"group1": 2.0},  # Others default to 1.0
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 30))
 
             assert len(ds) == 30
 
@@ -206,10 +196,9 @@ class TestCreateBalancedAudioDataset:
 
             ds = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir]},
-                num_records=10,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 10))
 
             item = ds[0]
             assert isinstance(item, AudioTree)
@@ -222,11 +211,10 @@ class TestCreateBalancedAudioDataset:
 
             ds = create_balanced_audio_dataset(
                 sources={"music": [group1_dir], "speech": [group2_dir]},
-                num_records=20,
                 shuffle=False,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             # Check that each item has a source property
             sources_found = set()
@@ -250,11 +238,10 @@ class TestCreateBalancedAudioDataset:
 
             ds = create_balanced_audio_dataset(
                 sources={"music": [group1_dir], "speech": [group2_dir]},
-                num_records=20,
                 shuffle=False,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             # Use AudioTree's Batch transform (concatenates properly)
             batch_transform = Batch(batch_size=4)
@@ -290,11 +277,10 @@ class TestCreateBalancedAudioDataset:
             ds = create_balanced_audio_dataset(
                 sources={"speech": [group1_dir]},
                 datasets={"music": preprocessed_ds},
-                num_records=20,
                 weights={"speech": 0.6, "music": 0.4},
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             assert len(ds) == 20
 
@@ -317,16 +303,15 @@ class TestCreateBalancedAudioDataset:
             # Mix only datasets, no file sources
             mixed = create_balanced_audio_dataset(
                 datasets={"ds1": ds1, "ds2": ds2},
-                num_records=20,
                 weights={"ds1": 2.0, "ds2": 1.0},
-            )
+            ).slice(slice(0, 20))
 
             assert len(mixed) == 20
 
     def test_no_sources_or_datasets_error(self):
         """Test that providing neither sources nor datasets raises an error."""
         try:
-            ds = create_balanced_audio_dataset(num_records=10)
+            ds = create_balanced_audio_dataset()
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "At least one of 'sources' or 'datasets' must be provided" in str(e)
@@ -403,18 +388,17 @@ class TestBalancedDatasetHierarchical:
             }
             group_paths = _create_hierarchical_test_data(tmpdir, structure)
 
-            # Create dataset with small num_records to test file discovery
+            # Create dataset with small num records to test file discovery
             ds = create_balanced_audio_dataset(
                 sources={
                     "group1": [group_paths["group1"]],
                     "group2": [group_paths["group2"]],
                     "group3": [group_paths["group3"]],
                 },
-                num_records=100,
                 sample_rate=44100,
                 duration=0.5,
                 shuffle=False,
-            )
+            ).slice(slice(0, 100))
 
             # Verify dataset was created successfully
             assert len(ds) == 100
@@ -445,12 +429,11 @@ class TestBalancedDatasetHierarchical:
                     "group2": [group_paths["group2"]],
                     "group3": [group_paths["group3"]],
                 },
-                num_records=900,
                 weights={"group1": 1.0, "group2": 1.0, "group3": 1.0},
                 sample_rate=44100,
                 duration=0.5,
                 seed=42,
-            )
+            ).slice(slice(0, 900))
 
             # Count occurrences by source
             source_counts = {"group1": 0, "group2": 0, "group3": 0}
@@ -485,12 +468,11 @@ class TestBalancedDatasetHierarchical:
                     "group2": [group_paths["group2"]],
                     "group3": [group_paths["group3"]],
                 },
-                num_records=1000,
                 weights={"group1": 0.5, "group2": 0.3, "group3": 0.2},
                 sample_rate=44100,
                 duration=0.5,
                 seed=42,
-            )
+            ).slice(slice(0, 1000))
 
             # Count occurrences by source
             source_counts = {"group1": 0, "group2": 0, "group3": 0}
@@ -523,12 +505,11 @@ class TestBalancedDatasetHierarchical:
                     "group1": [group_paths["group1"]],
                     "group2": [group_paths["group2"]],
                 },
-                num_records=200,
                 weights={"group1": 1.0, "group2": 1.0},
                 sample_rate=44100,
                 duration=0.5,
                 seed=42,
-            )
+            ).slice(slice(0, 200))
 
             # Collect filepaths for group1
             group1_filepaths = []
@@ -576,12 +557,11 @@ class TestBalancedDatasetHierarchical:
                     "large_group": [group_paths["large_group"]],
                     "small_group": [group_paths["small_group"]],
                 },
-                num_records=400,
                 weights={"large_group": 1.0, "small_group": 1.0},
                 sample_rate=44100,
                 duration=0.5,
                 seed=42,
-            )
+            ).slice(slice(0, 400))
 
             # Count occurrences
             source_counts = {"large_group": 0, "small_group": 0}
@@ -614,12 +594,11 @@ class TestBalancedDatasetHierarchical:
                     "group2": [group_paths["group2"]],
                     "group3": [group_paths["group3"]],
                 },
-                num_records=10000,
                 weights={"group1": 0.5, "group2": 0.3, "group3": 0.2},
                 sample_rate=44100,
                 duration=0.5,
                 seed=42,
-            )
+            ).slice(slice(0, 10000))
 
             # Count all occurrences
             source_counts = {"group1": 0, "group2": 0, "group3": 0}
@@ -652,12 +631,11 @@ class TestBalancedDatasetHierarchical:
                     "group1": [group_paths["group1"]],
                     "group2": [group_paths["group2"]],
                 },
-                num_records=200,
                 weights={"group1": 1.0, "group2": 1.0},
                 sample_rate=44100,
                 duration=0.5,
                 seed=42,
-            )
+            ).slice(slice(0, 200))
 
             # Count occurrences
             source_counts = {"group1": 0, "group2": 0}
@@ -697,11 +675,10 @@ class TestBalancedDatasetHierarchical:
                     "group1": [str(base_path / "group1")],
                     "group2": [str(base_path / "group2")],
                 },
-                num_records=20,
                 weights={"group1": 1.0, "group2": 1.0},
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 20))
 
             # Verify both groups are discovered and accessible
             source_counts = {"group1": 0, "group2": 0}
@@ -750,12 +727,11 @@ class TestBalancedDatasetHierarchical:
                     "group2": [str(group2_path)],
                     "group3": [str(group3_path)],
                 },
-                num_records=300,
                 weights={"group1": 1.0, "group2": 1.0, "group3": 1.0},
                 sample_rate=44100,
                 duration=0.5,
                 seed=42,
-            )
+            ).slice(slice(0, 300))
 
             # Count occurrences
             source_counts = {"group1": 0, "group2": 0, "group3": 0}
@@ -792,11 +768,10 @@ class TestBalancedDatasetHierarchical:
                     "group1": [str(base_path / "group1")],
                     "group2": [str(base_path / "group2")],
                 },
-                num_records=20,
                 sample_rate=44100,
                 duration=0.5,
                 shuffle=False,
-            )
+            ).slice(slice(0, 20))
 
             # Verify source property
             for i in range(len(ds)):
@@ -821,26 +796,24 @@ class TestBalancedDatasetHierarchical:
                     "group1": [group_paths["group1"]],
                     "group2": [group_paths["group2"]],
                 },
-                num_records=100,
                 weights={"group1": 0.7, "group2": 0.3},
                 sample_rate=44100,
                 duration=0.5,
                 shuffle=True,
                 seed=42,
-            )
+            ).slice(slice(0, 100))
 
             ds2 = create_balanced_audio_dataset(
                 sources={
                     "group1": [group_paths["group1"]],
                     "group2": [group_paths["group2"]],
                 },
-                num_records=100,
                 weights={"group1": 0.7, "group2": 0.3},
                 sample_rate=44100,
                 duration=0.5,
                 shuffle=True,
                 seed=42,
-            )
+            ).slice(slice(0, 100))
 
             # Verify identical sequences
             for i in range(len(ds1)):
@@ -867,12 +840,11 @@ class TestBalancedDatasetHierarchical:
                     "group2": [group_paths["group2"]],
                     "group3": [group_paths["group3"]],
                 },
-                num_records=1000,
                 weights={"group1": 2.0, "group2": 3.0, "group3": 5.0},
                 sample_rate=44100,
                 duration=0.5,
                 seed=42,
-            )
+            ).slice(slice(0, 1000))
 
             # Create dataset with normalized weights (equivalent)
             ds_normalized = create_balanced_audio_dataset(
@@ -881,12 +853,11 @@ class TestBalancedDatasetHierarchical:
                     "group2": [group_paths["group2"]],
                     "group3": [group_paths["group3"]],
                 },
-                num_records=1000,
                 weights={"group1": 0.2, "group2": 0.3, "group3": 0.5},
                 sample_rate=44100,
                 duration=0.5,
                 seed=42,
-            )
+            ).slice(slice(0, 1000))
 
             # Count occurrences for both datasets
             counts_unnorm = {"group1": 0, "group2": 0, "group3": 0}

@@ -32,7 +32,6 @@ def test_basic_creation():
 
         ds = create_audio_dataset(
             sources=audio_dir,
-            num_records=10,
             sample_rate=44100,
             duration=0.5,
         )
@@ -53,7 +52,6 @@ def test_multiple_directories():
 
         ds = create_audio_dataset(
             sources=[dir1, dir2],
-            num_records=10,
             sample_rate=44100,
             duration=0.5,
         )
@@ -68,7 +66,6 @@ def test_no_shuffle():
 
         ds1 = create_audio_dataset(
             sources=audio_dir,
-            num_records=10,
             shuffle=False,
             seed=42,
             sample_rate=44100,
@@ -77,7 +74,6 @@ def test_no_shuffle():
 
         ds2 = create_audio_dataset(
             sources=audio_dir,
-            num_records=10,
             shuffle=False,
             seed=42,
             sample_rate=44100,
@@ -98,7 +94,6 @@ def test_shuffle():
 
         ds1 = create_audio_dataset(
             sources=audio_dir,
-            num_records=10,
             shuffle=True,
             seed=42,
             sample_rate=44100,
@@ -107,7 +102,6 @@ def test_shuffle():
 
         ds2 = create_audio_dataset(
             sources=audio_dir,
-            num_records=10,
             shuffle=True,
             seed=99,
             sample_rate=44100,
@@ -130,14 +124,13 @@ def test_repeat_mode():
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_dir = _create_test_audio_files(tmpdir, 5)
 
-        # With repeat=True and num_records, should repeat files
+        # With repeat=True, should repeat files; use slice to limit to 20
         ds = create_audio_dataset(
             sources=audio_dir,
-            num_records=20,  # More than available files
             repeat=True,
             sample_rate=44100,
             duration=0.5,
-        )
+        ).slice(slice(0, 20))
 
         assert len(ds) == 20
 
@@ -171,7 +164,6 @@ def test_with_saliency():
         saliency_params = SaliencyParams(enabled=True, loudness_cutoff=None)
         ds = create_audio_dataset(
             sources=audio_dir,
-            num_records=5,
             sample_rate=44100,
             duration=1.0,
             saliency_params=saliency_params,
@@ -198,7 +190,6 @@ def test_mono_conversion():
 
         ds = create_audio_dataset(
             sources=str(output_dir),
-            num_records=1,
             sample_rate=44100,
             duration=1.0,
             mono=True,

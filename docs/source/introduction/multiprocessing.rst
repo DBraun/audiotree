@@ -39,7 +39,6 @@ Use multithreading for I/O-bound operations:
             "speech": ["/data/speech"],
             "music": ["/data/music"],
         },
-        num_records=10000,
         sample_rate=44100,
         duration=3.0,
     )
@@ -77,7 +76,6 @@ Use multiprocessing for CPU-bound operations:
             "speech": ["/data/speech"],
             "music": ["/data/music"],
         },
-        num_records=10000,
         sample_rate=44100,
         duration=3.0,
     )
@@ -116,7 +114,6 @@ For maximum throughput, use both multithreading and multiprocessing:
             "speech": ["/data/speech"],
             "music": ["/data/music"],
         },
-        num_records=10000,
         sample_rate=44100,
         duration=3.0,
     )
@@ -157,7 +154,6 @@ Weight-based balancing is preserved with multiprocessing:
             "speech": ["/data/speech"],
             "music": ["/data/music"],
         },
-        num_records=10000,
         weights={"speech": 0.7, "music": 0.3},
         sample_rate=44100,
         duration=3.0,
@@ -272,7 +268,6 @@ Common Patterns
     # Create dataset
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"], "music": ["/data/music"]},
-        num_records=100000,
         shuffle=True,
         repeat=True,  # Infinite dataset for training
         sample_rate=44100,
@@ -306,7 +301,6 @@ Common Patterns
     # Create validation dataset (no shuffle, no repeat)
     val_ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/val_speech"], "music": ["/data/val_music"]},
-        num_records=1000,
         shuffle=False,  # Deterministic order
         repeat=False,
         seed=42,
@@ -442,7 +436,6 @@ Complete example with batching and all optimizations:
             "music": ["/fast_storage/music"],
             "effects": ["/fast_storage/effects"],
         },
-        num_records=1000000,
         weights={"speech": 0.5, "music": 0.3, "effects": 0.2},
         shuffle=True,
         repeat=True,

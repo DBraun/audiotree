@@ -38,7 +38,6 @@ class TestBasicChaining:
             # Create dataset
             ds = create_audio_dataset(
                 sources=audio_dir,
-                num_records=10,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
@@ -63,7 +62,6 @@ class TestBasicChaining:
             # Create dataset
             ds = create_audio_dataset(
                 sources=audio_dir,
-                num_records=10,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
@@ -87,7 +85,6 @@ class TestBasicChaining:
             # Create dataset
             ds = create_audio_dataset(
                 sources=audio_dir,
-                num_records=10,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
@@ -131,11 +128,10 @@ class TestBalancedDatasetChaining:
                     "group1": [group1_dir],
                     "group2": [group2_dir],
                 },
-                num_records=40,
                 shuffle=False,
                 sample_rate=44100,
                 duration=5.0,
-            )
+            ).slice(slice(0, 40))
 
             # Chain transforms
             ds = ds.random_map(
@@ -158,7 +154,6 @@ class TestBalancedDatasetChaining:
             # Create base dataset
             base_ds = create_audio_dataset(
                 sources=audio_dir,
-                num_records=5,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
@@ -200,7 +195,6 @@ class TestProbabilisticTransforms:
             # Create dataset
             ds = create_audio_dataset(
                 sources=audio_dir,
-                num_records=20,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
@@ -234,7 +228,6 @@ class TestLazyEvaluation:
             # Create dataset and chain transforms
             ds = create_audio_dataset(
                 sources=audio_dir,
-                num_records=10,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
@@ -269,7 +262,6 @@ class TestStereoMonoChaining:
             # Create dataset (mono files)
             ds = create_audio_dataset(
                 sources=audio_dir,
-                num_records=5,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,

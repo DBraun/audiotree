@@ -31,7 +31,6 @@ The main functions are :func:`~audiotree.sources.create_audio_dataset` for simpl
             "speech": ["/data/speech"],
             "music": ["/data/music"],
         },
-        num_records=10000,
         sample_rate=44100,
         duration=3.0,
     )
@@ -64,7 +63,6 @@ Use saliency to select louder sections of audio:
             "speech": ["/data/speech"],
             "music": ["/data/music"],
         },
-        num_records=10000,
         saliency_params=saliency_params,
         sample_rate=44100,
         duration=3.0,
@@ -78,7 +76,6 @@ Customize which file types to load:
 
     ds = create_balanced_audio_dataset(
         sources={"audio": ["/data/audio"]},
-        num_records=1000,
         extensions=[".wav", ".flac", ".mp3", ".ogg"],
         sample_rate=44100,
         duration=3.0,
@@ -100,7 +97,6 @@ Customize which file types to load:
                 "/data/jamendo",
             ],
         },
-        num_records=10000,
         weights={"speech": 0.7, "music": 0.3},
         sample_rate=44100,
         duration=3.0,

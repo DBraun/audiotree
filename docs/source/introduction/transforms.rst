@@ -33,7 +33,6 @@ Examples include:
     # Create dataset
     ds = create_audio_dataset(
         sources="/data/audio",
-        num_records=1000,
         sample_rate=44100,
         duration=5.0,
     )

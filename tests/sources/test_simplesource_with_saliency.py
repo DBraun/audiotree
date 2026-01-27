@@ -140,13 +140,12 @@ def test_create_balanced_audio_dataset_with_saliency():
         saliency_params = SaliencyParams(enabled=True, loudness_cutoff=None)
         ds = create_balanced_audio_dataset(
             sources={"test": [str(output_dir)]},
-            num_records=num_files,
             sample_rate=sample_rate,
             duration=1.0,
             mono=True,
             saliency_params=saliency_params,
             seed=42,
-        )
+        ).slice(slice(0, num_files))
 
         # Load items
         items = []
@@ -214,13 +213,12 @@ def test_repeated_dataset_variety():
         saliency_params = SaliencyParams(enabled=True, loudness_cutoff=None)
         ds = create_balanced_audio_dataset(
             sources={"test": [str(output_dir)]},
-            num_records=100,  # Much more than num_files
             sample_rate=sample_rate,
             duration=1.0,
             mono=True,
             saliency_params=saliency_params,
             seed=42,
-        )
+        ).slice(slice(0, 100))
 
         # Load all excerpts
         excerpts = [ds[i] for i in range(100)]

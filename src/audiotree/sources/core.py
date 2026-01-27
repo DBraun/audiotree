@@ -125,7 +125,6 @@ def _load_audio_with_saliency(
 
 def create_audio_dataset(
     sources: List[str] | str,
-    num_records: int | None = None,
     shuffle: bool = True,
     repeat: bool = False,
     seed: int = 0,
@@ -145,8 +144,6 @@ def create_audio_dataset(
 
     Args:
         sources: A directory path or list of directory paths containing audio files.
-        num_records: Total number of records in the resulting dataset. If None and repeat=False,
-            uses all available files. If None and repeat=True, dataset is infinite.
         shuffle: Whether to shuffle files.
         repeat: Whether to repeat the dataset infinitely. Set to True for training,
             False for validation/testing.
@@ -185,7 +182,6 @@ def create_audio_dataset(
         >>> # Validation dataset: deterministic, no repeat, limited records
         >>> ds = create_audio_dataset(
         ...     sources="/data/val",
-        ...     num_records=1000,
         ...     shuffle=False,
         ...     repeat=False,
         ...     sample_rate=44100,
@@ -236,15 +232,11 @@ def create_audio_dataset(
     )
     ds = ds.random_map(load_fn, seed=seed + 1000)
 
-    if num_records is not None:
-        ds = ds.slice(slice(0, num_records))
-
     return ds
 
 
 def create_balanced_audio_dataset(
     sources: Mapping[str, List[str]] | None = None,
-    num_records: int = None,
     weights: Optional[Mapping[str, float]] = None,
     datasets: Optional[Mapping[str, grain.MapDataset]] = None,
     shuffle: bool = True,
@@ -266,8 +258,6 @@ def create_balanced_audio_dataset(
     Args:
         sources: Optional dictionary mapping group names to lists of directories for
             audio files. At least one of `sources` or `datasets` must be provided.
-        num_records: Total number of records in the resulting dataset. Required if the
-            mixed dataset would be infinite.
         weights: Optional dictionary mapping group names to sampling weights.
             Weights are normalized to sum to 1.0. Groups not in the dict
             default to weight 1.0. If None, all groups are weighted equally.
@@ -289,14 +279,13 @@ def create_balanced_audio_dataset(
         saliency_params: Optional saliency parameters for excerpt selection (only applies to file-based sources).
 
     Returns:
-        A grain.MapDataset with length num_records that samples from the
+        A grain.MapDataset with length that samples from the
         source groups according to the specified weights.
 
     Example:
         >>> # Equal weighting (default)
         >>> ds = create_balanced_audio_dataset(
         ...     sources={"speech": ["/data/speech"], "music": ["/data/music"]},
-        ...     num_records=10000,
         ...     sample_rate=44100,
         ...     duration=3.0,
         ... )
@@ -304,7 +293,6 @@ def create_balanced_audio_dataset(
         >>> # Custom weights: 70% speech, 30% music
         >>> ds = create_balanced_audio_dataset(
         ...     sources={"speech": ["/data/speech"], "music": ["/data/music"]},
-        ...     num_records=10000,
         ...     weights={"speech": 0.7, "music": 0.3},
         ...     sample_rate=44100,
         ...     duration=3.0,
@@ -313,7 +301,6 @@ def create_balanced_audio_dataset(
         >>> # For pre-rendering (deterministic, no shuffle)
         >>> ds = create_balanced_audio_dataset(
         ...     sources={"speech": ["/data/speech"], "music": ["/data/music"]},
-        ...     num_records=72000,
         ...     weights={"speech": 0.5, "music": 0.5},
         ...     shuffle=False,
         ...     seed=42,
@@ -326,7 +313,6 @@ def create_balanced_audio_dataset(
         >>> ds = create_balanced_audio_dataset(
         ...     sources={"speech": ["/data/speech"]},
         ...     datasets={"preprocessed": preprocessed_ds},
-        ...     num_records=10000,
         ...     weights={"speech": 0.7, "preprocessed": 0.3},
         ... )
     """
@@ -346,7 +332,6 @@ def create_balanced_audio_dataset(
             # Create dataset for this group with repeat=True (required for mixing)
             ds = create_audio_dataset(
                 sources=folders,
-                num_records=None,  # Don't slice per-group, slice after mixing
                 shuffle=shuffle,
                 repeat=True,  # Always repeat before mixing
                 seed=seed + dataset_index,
@@ -388,6 +373,4 @@ def create_balanced_audio_dataset(
     if shuffle:
         mixed = mixed.shuffle(seed=seed)
 
-    if num_records is not None:
-        return mixed.slice(slice(0, num_records))
     return mixed

@@ -25,7 +25,6 @@ Create a balanced dataset from two audio directories:
             "speech": ["/data/speech"],
             "music": ["/data/music"],
         },
-        num_records=10000,
         sample_rate=44100,
         duration=3.0,
     )
@@ -45,7 +44,6 @@ Control the proportion of each group:
             "music": ["/data/music"],
             "effects": ["/data/sound_effects"],
         },
-        num_records=10000,
         weights={"speech": 0.5, "music": 0.3, "effects": 0.2},
         sample_rate=44100,
         duration=3.0,
@@ -80,7 +78,6 @@ All files under ``/data/speech/`` are aggregated into the "speech" group:
         sources={
             "speech": ["/data/speech"],  # Finds all .wav and .flac files recursively
         },
-        num_records=1000,
         sample_rate=44100,
         duration=3.0,
     )
@@ -101,7 +98,6 @@ The balancing works even with drastically different file counts:
             "large": ["/data/large_dataset"],
             "small": ["/data/small_dataset"],
         },
-        num_records=2000,
         weights={"large": 0.5, "small": 0.5},  # 50/50 split
         sample_rate=44100,
         duration=3.0,
@@ -128,7 +124,6 @@ Combine multiple directories into a single group:
                 "/data/fma",
             ],
         },
-        num_records=10000,
         weights={"speech": 0.7, "music": 0.3},
         sample_rate=44100,
         duration=3.0,
@@ -162,7 +157,6 @@ Use ``shuffle=False`` and a fixed ``seed`` for reproducible iteration:
 
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"], "music": ["/data/music"]},
-        num_records=1000,
         shuffle=False,
         seed=42,
         sample_rate=44100,
@@ -192,7 +186,6 @@ Combine file-based sources with existing Grain datasets:
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"]},
         datasets={"preprocessed": preprocessed_ds},
-        num_records=10000,
         weights={"speech": 0.7, "preprocessed": 0.3},
     )
 
@@ -213,7 +206,6 @@ Use saliency to randomly select louder sections of audio:
 
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"], "music": ["/data/music"]},
-        num_records=10000,
         saliency_params=saliency_params,
         sample_rate=44100,
         duration=3.0,
@@ -230,7 +222,6 @@ By default, ``.wav`` and ``.flac`` files are discovered. Customize this:
 
     ds = create_balanced_audio_dataset(
         sources={"audio": ["/data/audio"]},
-        num_records=1000,
         extensions=[".wav", ".flac", ".mp3", ".ogg"],
         sample_rate=44100,
         duration=3.0,
@@ -249,7 +240,6 @@ Over large sample sizes, the actual distribution closely matches requested weigh
             "group2": ["/data/group2"],
             "group3": ["/data/group3"],
         },
-        num_records=10000,
         weights={"group1": 0.5, "group2": 0.3, "group3": 0.2},
         sample_rate=44100,
         duration=3.0,

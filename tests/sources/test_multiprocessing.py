@@ -39,7 +39,6 @@ class TestMultithreading:
             # Create dataset
             ds = create_audio_dataset(
                 sources=audio_dir,
-                num_records=20,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
@@ -76,11 +75,10 @@ class TestMultithreading:
                     "group1": [group1_dir],
                     "group2": [group2_dir],
                 },
-                num_records=40,
                 shuffle=False,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 40))
 
             # Convert to IterDataset with multithreading
             read_options = grain.ReadOptions(
@@ -114,7 +112,6 @@ class TestMultiprocessing:
             # Create dataset
             ds = create_audio_dataset(
                 sources=audio_dir,
-                num_records=20,
                 shuffle=False,
                 repeat=False,
                 sample_rate=44100,
@@ -151,11 +148,10 @@ class TestMultiprocessing:
                     "group1": [group1_dir],
                     "group2": [group2_dir],
                 },
-                num_records=40,
                 shuffle=False,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 40))
 
             # Convert to IterDataset and add multiprocessing
             mp_options = grain.MultiprocessingOptions(
@@ -189,13 +185,12 @@ class TestMultiprocessing:
                     "group1": [group1_dir],
                     "group2": [group2_dir],
                 },
-                num_records=1000,
                 weights={"group1": 0.7, "group2": 0.3},
                 shuffle=True,
                 seed=42,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 1000))
 
             # Convert to IterDataset and add multiprocessing
             mp_options = grain.MultiprocessingOptions(
@@ -236,12 +231,11 @@ class TestCombinedMultithreadingMultiprocessing:
                     "group1": [group1_dir],
                     "group2": [group2_dir],
                 },
-                num_records=60,
                 shuffle=True,
                 seed=42,
                 sample_rate=44100,
                 duration=0.5,
-            )
+            ).slice(slice(0, 60))
 
             # Convert to IterDataset with multithreading
             read_options = grain.ReadOptions(
