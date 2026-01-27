@@ -3,7 +3,7 @@
 from typing import Any, Callable, Dict, List, Union
 import warnings
 
-from grain.python import MapTransform, RandomMapTransform
+from grain.transforms import Map as MapTransform, RandomMap as RandomMapTransform
 import jax
 from jax import random
 from jax.tree import map_with_path
