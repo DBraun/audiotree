@@ -3,7 +3,7 @@
 This module contains only the Batch operation, which is kept for compatibility
 with grain's BatchOperation pattern.
 
-All other transforms have been migrated to function-based API in functional.py.
+All other transforms are in the function-based API in functional.py.
 """
 
 from typing import Any, Sequence

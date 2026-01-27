@@ -70,9 +70,7 @@ def test_main_with_custom_yaml():
 
 def test_volume_norm_binding():
     """Test that volume_norm can be bound with argbind."""
-    import jax
-
-    VolumeNorm = argbind.bind(transforms.volume_norm)
+    volume_norm = argbind.bind(transforms.volume_norm)
 
     B = 4
     T = 44100
@@ -80,7 +78,7 @@ def test_volume_norm_binding():
     audio_tree = audio_tree.replace_loudness()
     loudness_before = audio_tree.loudness
 
-    rng = jax.random.key(42)
+    rng = np.random.default_rng(42)
 
     args = {
         "volume_norm.min_db": -20,
@@ -88,7 +86,7 @@ def test_volume_norm_binding():
     }
 
     with argbind.scope(args):
-        transform = VolumeNorm()
+        transform = volume_norm()
         audio_tree_normalized = transform.random_map(audio_tree, rng)
 
     assert audio_tree_normalized.loudness is not None
@@ -100,7 +98,7 @@ def test_volume_norm_binding():
 
 def test_trim_binding():
     """Test that trim can be bound with argbind."""
-    Trim = argbind.bind(transforms.trim)
+    trim = argbind.bind(transforms.trim)
 
     B = 4
     T = 44100
@@ -111,7 +109,7 @@ def test_trim_binding():
     }
 
     with argbind.scope(args):
-        transform = Trim()
+        transform = trim()
         audio_tree_trimmed = transform.map(audio_tree)
 
     expected_length = int(1.0 * 44100)

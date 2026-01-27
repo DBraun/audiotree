@@ -33,9 +33,9 @@ Given this Python code:
     from audiotree import AudioTree, transforms
     import numpy as np
 
-    # Bind transform classes to argbind
-    VolumeNorm = argbind.bind(transforms.VolumeNorm)
-    Trim = argbind.bind(transforms.Trim)
+    # Bind transform functions to argbind
+    volume_norm = argbind.bind(transforms.volume_norm)
+    trim = argbind.bind(transforms.trim)
 
     def main():
         # Create audio
@@ -44,8 +44,8 @@ Given this Python code:
 
         # Apply transforms (config set via argbind)
         rng = np.random.default_rng(42)
-        audio_tree = VolumeNorm().random_map(audio_tree, rng)
-        audio_tree = Trim().map(audio_tree)
+        audio_tree = volume_norm().random_map(audio_tree, rng)
+        audio_tree = trim().map(audio_tree)
 
         print("Final shape:", audio_tree.audio_data.shape)
 
@@ -58,12 +58,10 @@ And this config file (``config.yml``):
 
 .. code-block:: yaml
 
-    VolumeNorm.config:
-      min_db: -20
-      max_db: -15
+    volume_norm.min_db: -20
+    volume_norm.max_db: -15
 
-    Trim.config:
-      length: 1.0
+    trim.length: 1.0
 
 Run with:
 
@@ -74,22 +72,19 @@ Run with:
 Transform Config Structure
 ---------------------------
 
-AudioTree transforms take a ``config`` dict parameter. With argbind, set this in YAML:
+AudioTree transform parameters are set as flat keys in YAML:
 
 .. code-block:: yaml
 
-    VolumeNorm.config:
-      min_db: -20
-      max_db: -15
+    volume_norm.min_db: -20
+    volume_norm.max_db: -15
 
-    VolumeChange.config:
-      min_db: -12
-      max_db: 3
+    volume_change.min_db: -12
+    volume_change.max_db: 3
 
-    Trim.config:
-      length: 2.0
+    trim.length: 2.0
 
-**Note**: ArgBind does not support JSON syntax for dict parameters from the command line. Always use YAML files for configuration.
+**Note**: Use YAML files for configuration. Command-line overrides also work (e.g., ``--volume_norm.min_db=-25``).
 
 Scoped Configurations
 ---------------------
@@ -101,33 +96,32 @@ Use scopes to configure the same transform differently for train vs validation:
 .. code-block:: yaml
 
     # Training: aggressive augmentation
-    train/VolumeNorm.config:
-      min_db: -25
-      max_db: -15
+    train/volume_norm.min_db: -25
+    train/volume_norm.max_db: -15
 
     # Validation: deterministic (same min/max)
-    val/VolumeNorm.config:
-      min_db: -20
-      max_db: -20
+    val/volume_norm.min_db: -20
+    val/volume_norm.max_db: -20
 
     # Shared config (no scope prefix)
-    Trim.config:
-      length: 1.0
+    trim.length: 1.0
 
 **Python:**
 
 .. code-block:: python
 
+    volume_norm = argbind.bind(transforms.volume_norm, "train", "val")
+
     args = argbind.parse_args()
 
     # Training pipeline
     with argbind.scope(args, "train"):
-        transform = VolumeNorm()  # Uses train/VolumeNorm.config
+        transform = volume_norm()  # Uses train/volume_norm config
         train_audio = transform.random_map(audio_tree, rng)
 
     # Validation pipeline
     with argbind.scope(args, "val"):
-        transform = VolumeNorm()  # Uses val/VolumeNorm.config
+        transform = volume_norm()  # Uses val/volume_norm config
         val_audio = transform.random_map(audio_tree, rng)
 
 Binding Multiple Transforms
@@ -139,10 +133,12 @@ Bind an entire module at once using ``bind_module``:
 
     from audiotree import transforms as transforms_lib
     import argbind
+    import grain
+    from jax import random
 
-    # Filter to only bind Map and RandomMap transforms
+    # Filter to only bind transform functions (excludes Batch class)
     def filter_fn(fn):
-        return hasattr(fn, "random_map") or hasattr(fn, "map")
+        return callable(fn) and not isinstance(fn, type)
 
     # Bind all transforms in the module
     transforms_lib = argbind.bind_module(
@@ -152,12 +148,12 @@ Bind an entire module at once using ``bind_module``:
     # Now all transforms are available with scoped configs
     @argbind.bind("train", "val")
     def augment_batch(rng, batch, transforms: list[str] = None):
-        for TransformClass in transforms or []:
-            transform = getattr(transforms_lib, TransformClass)()
-            if hasattr(transform, "random_map"):
+        for transform_name in transforms or []:
+            transform = getattr(transforms_lib, transform_name)()
+            if isinstance(transform, grain.transforms.RandomMap):
                 rng, subkey = random.split(rng)
                 batch = transform.random_map(batch, subkey)
-            elif hasattr(transform, "map"):
+            elif isinstance(transform, grain.transforms.Map):
                 batch = transform.map(batch)
         return batch
 
@@ -165,25 +161,22 @@ Bind an entire module at once using ``bind_module``:
 
 .. code-block:: yaml
 
-    train/VolumeNorm.config:
-      min_db: -25
-      max_db: -15
+    train/volume_norm.min_db: -25
+    train/volume_norm.max_db: -15
 
-    val/VolumeNorm.config:
-      min_db: -20
-      max_db: -20
+    val/volume_norm.min_db: -20
+    val/volume_norm.max_db: -20
 
-    Trim.config:
-      length: 1.0
+    trim.length: 1.0
 
-    # List of transforms to apply
+    # List of transforms to apply (use function names)
     train/augment_batch.transforms:
-      - VolumeNorm
-      - Trim
+      - volume_norm
+      - trim
 
     val/augment_batch.transforms:
-      - VolumeNorm
-      - Trim
+      - volume_norm
+      - trim
 
 Saving and Loading Configs
 ---------------------------
@@ -215,13 +208,14 @@ Output:
 
 .. code-block:: text
 
-    VolumeNorm(
-      config : dict = {'min_db': -20, 'max_db': -15}
+    volume_norm(
+      min_db : float = -20
+      max_db : float = -15
       split_seed : bool = True
       prob : float = 1.0
     )
-    Trim(
-      config : dict = {'length': 1.0}
+    trim(
+      length : float = 1.0
     )
 
 Available Transform Parameters

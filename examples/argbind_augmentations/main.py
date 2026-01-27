@@ -2,7 +2,7 @@
 Basic example of using argbind with AudioTree transforms.
 
 This example demonstrates:
-1. Binding transform classes with argbind
+1. Binding transform functions with argbind
 2. Configuring transforms via YAML files or command-line arguments
 3. Applying random and deterministic transforms to audio
 
@@ -25,8 +25,8 @@ from audiotree import transforms
 
 # Bind transform functions to argbind
 # This allows their parameters to be set via CLI or YAML
-VolumeNorm = argbind.bind(transforms.volume_norm)
-Trim = argbind.bind(transforms.trim)
+volume_norm = argbind.bind(transforms.volume_norm)
+trim = argbind.bind(transforms.trim)
 
 
 def main():
@@ -44,20 +44,20 @@ def main():
     # Create RNG for deterministic randomness
     rng = np.random.default_rng(42)
 
-    # Apply VolumeNorm transform (normalizes loudness to a random value in [min_db, max_db])
+    # Apply volume_norm transform (normalizes loudness to a random value in [min_db, max_db])
     # The config values (min_db, max_db) are set via argbind from config.yml or CLI
-    audio_tree = VolumeNorm().random_map(audio_tree, rng)
+    audio_tree = volume_norm().random_map(audio_tree, rng)
     loudness_after = audio_tree.loudness
     print("After:", loudness_after)
 
-    # Apply VolumeNorm again to show it can produce different results with same RNG
-    audio_tree = VolumeNorm().random_map(audio_tree, rng)
+    # Apply volume_norm again to show it can produce different results with same RNG
+    audio_tree = volume_norm().random_map(audio_tree, rng)
     loudness_after = audio_tree.loudness
     print("After again:", loudness_after)
 
-    # Apply Trim transform (deterministic - trims to specified length)
+    # Apply trim transform (deterministic - trims to specified length)
     print("length:", audio_tree.audio_data.shape[-1])
-    audio_tree = Trim().map(audio_tree)
+    audio_tree = trim().map(audio_tree)
     print("after length:", audio_tree.audio_data.shape[-1])
 
 

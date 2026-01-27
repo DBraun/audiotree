@@ -29,11 +29,11 @@ from jax import random
 import numpy as np
 
 from audiotree import AudioTree
-from audiotree import transforms as transforms_lib
+from audiotree.transforms import jax as jax_transforms
 
 
 def filter_fn(fn):
-    """Only bind transform functions (excludes Batch which is a BatchOperation).
+    """Only bind transform functions (excludes non-callables).
 
     Args:
         fn: A function or class from the transforms module
@@ -41,14 +41,14 @@ def filter_fn(fn):
     Returns:
         bool: True if the function should be bound with argbind
     """
-    # Bind if it's a callable that's not a class and not Batch
+    # Bind if it's a callable that's not a class
     return callable(fn) and not isinstance(fn, type)
 
 
-# Bind the entire transforms module with scopes for "train" and "val"
+# Bind the entire JAX transforms module with scopes for "train" and "val"
 # See: https://github.com/pseeth/argbind/tree/main/examples/bind_module
 transforms_lib = argbind.bind_module(
-    transforms_lib, "train", "val", filter_fn=filter_fn
+    jax_transforms, "train", "val", filter_fn=filter_fn
 )
 
 
@@ -66,16 +66,16 @@ def augment_batch(
     Args:
         rng: JAX random key
         batch: Dict containing AudioTree under "src" key
-        transforms: List of transform class names to apply in order
+        transforms: List of transform function names to apply in order
 
     Returns:
         Dict containing transformed AudioTree
     """
     transforms = transforms or []
 
-    for TransformClass in transforms:
-        # Get the bound transform class by name
-        transform = getattr(transforms_lib, TransformClass)()
+    for transform_name in transforms:
+        # Get the bound transform by name
+        transform = getattr(transforms_lib, transform_name)()
 
         # Apply transform based on its type
         if isinstance(transform, grain.transforms.RandomMap):

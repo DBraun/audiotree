@@ -1,4 +1,4 @@
-"""Tests for main2.py - advanced argbind usage with scoped transforms."""
+"""Tests for main2.py - advanced argbind usage with scoped JAX transforms."""
 
 import subprocess
 import sys
@@ -6,7 +6,7 @@ from typing import Dict
 
 import argbind
 from audiotree import AudioTree
-from audiotree import transforms as transforms_lib
+from audiotree.transforms import jax as jax_transforms
 import jax
 from jax import random
 import numpy as np
@@ -70,62 +70,85 @@ def test_bind_module_with_filter():
     """Test that bind_module correctly filters transforms."""
 
     def filter_fn(fn):
-        """Only bind transform functions (excludes Batch and classes)."""
+        """Only bind transform functions (excludes classes)."""
         return callable(fn) and not isinstance(fn, type)
 
     transforms_bound = argbind.bind_module(
-        transforms_lib, "test_train", "test_val", filter_fn=filter_fn
+        jax_transforms, "test_train", "test_val", filter_fn=filter_fn
     )
 
     assert hasattr(transforms_bound, "volume_norm")
     assert hasattr(transforms_bound, "trim")
     assert hasattr(transforms_bound, "volume_change")
-    # Batch should be excluded by the filter
-    assert not hasattr(transforms_bound, "Batch")
 
 
 def test_scoped_augmentation():
-    """Test that bind_module correctly binds transforms for different scopes."""
+    """Test that bind_module correctly binds JAX transforms for different scopes.
 
-    def filter_fn(fn):
-        """Only bind transform functions (excludes Batch and classes)."""
-        return callable(fn) and not isinstance(fn, type)
+    This test runs in a subprocess to avoid argbind state pollution from other tests.
+    When argbind binds functions with the same name (e.g., volume_norm from both
+    NumPy and JAX modules), the registry can get confused.
+    """
+    # Run in subprocess for isolation from other argbind bindings
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import argbind
+from audiotree import AudioTree
+from audiotree.transforms import jax as jax_transforms
+from jax import random
+import numpy as np
 
-    transforms_bound = argbind.bind_module(
-        transforms_lib, "test_train", "test_val", filter_fn=filter_fn
+def filter_fn(fn):
+    return callable(fn) and not isinstance(fn, type)
+
+transforms_bound = argbind.bind_module(
+    jax_transforms, "test_train", "test_val", filter_fn=filter_fn
+)
+
+B = 2
+T = 44100
+
+audio_tree = AudioTree(np.random.uniform(-1, 1, size=(B, 1, T)), sample_rate=44100)
+audio_tree = audio_tree.replace_loudness()
+
+train_args = {
+    "test_train/volume_norm.min_db": -25,
+    "test_train/volume_norm.max_db": -15,
+}
+
+val_args = {
+    "test_val/volume_norm.min_db": -20,
+    "test_val/volume_norm.max_db": -20,
+}
+
+rng = random.key(0)
+
+with argbind.scope(train_args, "test_train"):
+    transform = transforms_bound.volume_norm()
+    train_audio = transform.random_map(audio_tree, rng)
+
+with argbind.scope(val_args, "test_val"):
+    transform = transforms_bound.volume_norm()
+    val_audio = transform.random_map(audio_tree, rng)
+
+assert train_audio.loudness is not None, "train_audio.loudness is None"
+assert val_audio.loudness is not None, "val_audio.loudness is None"
+
+assert np.all(train_audio.loudness >= -25 - 1), f"train loudness too low: {train_audio.loudness}"
+assert np.all(train_audio.loudness <= -15 + 1), f"train loudness too high: {train_audio.loudness}"
+
+assert np.all(val_audio.loudness >= -20 - 1), f"val loudness too low: {val_audio.loudness}"
+assert np.all(val_audio.loudness <= -20 + 1), f"val loudness too high: {val_audio.loudness}"
+
+print("SUCCESS")
+""",
+        ],
+        capture_output=True,
+        text=True,
     )
 
-    B = 2
-    T = 44100
-
-    audio_tree = AudioTree(np.random.uniform(-1, 1, size=(B, 1, T)), sample_rate=44100)
-    audio_tree = audio_tree.replace_loudness()
-
-    train_args = {
-        "test_train/volume_norm.min_db": -25,
-        "test_train/volume_norm.max_db": -15,
-    }
-
-    val_args = {
-        "test_val/volume_norm.min_db": -20,
-        "test_val/volume_norm.max_db": -20,
-    }
-
-    rng = random.key(0)
-
-    with argbind.scope(train_args, "test_train"):
-        transform = transforms_bound.volume_norm()
-        train_audio = transform.random_map(audio_tree, rng)
-
-    with argbind.scope(val_args, "test_val"):
-        transform = transforms_bound.volume_norm()
-        val_audio = transform.random_map(audio_tree, rng)
-
-    assert train_audio.loudness is not None
-    assert val_audio.loudness is not None
-
-    assert np.all(train_audio.loudness >= -25 - 1)
-    assert np.all(train_audio.loudness <= -15 + 1)
-
-    assert np.all(val_audio.loudness >= -20 - 1)
-    assert np.all(val_audio.loudness <= -20 + 1)
+    assert result.returncode == 0, f"Test failed with stderr: {result.stderr}"
+    assert "SUCCESS" in result.stdout
