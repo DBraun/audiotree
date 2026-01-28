@@ -101,7 +101,7 @@ class TestCreateBalancedAudioDataset:
             ds1 = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
                 shuffle=False,
-                seed=42,
+                shuffle_seed=42,
                 sample_rate=44100,
                 duration=0.5,
             ).slice(slice(0, 20))
@@ -109,7 +109,7 @@ class TestCreateBalancedAudioDataset:
             ds2 = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
                 shuffle=False,
-                seed=42,
+                shuffle_seed=42,
                 sample_rate=44100,
                 duration=0.5,
             ).slice(slice(0, 20))
@@ -129,7 +129,7 @@ class TestCreateBalancedAudioDataset:
             ds1 = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
                 shuffle=True,
-                seed=42,
+                shuffle_seed=42,
                 sample_rate=44100,
                 duration=0.5,
             ).slice(slice(0, 20))
@@ -137,7 +137,7 @@ class TestCreateBalancedAudioDataset:
             ds2 = create_balanced_audio_dataset(
                 sources={"group1": [group1_dir], "group2": [group2_dir]},
                 shuffle=True,
-                seed=123,
+                shuffle_seed=123,
                 sample_rate=44100,
                 duration=0.5,
             ).slice(slice(0, 20))
@@ -270,7 +270,7 @@ class TestCreateBalancedAudioDataset:
                 repeat=True,
                 sample_rate=44100,
                 duration=0.5,
-                seed=999,
+                shuffle_seed=999,
             )
 
             # Mix them together
@@ -432,7 +432,7 @@ class TestBalancedDatasetHierarchical:
                 weights={"group1": 1.0, "group2": 1.0, "group3": 1.0},
                 sample_rate=44100,
                 duration=0.5,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 900))
 
             # Count occurrences by source
@@ -471,7 +471,7 @@ class TestBalancedDatasetHierarchical:
                 weights={"group1": 0.5, "group2": 0.3, "group3": 0.2},
                 sample_rate=44100,
                 duration=0.5,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 1000))
 
             # Count occurrences by source
@@ -508,7 +508,7 @@ class TestBalancedDatasetHierarchical:
                 weights={"group1": 1.0, "group2": 1.0},
                 sample_rate=44100,
                 duration=0.5,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 200))
 
             # Collect filepaths for group1
@@ -560,7 +560,7 @@ class TestBalancedDatasetHierarchical:
                 weights={"large_group": 1.0, "small_group": 1.0},
                 sample_rate=44100,
                 duration=0.5,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 400))
 
             # Count occurrences
@@ -597,7 +597,7 @@ class TestBalancedDatasetHierarchical:
                 weights={"group1": 0.5, "group2": 0.3, "group3": 0.2},
                 sample_rate=44100,
                 duration=0.5,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 10000))
 
             # Count all occurrences
@@ -634,7 +634,7 @@ class TestBalancedDatasetHierarchical:
                 weights={"group1": 1.0, "group2": 1.0},
                 sample_rate=44100,
                 duration=0.5,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 200))
 
             # Count occurrences
@@ -730,7 +730,7 @@ class TestBalancedDatasetHierarchical:
                 weights={"group1": 1.0, "group2": 1.0, "group3": 1.0},
                 sample_rate=44100,
                 duration=0.5,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 300))
 
             # Count occurrences
@@ -800,7 +800,7 @@ class TestBalancedDatasetHierarchical:
                 sample_rate=44100,
                 duration=0.5,
                 shuffle=True,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 100))
 
             ds2 = create_balanced_audio_dataset(
@@ -812,7 +812,7 @@ class TestBalancedDatasetHierarchical:
                 sample_rate=44100,
                 duration=0.5,
                 shuffle=True,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 100))
 
             # Verify identical sequences
@@ -843,7 +843,7 @@ class TestBalancedDatasetHierarchical:
                 weights={"group1": 2.0, "group2": 3.0, "group3": 5.0},
                 sample_rate=44100,
                 duration=0.5,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 1000))
 
             # Create dataset with normalized weights (equivalent)
@@ -856,7 +856,7 @@ class TestBalancedDatasetHierarchical:
                 weights={"group1": 0.2, "group2": 0.3, "group3": 0.5},
                 sample_rate=44100,
                 duration=0.5,
-                seed=42,
+                shuffle_seed=42,
             ).slice(slice(0, 1000))
 
             # Count occurrences for both datasets

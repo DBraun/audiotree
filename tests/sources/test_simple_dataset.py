@@ -67,7 +67,7 @@ def test_no_shuffle():
         ds1 = create_audio_dataset(
             sources=audio_dir,
             shuffle=False,
-            seed=42,
+            shuffle_seed=42,
             sample_rate=44100,
             duration=0.5,
         )
@@ -75,7 +75,7 @@ def test_no_shuffle():
         ds2 = create_audio_dataset(
             sources=audio_dir,
             shuffle=False,
-            seed=42,
+            shuffle_seed=42,
             sample_rate=44100,
             duration=0.5,
         )
@@ -95,7 +95,7 @@ def test_shuffle():
         ds1 = create_audio_dataset(
             sources=audio_dir,
             shuffle=True,
-            seed=42,
+            shuffle_seed=42,
             sample_rate=44100,
             duration=0.5,
         )
@@ -103,7 +103,7 @@ def test_shuffle():
         ds2 = create_audio_dataset(
             sources=audio_dir,
             shuffle=True,
-            seed=99,
+            shuffle_seed=99,
             sample_rate=44100,
             duration=0.5,
         )

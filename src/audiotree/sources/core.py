@@ -127,7 +127,8 @@ def create_audio_dataset(
     sources: List[str] | str,
     shuffle: bool = True,
     repeat: bool = False,
-    seed: int = 0,
+    shuffle_seed: int = 0,
+    excerpt_seed: int | None = None,
     sample_rate: int = 44_100,
     mono: bool = True,
     duration: float = 1.0,
@@ -147,7 +148,10 @@ def create_audio_dataset(
         shuffle: Whether to shuffle files.
         repeat: Whether to repeat the dataset infinitely. Set to True for training,
             False for validation/testing.
-        seed: Random seed for shuffling.
+        shuffle_seed: Random seed for shuffling file order.
+        excerpt_seed: Random seed for excerpt selection (random_map). If None, defaults
+            to shuffle_seed. Use different values to create datasets that visit files
+            in the same order but load different random excerpts.
         sample_rate: Target sample rate for audio files.
         mono: Whether to convert audio to mono.
         duration: Duration in seconds to load from each file.
@@ -187,7 +191,22 @@ def create_audio_dataset(
         ...     sample_rate=44100,
         ...     duration=3.0,
         ... )
+
+        >>> # Two datasets with same file order but different excerpts
+        >>> ds1 = create_audio_dataset(
+        ...     sources="/data/audio",
+        ...     shuffle_seed=42,
+        ...     excerpt_seed=100,
+        ... )
+        >>> ds2 = create_audio_dataset(
+        ...     sources="/data/audio",
+        ...     shuffle_seed=42,
+        ...     excerpt_seed=200,
+        ... )
     """
+    if excerpt_seed is None:
+        excerpt_seed = shuffle_seed
+
     if extensions is None:
         extensions = _default_extensions
 
@@ -215,7 +234,7 @@ def create_audio_dataset(
     ds = grain.MapDataset.source(filepaths)
 
     if shuffle:
-        ds = ds.shuffle(seed=seed)
+        ds = ds.shuffle(seed=shuffle_seed)
 
     if repeat:
         ds = ds.repeat()
@@ -230,7 +249,7 @@ def create_audio_dataset(
         saliency_params=saliency_params,
         source=source,
     )
-    ds = ds.random_map(load_fn, seed=seed + 1000)
+    ds = ds.random_map(load_fn, seed=excerpt_seed)
 
     return ds
 
@@ -240,7 +259,8 @@ def create_balanced_audio_dataset(
     weights: Optional[Mapping[str, float]] = None,
     datasets: Optional[Mapping[str, grain.MapDataset]] = None,
     shuffle: bool = True,
-    seed: int = 0,
+    shuffle_seed: int = 0,
+    excerpt_seed: int | None = None,
     sample_rate: int = 44_100,
     mono: int = 1,
     duration: float = 1.0,
@@ -267,8 +287,11 @@ def create_balanced_audio_dataset(
             different data sources or including pre-processed datasets.
         shuffle: Whether to shuffle files within each file-based group. Set to False for
             deterministic iteration (e.g., pre-rendering). Does not affect pre-constructed datasets.
-        seed: Random seed for shuffling. Each file-based group uses seed + group_index
-            for independent shuffling.
+        shuffle_seed: Random seed for shuffling file order. Used to initialize an RNG
+            that derives independent seeds for each group and the final mix.
+        excerpt_seed: Random seed for excerpt selection (random_map). If None, defaults
+            to shuffle_seed. Used to initialize an RNG that derives independent seeds
+            for each group.
         sample_rate: Target sample rate for audio files (only applies to file-based sources).
         mono: Whether to convert audio to mono (only applies to file-based sources, 0 or 1).
         duration: Duration in seconds to load from each file (only applies to file-based sources).
@@ -279,8 +302,8 @@ def create_balanced_audio_dataset(
         saliency_params: Optional saliency parameters for excerpt selection (only applies to file-based sources).
 
     Returns:
-        A grain.MapDataset with length that samples from the
-        source groups according to the specified weights.
+        An infinite grain.MapDataset that interleaves items from source groups
+        according to the specified weights.
 
     Example:
         >>> # Equal weighting (default)
@@ -303,7 +326,7 @@ def create_balanced_audio_dataset(
         ...     sources={"speech": ["/data/speech"], "music": ["/data/music"]},
         ...     weights={"speech": 0.5, "music": 0.5},
         ...     shuffle=False,
-        ...     seed=42,
+        ...     shuffle_seed=42,
         ...     sample_rate=44100,
         ...     duration=3.0,
         ... )
@@ -319,14 +342,20 @@ def create_balanced_audio_dataset(
     if sources is None and datasets is None:
         raise ValueError("At least one of 'sources' or 'datasets' must be provided")
 
+    if excerpt_seed is None:
+        excerpt_seed = shuffle_seed
+
+    # Create RNGs to derive independent seeds for each group
+    shuffle_rng = np.random.default_rng(shuffle_seed)
+    excerpt_rng = np.random.default_rng(excerpt_seed)
+
     all_datasets = []
     all_proportions = []
-    dataset_index = 0
 
     # Create datasets from file-based sources
     if sources is not None:
         group_names = list(sources.keys())
-        for i, group_name in enumerate(group_names):
+        for group_name in group_names:
             folders = sources[group_name]
 
             # Create dataset for this group with repeat=True (required for mixing)
@@ -334,7 +363,8 @@ def create_balanced_audio_dataset(
                 sources=folders,
                 shuffle=shuffle,
                 repeat=True,  # Always repeat before mixing
-                seed=seed + dataset_index,
+                shuffle_seed=int(shuffle_rng.integers(2**31)),
+                excerpt_seed=int(excerpt_rng.integers(2**31)),
                 sample_rate=sample_rate,
                 mono=bool(mono),
                 duration=duration,
@@ -351,7 +381,6 @@ def create_balanced_audio_dataset(
             if weights is not None:
                 weight = weights.get(group_name, 1.0)
             all_proportions.append(weight)
-            dataset_index += 1
 
     # Add pre-constructed datasets
     if datasets is not None:
@@ -364,13 +393,6 @@ def create_balanced_audio_dataset(
                 weight = weights.get(group_name, 1.0)
             all_proportions.append(weight)
 
-    # Mix datasets with weights, shuffle to break alternating pattern, then slice
-    # The shuffle after mix is critical: without it, mix() produces a strict
-    # alternating pattern (A, B, A, B, ...) which causes problems with striped
-    # worker sharding in DataLoader (even-numbered workers see only source A,
-    # odd-numbered workers see only source B).
-    mixed = grain.MapDataset.mix(all_datasets, weights=all_proportions).seed(seed + dataset_index)
-    if shuffle:
-        mixed = mixed.shuffle(seed=seed)
-
-    return mixed
+    # Mix datasets with weights. Note: mix() produces an alternating pattern
+    # (A, B, A, B, ...). If you need randomized order, call .shuffle() on the result.
+    return grain.MapDataset.mix(all_datasets, weights=all_proportions)

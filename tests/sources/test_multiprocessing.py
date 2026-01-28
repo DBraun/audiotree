@@ -187,7 +187,7 @@ class TestMultiprocessing:
                 },
                 weights={"group1": 0.7, "group2": 0.3},
                 shuffle=True,
-                seed=42,
+                shuffle_seed=42,
                 sample_rate=44100,
                 duration=0.5,
             ).slice(slice(0, 1000))
@@ -232,7 +232,7 @@ class TestCombinedMultithreadingMultiprocessing:
                     "group2": [group2_dir],
                 },
                 shuffle=True,
-                seed=42,
+                shuffle_seed=42,
                 sample_rate=44100,
                 duration=0.5,
             ).slice(slice(0, 60))

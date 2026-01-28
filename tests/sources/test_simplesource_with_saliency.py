@@ -144,7 +144,7 @@ def test_create_balanced_audio_dataset_with_saliency():
             duration=1.0,
             mono=True,
             saliency_params=saliency_params,
-            seed=42,
+            shuffle_seed=42,
         ).slice(slice(0, num_files))
 
         # Load items
@@ -217,7 +217,7 @@ def test_repeated_dataset_variety():
             duration=1.0,
             mono=True,
             saliency_params=saliency_params,
-            seed=42,
+            shuffle_seed=42,
         ).slice(slice(0, 100))
 
         # Load all excerpts
