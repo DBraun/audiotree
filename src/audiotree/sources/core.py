@@ -234,7 +234,7 @@ def create_audio_dataset(
     ds = grain.MapDataset.source(filepaths)
 
     if shuffle:
-        ds = ds.shuffle(seed=shuffle_seed)
+        ds = ds.seed(shuffle_seed).shuffle()
 
     if repeat:
         ds = ds.repeat()
@@ -353,34 +353,31 @@ def create_balanced_audio_dataset(
     all_proportions = []
 
     # Create datasets from file-based sources
-    if sources is not None:
-        group_names = list(sources.keys())
-        for group_name in group_names:
-            folders = sources[group_name]
+    sources = sources or {}
+    for group_name, folders in sources.items():
+        # Create dataset for this group with repeat=True (required for mixing)
+        ds = create_audio_dataset(
+            sources=folders,
+            shuffle=shuffle,
+            repeat=True,  # Always repeat before mixing
+            shuffle_seed=int(shuffle_rng.integers(2**31)),
+            excerpt_seed=int(excerpt_rng.integers(2**31)),
+            sample_rate=sample_rate,
+            mono=bool(mono),
+            duration=duration,
+            pad_mode=pad_mode,
+            extensions=extensions,
+            saliency_params=saliency_params,
+            source=group_name,  # Set source metadata to group name
+        )
 
-            # Create dataset for this group with repeat=True (required for mixing)
-            ds = create_audio_dataset(
-                sources=folders,
-                shuffle=shuffle,
-                repeat=True,  # Always repeat before mixing
-                shuffle_seed=int(shuffle_rng.integers(2**31)),
-                excerpt_seed=int(excerpt_rng.integers(2**31)),
-                sample_rate=sample_rate,
-                mono=bool(mono),
-                duration=duration,
-                pad_mode=pad_mode,
-                extensions=extensions,
-                saliency_params=saliency_params,
-                source=group_name,  # Set source metadata to group name
-            )
+        all_datasets.append(ds)
 
-            all_datasets.append(ds)
-
-            # Get weight for this group (default to 1.0)
-            weight = 1.0
-            if weights is not None:
-                weight = weights.get(group_name, 1.0)
-            all_proportions.append(weight)
+        # Get weight for this group (default to 1.0)
+        weight = 1.0
+        if weights is not None:
+            weight = weights.get(group_name, 1.0)
+        all_proportions.append(weight)
 
     # Add pre-constructed datasets
     if datasets is not None:
