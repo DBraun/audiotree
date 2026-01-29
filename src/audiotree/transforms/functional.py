@@ -12,11 +12,11 @@ Example:
 
     # With argbind
     import argbind
-    VolumeNorm = argbind.bind(volume_norm)
+    volume_norm = argbind.bind(volume_norm)
 
     args = argbind.parse_args()
     with argbind.scope(args):
-        transform = VolumeNorm()
+        transform = volume_norm()
         ds = ds.random_map(transform, seed=42)
 """
 

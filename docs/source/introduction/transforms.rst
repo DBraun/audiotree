@@ -58,12 +58,12 @@ optimization, see :ref:`transform_chaining`.
     from audiotree import transforms
 
     # Bind transform function to argbind
-    VolumeNorm = argbind.bind(transforms.volume_norm)
+    volume_norm = argbind.bind(transforms.volume_norm)
 
     # Config via YAML
     args = argbind.parse_args()
     with argbind.scope(args):
-        transform = VolumeNorm()  # Uses params from YAML
+        transform = volume_norm()  # Uses params from YAML
         ds = ds.random_map(transform, seed=42)
 
 For a complete guide on using ArgBind with transforms, including scoped configurations, YAML syntax,
@@ -277,7 +277,7 @@ Use decorators to create custom transforms:
 
     # Or with argbind
     import argbind
-    MyAugmentation = argbind.bind(my_augmentation)
+    my_augmentation = argbind.bind(my_augmentation)
 
     # config.yml:
     # my_augmentation.strength: 0.1

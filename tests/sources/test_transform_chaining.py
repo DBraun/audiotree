@@ -105,7 +105,7 @@ class TestBasicChaining:
             # Load item and verify all transforms were applied
             item = ds[0]
 
-            # Check VolumeNorm and VolumeChange were applied (loudness should be present)
+            # Check volume_norm and volume_change were applied (loudness should be present)
             assert item.loudness is not None
 
             # Check Trim was applied

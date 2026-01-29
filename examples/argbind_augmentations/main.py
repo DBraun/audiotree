@@ -36,7 +36,7 @@ def main():
     T = 44100
     audio_tree = AudioTree(np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100)
 
-    # Compute loudness (required for VolumeNorm transform)
+    # Compute loudness (required for volume_norm transform)
     audio_tree = audio_tree.replace_loudness()
     loudness_before = audio_tree.loudness
     print("Before:", loudness_before)

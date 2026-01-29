@@ -242,7 +242,7 @@ class TestArgBindIntegration:
 
     def test_bind_volume_norm(self):
         """Test binding volume_norm with argbind."""
-        VolumeNorm = argbind.bind(volume_norm)
+        volume_norm_bound = argbind.bind(volume_norm)
 
         # Create audio
         audio_tree = AudioTree(
@@ -260,7 +260,7 @@ class TestArgBindIntegration:
 
         # Apply with scope
         with argbind.scope(args):
-            transform = VolumeNorm()
+            transform = volume_norm_bound()
             rng = np.random.default_rng(42)
             result = transform.random_map(audio_tree, rng)
 
@@ -269,7 +269,7 @@ class TestArgBindIntegration:
 
     def test_bind_trim(self):
         """Test binding trim with argbind."""
-        Trim = argbind.bind(trim)
+        trim_bound = argbind.bind(trim)
 
         # Create audio
         audio_tree = AudioTree(
@@ -284,7 +284,7 @@ class TestArgBindIntegration:
 
         # Apply with scope
         with argbind.scope(args):
-            transform = Trim()
+            transform = trim_bound()
             result = transform.map(audio_tree)
 
         # Verify length
@@ -297,8 +297,8 @@ class TestArgBindIntegration:
             _create_test_audio_file(tmpdir, "test.wav", duration=5.0)
 
             # Bind transforms
-            VolumeNorm = argbind.bind(volume_norm)
-            Trim = argbind.bind(trim)
+            volume_norm_bound = argbind.bind(volume_norm)
+            trim_bound = argbind.bind(trim)
 
             # Create dataset
             ds = create_audio_dataset(
@@ -318,8 +318,8 @@ class TestArgBindIntegration:
 
             # Chain with scope
             with argbind.scope(args):
-                ds = ds.random_map(VolumeNorm(), seed=42)
-                ds = ds.map(Trim())
+                ds = ds.random_map(volume_norm_bound(), seed=42)
+                ds = ds.map(trim_bound())
 
             # Load item
             item = ds[0]

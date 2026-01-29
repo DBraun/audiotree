@@ -176,11 +176,11 @@ Configure scope via YAML:
     import argbind
     from audiotree.transforms import volume_change
 
-    VolumeChange = argbind.bind(volume_change)
+    volume_change = argbind.bind(volume_change)
 
     args = argbind.parse_args()
     with argbind.scope(args):
-        transform = VolumeChange()
+        transform = volume_change()
         batch = transform.random_map(batch, rng)
 
 Scope with Output Key
@@ -399,13 +399,13 @@ Scope with ArgBind
     import argbind
     from audiotree.transforms import volume_norm, volume_change
 
-    VolumeNorm = argbind.bind(volume_norm)
-    VolumeChange = argbind.bind(volume_change)
+    volume_norm = argbind.bind(volume_norm)
+    volume_change = argbind.bind(volume_change)
 
     args = argbind.parse_args()
     with argbind.scope(args):
-        transform1 = VolumeNorm()
-        transform2 = VolumeChange()
+        transform1 = volume_norm()
+        transform2 = volume_change()
 
         batch = transform1.random_map(batch, jax.random.key(42))
         batch = transform2.random_map(batch, jax.random.key(43))
@@ -610,19 +610,19 @@ Configure different pipelines for train vs validation:
     import argbind
     from audiotree.transforms import volume_norm, volume_change
 
-    VolumeNorm = argbind.bind(volume_norm, "train", "val")
-    VolumeChange = argbind.bind(volume_change, "train", "val")
+    volume_norm = argbind.bind(volume_norm, "train", "val")
+    volume_change = argbind.bind(volume_change, "train", "val")
 
     def augment_batch(batch, rng, scope_name):
         """Augment batch based on scope (train or val)."""
         with argbind.scope(args, scope_name):
             # Normalize both
-            transform1 = VolumeNorm()
+            transform1 = volume_norm()
             batch = transform1.random_map(batch, rng)
 
             # Augment dry (if enabled for this scope)
             rng, subkey = jax.random.split(rng)
-            transform2 = VolumeChange()
+            transform2 = volume_change()
             batch = transform2.random_map(batch, subkey)
 
         return batch

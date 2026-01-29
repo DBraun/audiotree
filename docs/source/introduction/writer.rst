@@ -275,13 +275,14 @@ AudioWriter integrates seamlessly with data processing pipelines:
 
 .. code-block:: python
 
-    from audiotree.transforms import VolumeNorm
+    from audiotree.transforms import volume_norm
 
     # Process and write data
     with AudioWriter("processed_output") as writer:
         for batch in data_loader:
             # Apply transformations
-            normalized = VolumeNorm(config={"target_db": -20}).random_map(batch)
+            transform = volume_norm(min_db=-20, max_db=-20)
+            normalized = transform.random_map(batch, rng=np.random.default_rng(42))
 
             # Write processed batch
             writer.write(normalized, tags={"processing": "normalized"})

@@ -27,11 +27,11 @@ import numpy as np
 from audiotree import AudioTree
 from audiotree.transforms.functional import trim
 
-Trim = argbind.bind(trim)
+trim = argbind.bind(trim)
 
 args = argbind.parse_args()
 with argbind.scope(args):
-    transform = Trim()
+    transform = trim()
     audio_tree = AudioTree(
         np.random.randn(1, 1, 44100 * 5).astype(np.float32) * 0.1,
         sample_rate=44100,
@@ -67,11 +67,11 @@ import numpy as np
 from audiotree import AudioTree
 from audiotree.transforms.functional import volume_norm
 
-VolumeNorm = argbind.bind(volume_norm)
+volume_norm = argbind.bind(volume_norm)
 
 args = argbind.parse_args()
 with argbind.scope(args):
-    transform = VolumeNorm()
+    transform = volume_norm()
     audio_tree = AudioTree(
         np.random.randn(1, 1, 44100).astype(np.float32) * 0.1,
         sample_rate=44100,
@@ -111,11 +111,11 @@ import numpy as np
 from audiotree import AudioTree
 from audiotree.transforms.functional import volume_norm
 
-VolumeNorm = argbind.bind(volume_norm)
+volume_norm = argbind.bind(volume_norm)
 
 args = argbind.parse_args()
 with argbind.scope(args):
-    transform = VolumeNorm()
+    transform = volume_norm()
     audio_tree = AudioTree(
         np.random.randn(1, 1, 44100).astype(np.float32) * 0.1,
         sample_rate=44100,
@@ -180,11 +180,11 @@ import numpy as np
 from audiotree import AudioTree
 from audiotree.transforms.functional import trim
 
-Trim = argbind.bind(trim)
+trim = argbind.bind(trim)
 
 args = argbind.parse_args()
 with argbind.scope(args):
-    transform = Trim()
+    transform = trim()
     audio_tree = AudioTree(
         np.random.randn(1, 1, 44100 * 5).astype(np.float32) * 0.1,
         sample_rate=44100,
@@ -230,11 +230,11 @@ import numpy as np
 from audiotree import AudioTree
 from audiotree.transforms.functional import volume_norm
 
-VolumeNorm = argbind.bind(volume_norm)
+volume_norm = argbind.bind(volume_norm)
 
 args = argbind.parse_args()
 with argbind.scope(args):
-    transform = VolumeNorm()
+    transform = volume_norm()
     audio_tree = AudioTree(
         np.random.randn(1, 1, 44100).astype(np.float32) * 0.1,
         sample_rate=44100,
@@ -286,7 +286,7 @@ import numpy as np
 from audiotree import AudioTree
 from audiotree.transforms.functional import volume_norm
 
-VolumeNorm = argbind.bind(volume_norm, "train", "val")
+volume_norm = argbind.bind(volume_norm, "train", "val")
 
 args = argbind.parse_args()
 
@@ -299,7 +299,7 @@ rng = np.random.default_rng(42)
 
 # Train scope
 with argbind.scope(args, "train"):
-    transform = VolumeNorm()
+    transform = volume_norm()
     train_result = transform.random_map(audio_tree, rng)
     train_loudness = float(train_result.loudness[0])
     print(f"Train loudness: {{train_loudness}}")
@@ -307,7 +307,7 @@ with argbind.scope(args, "train"):
 # Val scope - need a new rng to get different results
 rng2 = np.random.default_rng(42)
 with argbind.scope(args, "val"):
-    transform = VolumeNorm()
+    transform = volume_norm()
     val_result = transform.random_map(audio_tree, rng2)
     val_loudness = float(val_result.loudness[0])
     print(f"Val loudness: {{val_loudness}}")

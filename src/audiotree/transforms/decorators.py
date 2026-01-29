@@ -30,9 +30,9 @@ def random_transform(fn: Callable) -> Callable:
         ds = ds.random_map(transform, seed=42)
 
         # With argbind
-        VolumeNorm = argbind.bind(volume_norm)
+        volume_norm = argbind.bind(volume_norm)
         with argbind.scope(args):
-            transform = VolumeNorm()
+            transform = volume_norm()
             ds = ds.random_map(transform, seed=42)
     """
 
@@ -117,9 +117,9 @@ def map_transform(fn: Callable) -> Callable:
         ds = ds.map(transform)
 
         # With argbind
-        Trim = argbind.bind(trim)
+        trim = argbind.bind(trim)
         with argbind.scope(args):
-            transform = Trim()
+            transform = trim()
             ds = ds.map(transform)
     """
 

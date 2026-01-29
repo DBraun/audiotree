@@ -56,8 +56,6 @@ def _volume_norm_np(
 
     target_db = rng.uniform(min_db, max_db, size=(B,)).astype(np.float32)
     loudness = audio_tree.loudness
-    if isinstance(loudness, jax.Array):
-        loudness = np.asarray(loudness)
     gain_db = target_db - loudness
 
     audio_data = audio_data * _db2linear_np(gain_db)[:, None, None]

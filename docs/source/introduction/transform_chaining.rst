@@ -123,10 +123,10 @@ Use ArgBind to configure transform chains from YAML:
     from audiotree import transforms
 
     # Bind transforms
-    VolumeNorm = argbind.bind(transforms.volume_norm)
-    VolumeChange = argbind.bind(transforms.volume_change)
-    InvertPhase = argbind.bind(transforms.invert_phase)
-    Trim = argbind.bind(transforms.trim)
+    volume_norm = argbind.bind(transforms.volume_norm)
+    volume_change = argbind.bind(transforms.volume_change)
+    invert_phase = argbind.bind(transforms.invert_phase)
+    trim = argbind.bind(transforms.trim)
 
     def create_pipeline():
         # Create dataset
@@ -142,10 +142,10 @@ Use ArgBind to configure transform chains from YAML:
         )
 
         # Chain transforms (configured via ArgBind)
-        ds = ds.random_map(VolumeNorm(), seed=42)
-        ds = ds.random_map(VolumeChange(), seed=43)
-        ds = ds.random_map(InvertPhase(), seed=44)
-        ds = ds.map(Trim())
+        ds = ds.random_map(volume_norm(), seed=42)
+        ds = ds.random_map(volume_change(), seed=43)
+        ds = ds.random_map(invert_phase(), seed=44)
+        ds = ds.map(trim())
 
         return ds
 
@@ -191,8 +191,8 @@ Apply different transforms for training vs validation:
     from audiotree.sources import create_audio_dataset
     from audiotree import transforms
 
-    VolumeNorm = argbind.bind(transforms.volume_norm, "train", "val")
-    VolumeChange = argbind.bind(transforms.volume_change, "train", "val")
+    volume_norm = argbind.bind(transforms.volume_norm, "train", "val")
+    volume_change = argbind.bind(transforms.volume_change, "train", "val")
 
     def create_train_pipeline():
         ds = create_audio_dataset(
@@ -205,8 +205,8 @@ Apply different transforms for training vs validation:
 
         # Aggressive augmentation for training
         with argbind.scope(args, "train"):
-            ds = ds.random_map(VolumeNorm(), seed=42)
-            ds = ds.random_map(VolumeChange(), seed=43)
+            ds = ds.random_map(volume_norm(), seed=42)
+            ds = ds.random_map(volume_change(), seed=43)
 
         return ds
 
@@ -221,7 +221,7 @@ Apply different transforms for training vs validation:
 
         # Light augmentation for validation
         with argbind.scope(args, "val"):
-            ds = ds.random_map(VolumeNorm(), seed=42)
+            ds = ds.random_map(volume_norm(), seed=42)
 
         return ds
 
