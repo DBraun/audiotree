@@ -249,7 +249,7 @@ def create_audio_dataset(
         saliency_params=saliency_params,
         source=source,
     )
-    ds = ds.random_map(load_fn, seed=excerpt_seed)
+    ds = ds.seed(excerpt_seed).random_map(load_fn)
 
     return ds
 
