@@ -343,10 +343,10 @@ class AudioTree:
         if duration is not None and sample_rate is not None:
             target_length = round(duration * sample_rate)
 
-        data, sr = librosa.load(
+        data, _ = librosa.load(
             str(audio_path), sr=sample_rate, offset=offset, duration=duration, mono=mono
         )
-        assert sr == sample_rate
+
         if data.ndim == 1:
             data = data[None, None, :]  # Add batch and channel dimension
         elif data.ndim == 2:
@@ -399,7 +399,7 @@ class AudioTree:
 
         return cls(
             audio_data=data,
-            sample_rate=sr,
+            sample_rate=sample_rate,
             metadata=combined_metadata,
             loudness=wrap_if_scalar(loudness, np.float32),
             pitch=wrap_if_scalar(pitch, np.float32),
@@ -496,8 +496,7 @@ class AudioTree:
                 if not audio_path.exists():
                     raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-                data, sr = librosa.load(str(audio_path), sr=sample_rate, mono=False)
-                assert sr == sample_rate
+                data, _ = librosa.load(str(audio_path), sr=sample_rate, mono=False)
 
                 if data.ndim == 1:
                     data = data[None, :]  # Add channel dimension
@@ -593,18 +592,21 @@ class AudioTree:
         Returns:
             AudioTree: An instance of ``AudioTree``.
         """
-        assert (
-            "offset" not in kwargs
-        ), "``salient_excerpt`` cannot be used with kwarg ``offset``."
-        assert (
-            "duration" in kwargs
-        ), "``salient_excerpt`` must be used with kwarg ``duration``."
+        if "offset" in kwargs:
+            raise ValueError("``salient_excerpt`` cannot be used with kwarg ``offset``.")
+        if "duration" not in kwargs:
+            raise ValueError("``salient_excerpt`` must be used with kwarg ``duration``.")
         if (
             not saliency_params.enabled
             or saliency_params.loudness_cutoff is None
         ):
             excerpt = cls.excerpt(audio_path, rng=rng, **kwargs)
         else:
+            # Get file info once before the loop to avoid repeated soundfile.info calls
+            info = soundfile.info(audio_path)
+            file_duration = info.duration
+
+            duration = kwargs["duration"]
             loudness = -np.inf
             current_try = 0
             num_tries = saliency_params.num_tries
@@ -618,8 +620,10 @@ class AudioTree:
                     attempt=current_try,
                     max_attempts=num_tries,
                 )
-                new_excerpt = cls.excerpt(
-                    audio_path, rng=rng, search_function=search_function, **kwargs
+                # Inline the `excerpt` logic to reuse file_duration
+                random_offset = search_function(rng, 0.0, duration, file_duration)
+                new_excerpt = cls.from_file(
+                    audio_path=audio_path, offset=random_offset, **kwargs
                 ).replace_loudness()
                 if current_try == 0 or new_excerpt.loudness > loudness:
                     excerpt = new_excerpt
@@ -628,11 +632,6 @@ class AudioTree:
                 if num_tries is not None and current_try >= num_tries:
                     break
 
-        # todo: revisit whether casting to numpy here actually prevents any slowdown with grain.
-        excerpt = excerpt.replace(
-            audio_data=np.array(excerpt.audio_data),
-            loudness=np.array(excerpt.loudness) if excerpt.loudness is not None else None
-        )
         return excerpt
 
     def to_mono(self) -> Self:
