@@ -270,8 +270,8 @@ with argbind.scope(args):
     def test_scoped_yaml(self):
         """Test scoped configurations from YAML."""
         config = {
-            "train/volume_norm.min_db": -30,
-            "train/volume_norm.max_db": -10,
+            "train/volume_norm.min_db": -10,
+            "train/volume_norm.max_db": -5,
             "val/volume_norm.min_db": -20,
             "val/volume_norm.max_db": -20,
         }
@@ -313,7 +313,7 @@ with argbind.scope(args, "val"):
     print(f"Val loudness: {{val_loudness}}")
 
 # They should be different because val has min_db=max_db=-20 (exact)
-# while train has min_db=-30, max_db=-10 (range)
+# while train has min_db=-10, max_db=-5 (non-overlapping range)
 assert abs(train_loudness - val_loudness) > 1.0, "Train and val should use different configs"
 print("SUCCESS")
 '''
