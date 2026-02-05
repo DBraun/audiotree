@@ -316,6 +316,43 @@ class TestCreateBalancedAudioDataset:
         except ValueError as e:
             assert "At least one of 'sources' or 'datasets' must be provided" in str(e)
 
+    def test_different_sized_file_sources(self):
+        """Test that file sources with different sizes are handled correctly.
+
+        File-based sources are automatically repeated before mixing, so
+        different-sized source directories work correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create very different sized file sources
+            small_dir = _create_test_audio_files(tmpdir, "small", 3)  # 3 files
+            large_dir = _create_test_audio_files(tmpdir, "large", 50)  # 50 files
+
+            ds = create_balanced_audio_dataset(
+                sources={"small": [small_dir], "large": [large_dir]},
+                weights={"small": 0.5, "large": 0.5},
+                sample_rate=44100,
+                duration=0.5,
+                shuffle_seed=42,
+            ).slice(slice(0, 200))
+
+            # Should successfully create 200 items despite small group having only 3 files
+            assert len(ds) == 200
+
+            # Count occurrences
+            source_counts = {"small": 0, "large": 0}
+            for i in range(len(ds)):
+                item = ds[i]
+                source = item.source[0]
+                source_counts[source] += 1
+
+            # Both sources should be represented roughly equally
+            total = sum(source_counts.values())
+            for group_name in ["small", "large"]:
+                proportion = source_counts[group_name] / total
+                assert abs(proportion - 0.5) < 0.1, (
+                    f"{group_name} proportion {proportion:.3f} should be ~0.5"
+                )
+
 
 def _generate_sine_tone(
     frequency: float, duration: float, sample_rate: int = 44100

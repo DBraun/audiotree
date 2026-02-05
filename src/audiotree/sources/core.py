@@ -285,6 +285,9 @@ def create_balanced_audio_dataset(
         datasets: Optional dictionary mapping group names to pre-constructed grain MapDatasets.
             These datasets will be mixed with file-based sources. Useful for combining
             different data sources or including pre-processed datasets.
+            IMPORTANT: Pre-constructed datasets MUST already be repeated (call `.repeat()`
+            before passing them) to ensure infinite sampling. If a finite dataset is passed,
+            grain.MapDataset.mix will truncate the mixed output to the shortest dataset length.
         shuffle: Whether to shuffle files within each file-based group. Set to False for
             deterministic iteration (e.g., pre-rendering). Does not affect pre-constructed datasets.
         shuffle_seed: Random seed for shuffling file order. Used to initialize an RNG

@@ -23,7 +23,8 @@ class SaliencyParams:
     or enabled is False, a random offset is used without loudness-based filtering.
 
     Args:
-        enabled (bool): Whether to enable saliency detection. If False, uses a random offset.
+        enabled (bool): Whether to enable saliency detection. Defaults to True. If False, loads from
+            offset=0 (deterministic). If True without loudness_cutoff, uses a random offset.
         num_tries (int): Maximum number of attempts to find a salient section of audio (default 8).
             Only used when loudness_cutoff is not None.
         loudness_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
@@ -33,7 +34,7 @@ class SaliencyParams:
             searches earlier in the file as more attempts are made.
     """
 
-    enabled: bool = field(default=False)
+    enabled: bool = field(default=True)
     num_tries: int = 8
     loudness_cutoff: float = -40.0
 
