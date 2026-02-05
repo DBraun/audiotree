@@ -1,7 +1,7 @@
 import functools
 import os
 from pathlib import Path
-from typing import AnyStr, List, Literal, Mapping, Optional
+from typing import List, Literal, Mapping, Optional
 
 import grain
 import numpy as np
@@ -13,44 +13,36 @@ _default_extensions = [".wav", ".flac"]
 
 
 def _find_files_with_extensions(
-    directory: str, extensions: List[str], max_depth=None, follow_symlinks=False
-) -> list[AnyStr]:
-    """
-    Searches for files with specified extensions up to a maximum depth in the directory,
-    without modifying dirs while iterating.
+    directories: List[str],
+    extensions: List[str],
+) -> List[str]:
+    """Find audio files in directories, skipping hidden files and directories.
+
+    Uses os.walk with early pruning to efficiently skip hidden directories
+    like .git without descending into them.
 
     Args:
-        directory (str): The path to the directory to search.
-        extensions (list): A list of file extensions to search for. Each extension should include a period.
-        max_depth (int): The maximum depth to search for files.
-        follow_symlinks (bool): Whether to follow symbolic links during the search.
+        directories: List of directory paths to search.
+        extensions: List of file extensions to match (e.g., [".wav", ".flac"]).
 
     Returns:
-        list (list[AnyStr]): A list of paths to files that match the extensions within the maximum depth.
+        List of file paths matching the extensions.
     """
-    matching_files = []
-    extensions_set = {
-        ext.lower() for ext in extensions
-    }  # Normalize extensions to lowercase for matching
-
-    # Expand environment variables and user home directory
-    directory = os.path.expandvars(os.path.expanduser(directory))
-    directory = os.path.abspath(directory)  # Ensure the directory path is absolute
-
-    def recurse(current_dir, current_depth):
-        if max_depth is not None and current_depth > max_depth:
-            return
-        with os.scandir(current_dir) as it:
-            for entry in it:
-                if entry.is_file(follow_symlinks=follow_symlinks) and any(
-                    entry.name.lower().endswith(ext) for ext in extensions_set
-                ):
-                    matching_files.append(entry.path)
-                elif entry.is_dir(follow_symlinks=follow_symlinks):
-                    recurse(entry.path, current_depth + 1)
-
-    recurse(directory, 0)
-    return matching_files
+    extensions_lower = {ext.lstrip('.').lower() for ext in extensions}
+    filepaths = []
+    for folder in directories:
+        folder_path = Path(folder).expanduser()
+        folder_path = Path(os.path.expandvars(folder_path))
+        for root, dirs, files in os.walk(folder_path):
+            # Prune hidden directories in-place (prevents descent into .git, etc.)
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            for filename in files:
+                if filename.startswith('.'):
+                    continue
+                ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+                if ext in extensions_lower:
+                    filepaths.append(os.path.join(root, filename))
+    return filepaths
 
 
 def _load_audio_with_saliency(
@@ -214,16 +206,7 @@ def create_audio_dataset(
     if isinstance(sources, str):
         sources = [sources]
 
-    # Collect all filepaths
-    filepaths = []
-    for folder in sources:
-        folder_path = Path(folder)
-        folder_path = Path(os.path.expandvars(os.path.expanduser(str(folder_path))))
-        for ext in extensions:
-            # Remove leading dot if present
-            ext_clean = ext.lstrip('.')
-            found_files = folder_path.rglob(f"*.{ext_clean}")
-            filepaths.extend([str(p) for p in found_files])
+    filepaths = _find_files_with_extensions(sources, extensions)
 
     if not filepaths:
         raise RuntimeError(
@@ -259,10 +242,11 @@ def create_balanced_audio_dataset(
     weights: Optional[Mapping[str, float]] = None,
     datasets: Optional[Mapping[str, grain.MapDataset]] = None,
     shuffle: bool = True,
+    repeat: bool = True,
     shuffle_seed: int = 0,
     excerpt_seed: int | None = None,
     sample_rate: int = 44_100,
-    mono: int = 1,
+    mono: bool = True,
     duration: float = 1.0,
     pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"] | None = "constant",
     extensions: Optional[List[str]] = None,
@@ -290,6 +274,8 @@ def create_balanced_audio_dataset(
             grain.MapDataset.mix will truncate the mixed output to the shortest dataset length.
         shuffle: Whether to shuffle files within each file-based group. Set to False for
             deterministic iteration (e.g., pre-rendering). Does not affect pre-constructed datasets.
+        repeat: Whether to repeat the dataset. If False, then the overall length is limited by smallest of the
+            underlying datasets. See ``grain.MapDataset.mix``
         shuffle_seed: Random seed for shuffling file order. Used to initialize an RNG
             that derives independent seeds for each group and the final mix.
         excerpt_seed: Random seed for excerpt selection (random_map). If None, defaults
@@ -358,15 +344,14 @@ def create_balanced_audio_dataset(
     # Create datasets from file-based sources
     sources = sources or {}
     for group_name, folders in sources.items():
-        # Create dataset for this group with repeat=True (required for mixing)
         ds = create_audio_dataset(
             sources=folders,
             shuffle=shuffle,
-            repeat=True,  # Always repeat before mixing
+            repeat=repeat,
             shuffle_seed=int(shuffle_rng.integers(2**31)),
             excerpt_seed=int(excerpt_rng.integers(2**31)),
             sample_rate=sample_rate,
-            mono=bool(mono),
+            mono=mono,
             duration=duration,
             pad_mode=pad_mode,
             extensions=extensions,
