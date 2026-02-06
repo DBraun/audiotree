@@ -344,7 +344,7 @@ class AudioTree:
         if duration is not None and sample_rate is not None:
             target_length = round(duration * sample_rate)
 
-        data, _ = librosa.load(
+        data, sample_rate = librosa.load(
             str(audio_path), sr=sample_rate, offset=offset, duration=duration, mono=mono
         )
 
