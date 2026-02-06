@@ -65,6 +65,9 @@ class MemmapWriter:
         field_specs: List of FieldSpec defining what fields to write
         expected_samples: Total number of samples to write (required for pre-allocation)
         metadata: Optional dict of additional metadata to store in manifest
+        audio_dtype: If set, cast fields ending in ``_audio_data`` to this dtype
+            before writing. For example, ``np.float16`` halves storage compared to
+            float32 with negligible quality loss for training.
         pbar: Optional tqdm progress bar instance
         close_pbar: Whether to close progress bar on exit
 
@@ -89,6 +92,7 @@ class MemmapWriter:
         field_specs: Optional[List[FieldSpec]] = None,
         expected_samples: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        audio_dtype: Optional[np.dtype] = None,
         pbar: Optional[Any] = None,
         close_pbar: bool = False,
         infer_schema: bool = True,
@@ -97,10 +101,17 @@ class MemmapWriter:
         self.field_specs = {spec.name: spec for spec in field_specs} if field_specs else None
         self.expected_samples = expected_samples
         self.metadata = metadata or {}
+        self.audio_dtype = np.dtype(audio_dtype) if audio_dtype is not None else None
         self.pbar = pbar
         self.close_pbar = close_pbar
         # If field_specs are provided, don't infer schema
         self.infer_schema = infer_schema if field_specs is None else False
+
+        # Override dtypes in explicit field_specs for _audio_data fields
+        if self.audio_dtype is not None and self.field_specs is not None:
+            for name, spec in self.field_specs.items():
+                if name.endswith("_audio_data"):
+                    spec.dtype = self.audio_dtype
 
         self._current_index = 0
         self._memmaps: Dict[str, np.memmap] = {}
@@ -147,6 +158,12 @@ class MemmapWriter:
                 extracted[key] = value
             # Strings are handled separately, skip for now
 
+        # Cast audio fields to audio_dtype before inferring schema
+        if self.audio_dtype is not None:
+            for key in extracted:
+                if key.endswith("_audio_data"):
+                    extracted[key] = extracted[key].astype(self.audio_dtype)
+
         # Infer FieldSpec from extracted fields
         field_specs_list = AudioTreeFieldExtractor.infer_field_specs(extracted)
         self.field_specs = {spec.name: spec for spec in field_specs_list}
@@ -182,6 +199,12 @@ class MemmapWriter:
             elif isinstance(value, np.ndarray):
                 extracted[key] = value
             # Skip non-array types (will be in strings dict)
+
+        # Cast audio fields to audio_dtype
+        if self.audio_dtype is not None:
+            for key in extracted:
+                if key.endswith("_audio_data"):
+                    extracted[key] = extracted[key].astype(self.audio_dtype)
 
         return extracted
 
@@ -230,10 +253,19 @@ class MemmapWriter:
 
         # Extract numpy arrays from AudioTree objects (only if inferring schema)
         if self.infer_schema or self._audiotree_fields:
+            # _extract_batch_arrays handles audio_dtype cast internally
             extracted_data = self._extract_batch_arrays(data)
         else:
             # Use data as-is (backward compatible with explicit field_specs)
             extracted_data = data
+            # Cast audio fields for the explicit field_specs path
+            if self.audio_dtype is not None:
+                extracted_data = dict(extracted_data)
+                for key in extracted_data:
+                    if key.endswith("_audio_data"):
+                        extracted_data[key] = np.asarray(extracted_data[key]).astype(
+                            self.audio_dtype
+                        )
 
         # Validate and write each field
         batch_size = None
@@ -348,6 +380,10 @@ class MemmapWriter:
             "fields": {},
             "string_fields": {},
         }
+
+        # Store audio_dtype in manifest for documentation
+        if self.audio_dtype is not None:
+            manifest["audio_dtype"] = str(self.audio_dtype)
 
         # Store AudioTree reconstruction info if any AudioTree objects were written
         if self._audiotree_fields:

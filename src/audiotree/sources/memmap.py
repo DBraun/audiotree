@@ -48,6 +48,9 @@ class MemmapDataSource(RandomAccessDataSource):
         reconstruct_audiotree: If True, automatically reconstruct AudioTree objects
             from flat fields based on manifest metadata. Fields with matching prefixes
             are grouped and assembled into AudioTree objects. Default True.
+        audio_dtype: If set, cast fields ending in ``_audio_data`` to this dtype
+            after loading. For example, pass ``np.float32`` to upcast float16 data
+            stored on disk back to float32 for training.
 
     Example:
         >>> # With AudioTree reconstruction (default)
@@ -101,11 +104,13 @@ class MemmapDataSource(RandomAccessDataSource):
         split_seed: int = 42,
         load_into_memory: bool = False,
         reconstruct_audiotree: bool = True,
+        audio_dtype: Optional[np.dtype] = None,
     ):
         self.manifest_path = Path(manifest_path)
         self.data_dir = self.manifest_path.parent
         self.transform_fn = transform_fn
         self.reconstruct_audiotree = reconstruct_audiotree
+        self.audio_dtype = np.dtype(audio_dtype) if audio_dtype is not None else None
 
         # Load manifest
         with open(self.manifest_path) as f:
@@ -113,7 +118,7 @@ class MemmapDataSource(RandomAccessDataSource):
 
         # Load AudioTree metadata from manifest
         self._audiotree_fields = self.manifest.get("audiotree_fields", {})
-        self._sample_rate = self.manifest.get("sample_rate", 48000)
+        self._sample_rate = self.manifest.get("sample_rate")
 
         total_samples = self.manifest["num_samples"]
 
@@ -242,6 +247,12 @@ class MemmapDataSource(RandomAccessDataSource):
                 sample[name] = np.array(mm[actual_idx])[np.newaxis, ...]
                 del mm
 
+        # Cast audio fields to audio_dtype
+        if self.audio_dtype is not None:
+            for name in list(sample.keys()):
+                if name.endswith("_audio_data"):
+                    sample[name] = sample[name].astype(self.audio_dtype)
+
         # Add string data
         for name, str_list in self._string_data.items():
             if actual_idx < len(str_list):
@@ -346,6 +357,12 @@ class MemmapDataSource(RandomAccessDataSource):
                 )
                 sample[name] = np.array(mm[start:end])
                 del mm
+
+        # Cast audio fields to audio_dtype
+        if self.audio_dtype is not None:
+            for name in list(sample.keys()):
+                if name.endswith("_audio_data"):
+                    sample[name] = sample[name].astype(self.audio_dtype)
 
         # Add string data slice
         for name, str_list in self._string_data.items():

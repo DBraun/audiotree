@@ -594,3 +594,132 @@ def test_load_into_memory_from_directory():
 
         sample = source[0]
         assert "audio" in sample
+
+
+# === audio_dtype tests ===
+
+
+def test_audio_dtype_write_float16_read_float32():
+    """Test writing audio as float16 and reading back as float32."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        num_samples = 5
+
+        # Use _audio_data suffix so audio_dtype applies
+        field_specs = [
+            FieldSpec("dry_audio_data", np.float32, (2, 100)),
+            FieldSpec("params", np.float32, (3,)),
+        ]
+
+        audio_data = np.random.randn(num_samples, 2, 100).astype(np.float32)
+        params_data = np.random.randn(num_samples, 3).astype(np.float32)
+
+        # Write with audio_dtype=float16 (casts _audio_data fields)
+        with MemmapWriter(
+            output_dir,
+            field_specs=field_specs,
+            expected_samples=num_samples,
+            audio_dtype=np.float16,
+        ) as writer:
+            writer.write_batch(
+                {"dry_audio_data": audio_data, "params": params_data}
+            )
+
+        # Verify on-disk dtype is float16 for audio, float32 for params
+        import json
+
+        with open(output_dir / "manifest.json") as f:
+            manifest = json.load(f)
+        assert manifest["fields"]["dry_audio_data"]["dtype"] == "float16"
+        assert manifest["fields"]["params"]["dtype"] == "float32"
+        assert manifest["audio_dtype"] == "float16"
+
+        # Read back with audio_dtype=float32 (upcast)
+        source = MemmapDataSource(
+            output_dir / "manifest.json",
+            audio_dtype=np.float32,
+            reconstruct_audiotree=False,
+        )
+
+        for i in range(num_samples):
+            sample = source[i]
+            assert sample["dry_audio_data"].dtype == np.float32
+            assert sample["params"].dtype == np.float32
+            # Values close within float16 precision (atol ~1e-3)
+            np.testing.assert_allclose(
+                sample["dry_audio_data"][0],
+                audio_data[i],
+                atol=1e-3,
+                rtol=1e-3,
+            )
+            # Params should be exact (not cast)
+            np.testing.assert_array_almost_equal(
+                sample["params"][0], params_data[i], decimal=5
+            )
+
+
+def test_audio_dtype_write_float16_read_float32_get_slice():
+    """Test audio_dtype with get_slice."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        num_samples = 10
+
+        field_specs = [
+            FieldSpec("wet_audio_data", np.float32, (2, 50)),
+        ]
+
+        audio_data = np.random.randn(num_samples, 2, 50).astype(np.float32)
+
+        with MemmapWriter(
+            output_dir,
+            field_specs=field_specs,
+            expected_samples=num_samples,
+            audio_dtype=np.float16,
+        ) as writer:
+            writer.write_batch({"wet_audio_data": audio_data})
+
+        source = MemmapDataSource(
+            output_dir / "manifest.json",
+            audio_dtype=np.float32,
+            reconstruct_audiotree=False,
+        )
+
+        batch = source.get_slice(2, 5)
+        assert batch["wet_audio_data"].dtype == np.float32
+        assert batch["wet_audio_data"].shape == (3, 2, 50)
+        np.testing.assert_allclose(
+            batch["wet_audio_data"], audio_data[2:5], atol=1e-3, rtol=1e-3
+        )
+
+
+def test_audio_dtype_none_preserves_original():
+    """Test that audio_dtype=None leaves data unchanged."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        num_samples = 3
+
+        field_specs = [
+            FieldSpec("dry_audio_data", np.float32, (2, 50)),
+        ]
+
+        audio_data = np.random.randn(num_samples, 2, 50).astype(np.float32)
+
+        # Write without audio_dtype
+        with MemmapWriter(
+            output_dir,
+            field_specs=field_specs,
+            expected_samples=num_samples,
+        ) as writer:
+            writer.write_batch({"dry_audio_data": audio_data})
+
+        # Read without audio_dtype
+        source = MemmapDataSource(
+            output_dir / "manifest.json",
+            reconstruct_audiotree=False,
+        )
+
+        sample = source[0]
+        assert sample["dry_audio_data"].dtype == np.float32
+        np.testing.assert_array_almost_equal(
+            sample["dry_audio_data"][0], audio_data[0], decimal=5
+        )
