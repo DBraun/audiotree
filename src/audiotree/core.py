@@ -883,19 +883,17 @@ class AudioTree:
         )
 
 
-def _batch_audiotrees(audio_trees: Sequence[AudioTree], backend=None) -> AudioTree:
+def _batch_audiotrees(audio_trees: Sequence[AudioTree]) -> AudioTree:
     """Batch a list of AudioTrees into a single AudioTree.
 
-    Concatenates all array fields along the batch axis (axis 0). Requires all
-    AudioTrees to have the same sample_rate and compatible shapes.
+    Concatenates all array fields along the batch axis (axis 0) using NumPy.
+    Requires all AudioTrees to have the same sample_rate and compatible shapes.
 
     Prefer using ``AudioTree.batch_fn`` instead, which handles mixed-type
     structures (dicts with AudioTrees, arrays, strings, etc.).
 
     Args:
         audio_trees: List of AudioTree objects to batch together.
-        backend: Array module to use for concatenation (np or jnp). If None,
-            inferred from the first AudioTree's audio_data type.
 
     Returns:
         Single AudioTree with all items batched along axis 0.
@@ -903,11 +901,7 @@ def _batch_audiotrees(audio_trees: Sequence[AudioTree], backend=None) -> AudioTr
     if not audio_trees:
         raise ValueError("Cannot batch empty list of AudioTrees")
 
-    if backend is None:
-        first = audio_trees[0]
-        backend = np if isinstance(first.audio_data, np.ndarray) else jnp
-
     return tree_util.tree_map(
-        lambda *xs: backend.concatenate(xs, axis=0),
+        lambda *xs: np.concatenate(xs, axis=0),
         *audio_trees
     )
