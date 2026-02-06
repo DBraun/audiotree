@@ -282,16 +282,12 @@ class MemmapDataSource(RandomAccessDataSource):
             )
             output[tree_name] = reconstructed
 
-        # Add non-AudioTree fields (remove batch dimension)
+        # Add non-AudioTree fields (keep batch dimension for consistency with AudioTree)
         for field_name, value in raw_sample.items():
             # Skip if this field belongs to an AudioTree
             if any(field_name.startswith(f"{tree}_") for tree in self._audiotree_fields):
                 continue
-            # Remove batch dimension for consistency
-            if isinstance(value, np.ndarray):
-                output[field_name] = value[0]
-            else:
-                output[field_name] = value
+            output[field_name] = value
 
         return output
 

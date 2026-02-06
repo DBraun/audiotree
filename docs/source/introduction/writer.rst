@@ -189,7 +189,7 @@ AudioWriter supports progress tracking via tqdm integration:
     pbar = tqdm(total=1000, desc="Generating dataset")
 
     with AudioWriter("output", pbar=pbar) as writer:
-        for audio_tree in big_audio_tree.mini_batch_list(batch_size):
+        for audio_tree in big_audio_tree.split(batch_size):
             if audio_tree.loudness > -30:  # Only write loud samples
                 writer.write(audio_tree)  # Automatically updates pbar
 

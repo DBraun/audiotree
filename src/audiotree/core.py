@@ -711,7 +711,7 @@ class AudioTree:
             audio_data=audio_data, sample_rate=sample_rate, loudness=None
         )
 
-    def mini_batch_list(self, n_splits: int) -> List[Self]:
+    def split(self, n_splits: int) -> List[Self]:
         """Split batch dimension into a list of smaller AudioTree objects.
 
         Divides the batch dimension evenly into n_splits separate AudioTree objects,
@@ -728,7 +728,7 @@ class AudioTree:
             >>> big_tree = AudioTree(np.zeros((12, 1, 44100)), 44100)
             >>> big_tree.audio_data.shape
             (12, 1, 44100)
-            >>> split_trees = big_tree.mini_batch_list(2)
+            >>> split_trees = big_tree.split(2)
             >>> len(split_trees)
             2
             >>> split_trees[0].audio_data.shape
@@ -745,7 +745,7 @@ class AudioTree:
             for i in range(n_splits)
         ]
 
-    def mini_batch(self, mini_batch_size: int) -> Self:
+    def reshape_mini_batches(self, mini_batch_size: int) -> Self:
         """Reshape batch dimension into mini-batches by adding a new leading axis.
 
         Transforms audio data from shape (B, C, T) to (num_mini_batches, mini_batch_size, C, T),
@@ -760,7 +760,7 @@ class AudioTree:
 
         Example:
             >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
-            >>> x_batched = x.mini_batch(3)
+            >>> x_batched = x.reshape_mini_batches(3)
             >>> x_batched.audio_data.shape
             (4, 3, 1, 44100)  # 4 mini-batches of size 3
         """
@@ -779,21 +779,22 @@ class AudioTree:
         )
         return reshaped_audio_tree
 
-    def unbatch(self) -> Self:
+    def flatten_mini_batches(self) -> Self:
         """Flatten mini-batches back into a single batch dimension.
 
-        Undoes the operation performed by mini_batch(), transforming audio data
-        from shape (num_mini_batches, mini_batch_size, C, T) back to (B, C, T).
+        Undoes the operation performed by reshape_mini_batches(), transforming
+        audio data from shape (num_mini_batches, mini_batch_size, C, T) back to
+        (B, C, T).
 
         Returns:
             AudioTree with the mini-batch dimension flattened into the batch dimension.
 
         Example:
             >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
-            >>> x_batched = x.mini_batch(3)
+            >>> x_batched = x.reshape_mini_batches(3)
             >>> x_batched.audio_data.shape
             (4, 3, 1, 44100)  # 4 mini-batches of size 3
-            >>> x_unbatched = x_batched.unbatch()
+            >>> x_unbatched = x_batched.flatten_mini_batches()
             >>> x_unbatched.audio_data.shape
             (12, 1, 44100)  # Back to original shape
         """
@@ -820,7 +821,7 @@ class AudioTree:
 
     def filter(self, filter_fn: Callable) -> Self:
         B = self.audio_data.shape[0]
-        audio_trees = self.mini_batch_list(B)
+        audio_trees = self.split(B)
         audio_trees = list(filter(filter_fn, audio_trees))
 
         numpy = np if isinstance(self.audio_data, np.ndarray) else jnp
@@ -868,8 +869,11 @@ class AudioTree:
         def batching_function(*args):
             first_arg = args[0]
             if isinstance(first_arg, AudioTree):
-                return batch_audiotrees(args)
-            return np.concatenate(args, axis=0)
+                return _batch_audiotrees(args)
+            elif isinstance(first_arg, (np.ndarray, jnp.ndarray)):
+                return np.concatenate(args, axis=0)
+            else:
+                return list(args)
 
         return tree_util.tree_map(
             batching_function,
@@ -879,11 +883,14 @@ class AudioTree:
         )
 
 
-def batch_audiotrees(audio_trees: Sequence[AudioTree], backend=None) -> AudioTree:
+def _batch_audiotrees(audio_trees: Sequence[AudioTree], backend=None) -> AudioTree:
     """Batch a list of AudioTrees into a single AudioTree.
 
     Concatenates all array fields along the batch axis (axis 0). Requires all
     AudioTrees to have the same sample_rate and compatible shapes.
+
+    Prefer using ``AudioTree.batch_fn`` instead, which handles mixed-type
+    structures (dicts with AudioTrees, arrays, strings, etc.).
 
     Args:
         audio_trees: List of AudioTree objects to batch together.
@@ -892,12 +899,6 @@ def batch_audiotrees(audio_trees: Sequence[AudioTree], backend=None) -> AudioTre
 
     Returns:
         Single AudioTree with all items batched along axis 0.
-
-    Example:
-        >>> trees = [AudioTree(np.random.randn(1, 2, 48000), 48000) for _ in range(4)]
-        >>> batched = batch_audiotrees(trees)
-        >>> batched.audio_data.shape
-        (4, 2, 48000)
     """
     if not audio_trees:
         raise ValueError("Cannot batch empty list of AudioTrees")

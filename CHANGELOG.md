@@ -44,8 +44,7 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 * **New method**: `AudioTree.normalize_loudness(target_lufs)` to normalize audio to a target LUFS level. Computes loudness if not already set, scales audio, and updates the loudness field.
 * **New method**: `AudioTree.create()` classmethod with automatic audio dimensionality handling (1D→3D, 2D→3D) and `filepaths` parameter support.
 * **New method**: `AudioTree.filter()` which takes a function `filter_fn(AudioTree) -> bool`.
-* **New methods**: `AudioTree.mini_batch_list()` to split an AudioTree into a list, `AudioTree.mini_batch()` and `AudioTree.unbatch()` to add or remove mini-batch axis (useful for `nnx.scan`).
-* **New function**: `batch_audiotrees(audio_trees, backend=None)` to batch a list of AudioTrees into a single AudioTree. Uses `jax.tree_util.tree_map` to properly concatenate all fields. The `backend` kwarg allows explicit selection of `np` or `jnp` for concatenation.
+* **New methods**: `AudioTree.split()` to split an AudioTree into a list, `AudioTree.reshape_mini_batches()` and `AudioTree.flatten_mini_batches()` to add or remove mini-batch axis (useful for `nnx.scan`).
 * **New parameter**: `filepaths` is now a kwarg to `AudioTree.create()` and `AudioTree.from_file()`.
 * **New parameter**: `pad_mode` kwarg added to `AudioTree.from_file()`. Options include `"constant"` (zero padding), `None` (don't pad), and `"wrap"` (loop audio).
 

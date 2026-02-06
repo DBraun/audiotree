@@ -200,19 +200,19 @@ The :meth:`~audiotree.core.AudioTree.mini_batch` method reshapes the batch dimen
     (12, 1, 44100)
 
     # Reshape into mini-batches of size 3
-    x_batched = x.mini_batch(3)
+    x_batched = x.reshape_mini_batches(3)
     >>> x_batched.audio_data.shape
     (4, 3, 1, 44100)  # 4 mini-batches, each with 3 samples
 
     # Flatten back to original shape
-    x_unbatched = x_batched.unbatch()
+    x_unbatched = x_batched.flatten_mini_batches()
     >>> x_unbatched.audio_data.shape
     (12, 1, 44100)  # Back to original
 
 Splitting into Multiple Trees
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The :meth:`~audiotree.core.AudioTree.mini_batch_list` method splits a batch into separate AudioTree objects:
+The :meth:`~audiotree.core.AudioTree.split` method splits a batch into separate AudioTree objects:
 
 .. code-block:: python
 
@@ -220,7 +220,7 @@ The :meth:`~audiotree.core.AudioTree.mini_batch_list` method splits a batch into
     x = AudioTree(np.zeros((12, 1, 44_100)), 44_100)
 
     # Split into 2 separate AudioTree objects
-    split_trees = x.mini_batch_list(2)
+    split_trees = x.split(2)
     >>> len(split_trees)
     2
     >>> split_trees[0].audio_data.shape
@@ -288,7 +288,7 @@ You can use Flax's :func:`nnx.scan` to efficiently process mini-batches with neu
     x = AudioTree(np.ones((12, 1, 44_100)), 44_100)
 
     # Create mini-batches of size 3
-    x_batched = x.mini_batch(3)
+    x_batched = x.reshape_mini_batches(3)
     >>> x_batched.audio_data.shape
     (4, 3, 1, 44100)  # 4 mini-batches of size 3
 
@@ -298,7 +298,7 @@ You can use Flax's :func:`nnx.scan` to efficiently process mini-batches with neu
     (4, 3, 1, 44100)  # Still mini-batched
 
     # Flatten back to original batch dimension
-    full_batch = processed_batched.unbatch()
+    full_batch = processed_batched.flatten_mini_batches()
     >>> full_batch.audio_data.shape
     (12, 1, 44100)  # Back to original shape
     >>> np.allclose(full_batch.audio_data, 0.5)

@@ -102,7 +102,7 @@ def test_split_by_batch():
     trees = [x, x, x]
     big_tree = jax.tree.map(lambda *xs: np.concatenate(xs, axis=0), *trees)
     assert big_tree.audio_data.shape == (12, 1, 44100)
-    split_trees = big_tree.mini_batch_list(2)
+    split_trees = big_tree.split(2)
     assert len(split_trees) == 2
     assert split_trees[0].audio_data.shape == (6, 1, 44100)
 
@@ -124,7 +124,7 @@ def test_split_by_mini_batch():
 
     # Test splitting into mini-batches of size 3
     mini_batch_size = 3
-    reshaped_tree = audio_tree.mini_batch(mini_batch_size)
+    reshaped_tree = audio_tree.reshape_mini_batches(mini_batch_size)
 
     # Expected shape: (num_mini_batches=4, mini_batch_size=3, channels=2, samples=1000)
     expected_shape = (4, 3, channels, samples)
@@ -143,7 +143,7 @@ def test_split_by_mini_batch():
 
     # Test with different mini-batch size
     mini_batch_size_2 = 4
-    reshaped_tree_2 = audio_tree.mini_batch(mini_batch_size_2)
+    reshaped_tree_2 = audio_tree.reshape_mini_batches(mini_batch_size_2)
 
     # Expected shape: (num_mini_batches=3, mini_batch_size=4, channels=2, samples=1000)
     expected_shape_2 = (3, 4, channels, samples)
@@ -154,7 +154,7 @@ def test_split_by_mini_batch():
     assert reshaped_tree_2.sample_rate == sample_rate
 
     # Test edge case: mini_batch_size equals batch_size
-    reshaped_tree_full = audio_tree.mini_batch(batch_size)
+    reshaped_tree_full = audio_tree.reshape_mini_batches(batch_size)
     assert reshaped_tree_full.audio_data.shape == (1, batch_size, channels, samples)
     np.testing.assert_array_equal(reshaped_tree_full.audio_data[0], audio_data)
 
@@ -176,8 +176,8 @@ def test_unsplit_mini_batch():
 
     # Test round-trip: split then unsplit with mini-batch size 3
     mini_batch_size = 3
-    batched_tree = audio_tree.mini_batch(mini_batch_size)
-    unbatched_tree = batched_tree.unbatch()
+    batched_tree = audio_tree.reshape_mini_batches(mini_batch_size)
+    unbatched_tree = batched_tree.flatten_mini_batches()
 
     # Verify we get back the original shape
     assert unbatched_tree.audio_data.shape == original_audio_data.shape
@@ -188,15 +188,15 @@ def test_unsplit_mini_batch():
 
     # Test with different mini-batch size
     mini_batch_size_2 = 4
-    batched_tree_2 = audio_tree.mini_batch(mini_batch_size_2)
-    unbatched_tree_2 = batched_tree_2.unbatch()
+    batched_tree_2 = audio_tree.reshape_mini_batches(mini_batch_size_2)
+    unbatched_tree_2 = batched_tree_2.flatten_mini_batches()
 
     assert unbatched_tree_2.audio_data.shape == original_audio_data.shape
     np.testing.assert_array_equal(unbatched_tree_2.audio_data, original_audio_data)
 
     # Test edge case: mini_batch_size equals batch_size
-    batched_tree_full = audio_tree.mini_batch(batch_size)
-    unbatched_tree_full = batched_tree_full.unbatch()
+    batched_tree_full = audio_tree.reshape_mini_batches(batch_size)
+    unbatched_tree_full = batched_tree_full.flatten_mini_batches()
 
     assert unbatched_tree_full.audio_data.shape == original_audio_data.shape
     np.testing.assert_array_equal(unbatched_tree_full.audio_data, original_audio_data)
@@ -207,8 +207,8 @@ def test_unsplit_mini_batch():
         sample_rate,
         metadata={"test_key": "test_value"}
     )
-    batched_with_metadata = audio_tree_with_metadata.mini_batch(mini_batch_size)
-    unbatched_with_metadata = batched_with_metadata.unbatch()
+    batched_with_metadata = audio_tree_with_metadata.reshape_mini_batches(mini_batch_size)
+    unbatched_with_metadata = batched_with_metadata.flatten_mini_batches()
 
     assert unbatched_with_metadata.metadata == {"test_key": "test_value"}
 
@@ -218,7 +218,70 @@ def test_unsplit_mini_batch():
         4, 3, channels, samples  # (num_mini_batches, mini_batch_size, channels, samples)
     )
     mini_batched_tree = AudioTree(mini_batched_data, sample_rate)
-    flattened_tree = mini_batched_tree.unbatch()
+    flattened_tree = mini_batched_tree.flatten_mini_batches()
 
     expected_shape = (12, channels, samples)  # 4 * 3 = 12
     assert flattened_tree.audio_data.shape == expected_shape
+
+
+def test_forward_batches_with_scan():
+    """Demonstrate memory-efficient inference on large AudioTrees.
+
+    A large batch like [4096, 2, 44100] fits in GPU memory as raw data, but
+    processing it through a model creates intermediate activations that don't
+    fit. Using reshape_mini_batches + nnx.scan + flatten_mini_batches, we can
+    process it in chunks while keeping everything jittable.
+
+    Note: this trick saves memory only for inference (forward pass). During
+    training, backprop through scan still materializes all intermediate
+    activations, so there is no memory benefit.
+    """
+    from flax import nnx
+
+    # A toy model that doubles the audio
+    class ToyModel(nnx.Module):
+        def __init__(self, rngs: nnx.Rngs):
+            self.scale = nnx.Param(jax.numpy.array(2.0))
+
+        def __call__(self, x: AudioTree) -> AudioTree:
+            return x.replace(audio_data=x.audio_data * self.scale[...])
+
+    model = ToyModel(rngs=nnx.Rngs(0))
+
+    # Simulate a large batch (small here so the test is fast)
+    batch_size = 12
+    mini_batch_size = 3
+    x = AudioTree(np.ones((batch_size, 2, 1000), dtype=np.float32), 44_100)
+
+    # --- Naive approach: process all at once (would OOM on large batches) ---
+    @nnx.jit
+    def forward_naive(_model, _x):
+        return _model(_x)
+
+    out_naive = forward_naive(model, x)
+
+    # --- Memory-efficient approach: reshape → scan → flatten ---
+    #
+    # reshape_mini_batches and flatten_mini_batches happen outside jit because
+    # they use Python-level shape assertions. The scan body runs inside jit.
+    x_mini = x.reshape_mini_batches(mini_batch_size)
+    # x_mini.audio_data.shape == (4, 3, 2, 1000)
+
+    @nnx.jit
+    def forward_batches(_model, _x):
+        @nnx.scan(in_axes=(None, 0), out_axes=0)
+        def scan_fn(__model, __x):
+            return __model(__x)
+
+        return scan_fn(_model, _x)
+
+    out_mini = forward_batches(model, x_mini)
+    out_batched = out_mini.flatten_mini_batches()
+
+    # Both approaches produce the same result
+    np.testing.assert_allclose(
+        out_naive.audio_data, out_batched.audio_data, rtol=1e-5
+    )
+    assert out_naive.audio_data.shape == (batch_size, 2, 1000)
+    assert out_batched.audio_data.shape == (batch_size, 2, 1000)
+    np.testing.assert_allclose(out_batched.audio_data, 2.0)
