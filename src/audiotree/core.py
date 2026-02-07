@@ -3,6 +3,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Self, Sequence, Union
 
+from absl import logging
 from flax import struct
 from jax import numpy as jnp, tree_util
 import librosa
@@ -174,7 +175,13 @@ class AudioTree:
             Will raise ValueError if audio has more than 5 channels.
         """
         if isinstance(self.audio_data, np.ndarray):
-            audio_transposed = np.transpose(self.audio_data, (0, 2, 1)) # [B, T, C]
+            # integrated_loudness requires at least 400ms of audio
+            min_samples = int(np.ceil(0.4 * self.sample_rate))
+            audio_data = self.audio_data
+            if audio_data.shape[-1] < min_samples:
+                pad_right = min_samples - audio_data.shape[-1]
+                audio_data = np.pad(audio_data, ((0, 0), (0, 0), (0, pad_right)))
+            audio_transposed = np.transpose(audio_data, (0, 2, 1)) # [B, T, C]
             loudness_values = []
             for audio_item in audio_transposed:
                 lufs = loudness.integrated_loudness(audio_item, self.sample_rate)
@@ -359,8 +366,15 @@ class AudioTree:
             and data.shape[-1] < target_length
         ):
             pad_right = target_length - data.shape[-1]
+            # Modes like "wrap", "reflect", "edge" require non-empty data.
+            # Fall back to "constant" (zero-pad) when the time axis is empty.
+            effective_pad_mode = (
+                "constant" if data.shape[-1] == 0 else pad_mode
+            )
             data = np.pad(
-                data, pad_width=((0, 0), (0, 0), (0, pad_right)), mode=pad_mode
+                data,
+                pad_width=((0, 0), (0, 0), (0, pad_right)),
+                mode=effective_pad_mode,
             )
 
         # Start with user-provided metadata or empty dict
@@ -625,7 +639,13 @@ class AudioTree:
                 random_offset = search_function(rng, 0.0, duration, file_duration)
                 new_excerpt = cls.from_file(
                     audio_path=audio_path, offset=random_offset, **kwargs
-                ).replace_loudness()
+                )
+                if new_excerpt.audio_data.shape[-1] == 0:
+                    logging.warning(
+                        f"Empty audio loaded from {audio_path} at offset "
+                        f"{random_offset:.2f}s (file_duration={file_duration:.2f}s)"
+                    )
+                new_excerpt = new_excerpt.replace_loudness()
                 if current_try == 0 or new_excerpt.loudness > loudness:
                     excerpt = new_excerpt
                     loudness = new_excerpt.loudness

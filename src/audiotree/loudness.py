@@ -1,4 +1,5 @@
 from functools import partial
+import math
 
 from einops import rearrange
 import jax
@@ -10,17 +11,17 @@ from jax import numpy as jnp
 def jit_integrated_loudness(data: jnp.ndarray, sample_rate: int, zeros: int):
 
     block_size = 0.4
+    min_samples = math.ceil(block_size * sample_rate)
 
     original_length = data.shape[-1]
-    signal_duration = original_length / sample_rate
 
-    if signal_duration < block_size:
+    if original_length < min_samples:
         data = jnp.pad(
             data,
             pad_width=(
                 (0, 0),
                 (0, 0),
-                (0, int(block_size * sample_rate) - original_length),
+                (0, min_samples - original_length),
             ),
         )
 
