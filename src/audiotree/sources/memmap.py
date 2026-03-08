@@ -7,6 +7,8 @@ from typing import Callable, Dict, List, Literal, Optional, SupportsIndex, Tuple
 import numpy as np
 from grain.sources import RandomAccessDataSource
 
+from audiotree.memmap_writer import _is_audio_data_field
+
 # Avoid circular import: import AudioTree utilities lazily
 HAS_AUDIOTREE = False
 AudioTree = None
@@ -118,6 +120,7 @@ class MemmapDataSource(RandomAccessDataSource):
 
         # Load AudioTree metadata from manifest
         self._audiotree_fields = self.manifest.get("audiotree_fields", {})
+        self._single_audiotree = self.manifest.get("single_audiotree", False)
         self._sample_rate = self.manifest.get("sample_rate")
 
         total_samples = self.manifest["num_samples"]
@@ -250,7 +253,7 @@ class MemmapDataSource(RandomAccessDataSource):
         # Cast audio fields to audio_dtype
         if self.audio_dtype is not None:
             for name in list(sample.keys()):
-                if name.endswith("_audio_data"):
+                if _is_audio_data_field(name):
                     sample[name] = sample[name].astype(self.audio_dtype)
 
         # Add string data
@@ -258,8 +261,14 @@ class MemmapDataSource(RandomAccessDataSource):
             if actual_idx < len(str_list):
                 sample[name] = str_list[actual_idx]
 
-        # Reconstruct AudioTree objects if requested
-        if self.reconstruct_audiotree and self._audiotree_fields:
+        # Reconstruct single AudioTree if applicable
+        if self._single_audiotree and self.reconstruct_audiotree:
+            _ensure_audiotree_imported()
+            sample = AudioTreeFieldExtractor.reconstruct_single_audiotree(
+                sample, self._sample_rate
+            )
+        # Reconstruct dict of AudioTrees if applicable
+        elif self.reconstruct_audiotree and self._audiotree_fields:
             sample = self._reconstruct_audiotrees(sample)
 
         # Apply transform if provided
@@ -361,12 +370,19 @@ class MemmapDataSource(RandomAccessDataSource):
         # Cast audio fields to audio_dtype
         if self.audio_dtype is not None:
             for name in list(sample.keys()):
-                if name.endswith("_audio_data"):
+                if _is_audio_data_field(name):
                     sample[name] = sample[name].astype(self.audio_dtype)
 
         # Add string data slice
         for name, str_list in self._string_data.items():
             sample[name] = str_list[start:end]
+
+        # Reconstruct single AudioTree if applicable
+        if self._single_audiotree and self.reconstruct_audiotree:
+            _ensure_audiotree_imported()
+            sample = AudioTreeFieldExtractor.reconstruct_single_audiotree(
+                sample, self._sample_rate
+            )
 
         return sample
 

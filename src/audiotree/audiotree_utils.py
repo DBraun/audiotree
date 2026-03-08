@@ -168,3 +168,41 @@ class AudioTreeFieldExtractor:
                 kwargs[field_name] = tree_data[field_name]
 
         return AudioTree(**kwargs)
+
+    @staticmethod
+    def reconstruct_single_audiotree(
+        fields: Dict[str, np.ndarray],
+        sample_rate: int,
+    ) -> AudioTree:
+        """Reconstruct AudioTree from fields with no prefix.
+
+        Used when a single AudioTree was written directly (not wrapped
+        in a dict), so field names have no tree-name prefix.
+
+        Args:
+            fields: Dict of all fields (unprefixed, e.g. "audio_data", "loudness", "mel")
+            sample_rate: Audio sample rate
+
+        Returns:
+            Reconstructed AudioTree
+        """
+        tree_data = {}
+        metadata = {}
+
+        for field_name, array in fields.items():
+            if field_name in AUDIOTREE_MAIN_FIELDS:
+                tree_data[field_name] = array
+            else:
+                metadata[field_name] = array
+
+        kwargs = {
+            "audio_data": tree_data.get("audio_data", None),
+            "sample_rate": sample_rate,
+            "metadata": metadata if metadata else {},
+        }
+
+        for field_name in AUDIOTREE_MAIN_FIELDS:
+            if field_name != "audio_data" and field_name in tree_data:
+                kwargs[field_name] = tree_data[field_name]
+
+        return AudioTree(**kwargs)

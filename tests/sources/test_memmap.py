@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from audiotree import MemmapWriter, FieldSpec
+from audiotree import AudioTree, MemmapWriter, FieldSpec
 from audiotree.sources import MemmapDataSource
 
 
@@ -722,4 +722,138 @@ def test_audio_dtype_none_preserves_original():
         assert sample["dry_audio_data"].dtype == np.float32
         np.testing.assert_array_almost_equal(
             sample["dry_audio_data"][0], audio_data[0], decimal=5
+        )
+
+
+# === Single AudioTree tests ===
+
+
+def _create_single_audiotree(num_samples=5, sample_rate=44100):
+    """Helper to create a test AudioTree."""
+    audio_data = np.random.randn(num_samples, 2, 100).astype(np.float32)
+    loudness = np.random.randn(num_samples).astype(np.float32)
+    mel = np.random.randn(num_samples, 32).astype(np.float32)
+    tree = AudioTree(
+        audio_data=audio_data,
+        sample_rate=sample_rate,
+        loudness=loudness,
+        metadata={"mel": mel},
+    )
+    return tree, audio_data, loudness, mel
+
+
+def test_single_audiotree_round_trip():
+    """Test write/read round-trip with a single AudioTree."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree, audio_data, loudness, mel = _create_single_audiotree()
+
+        with MemmapWriter(output_dir, expected_samples=5) as writer:
+            writer.write_batch(tree)
+
+        source = MemmapDataSource.from_directory(output_dir)
+        assert len(source) == 5
+
+        for i in range(5):
+            sample = source[i]
+            # Should return an AudioTree directly, not a dict
+            assert isinstance(sample, AudioTree)
+            assert sample.sample_rate == 44100
+            np.testing.assert_array_almost_equal(
+                sample.audio_data[0], audio_data[i], decimal=5
+            )
+            np.testing.assert_array_almost_equal(
+                sample.loudness[0], loudness[i], decimal=5
+            )
+            np.testing.assert_array_almost_equal(
+                sample.metadata["mel"][0], mel[i], decimal=5
+            )
+
+
+def test_single_audiotree_reconstruct_false():
+    """Test that reconstruct_audiotree=False returns raw dict."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree, _, _, _ = _create_single_audiotree()
+
+        with MemmapWriter(output_dir, expected_samples=5) as writer:
+            writer.write_batch(tree)
+
+        source = MemmapDataSource.from_directory(
+            output_dir, reconstruct_audiotree=False
+        )
+
+        sample = source[0]
+        assert isinstance(sample, dict)
+        assert "audio_data" in sample
+        assert "loudness" in sample
+        assert "mel" in sample
+
+
+def test_single_audiotree_audio_dtype():
+    """Test audio_dtype casting with single AudioTree."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree, audio_data, _, _ = _create_single_audiotree()
+
+        # Write with float16
+        with MemmapWriter(
+            output_dir, expected_samples=5, audio_dtype=np.float16
+        ) as writer:
+            writer.write_batch(tree)
+
+        # Read back with float32 upcast
+        source = MemmapDataSource.from_directory(
+            output_dir, audio_dtype=np.float32
+        )
+
+        sample = source[0]
+        assert isinstance(sample, AudioTree)
+        assert sample.audio_data.dtype == np.float32
+        np.testing.assert_allclose(
+            sample.audio_data[0], audio_data[0], atol=1e-3, rtol=1e-3
+        )
+
+
+def test_dict_audiotree_still_works():
+    """Regression test: Dict[str, AudioTree] round-trip still returns a dict."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        audio_data = np.random.randn(3, 2, 100).astype(np.float32)
+        tree = AudioTree(
+            audio_data=audio_data,
+            sample_rate=44100,
+        )
+
+        with MemmapWriter(
+            output_dir, expected_samples=3, metadata={"sample_rate": 44100}
+        ) as writer:
+            writer.write_batch({"dry": tree})
+
+        source = MemmapDataSource.from_directory(output_dir)
+
+        sample = source[0]
+        # Should return a dict, not a bare AudioTree
+        assert isinstance(sample, dict)
+        assert "dry" in sample
+        assert isinstance(sample["dry"], AudioTree)
+
+
+def test_single_audiotree_get_slice():
+    """Test get_slice returns AudioTree in single-tree mode."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree, audio_data, _, _ = _create_single_audiotree(num_samples=10)
+
+        with MemmapWriter(output_dir, expected_samples=10) as writer:
+            writer.write_batch(tree)
+
+        source = MemmapDataSource.from_directory(output_dir)
+
+        result = source.get_slice(2, 5)
+        assert isinstance(result, AudioTree)
+        assert result.audio_data.shape == (3, 2, 100)
+        np.testing.assert_array_almost_equal(
+            result.audio_data, audio_data[2:5], decimal=5
         )

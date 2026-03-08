@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from audiotree import MemmapWriter, FieldSpec
+from audiotree import AudioTree, MemmapWriter, FieldSpec
 from audiotree.sources import MemmapDataSource
 
 
@@ -260,3 +260,33 @@ def test_flush():
         assert mm[1] == 2.0
 
         writer.close()
+
+
+def test_single_audiotree_write():
+    """Test writing a single AudioTree directly (not wrapped in a dict)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        audio_data = np.random.randn(5, 2, 100).astype(np.float32)
+        loudness = np.random.randn(5).astype(np.float32)
+        tree = AudioTree(
+            audio_data=audio_data,
+            sample_rate=44100,
+            loudness=loudness,
+            metadata={"mel": np.random.randn(5, 32).astype(np.float32)},
+        )
+
+        with MemmapWriter(output_dir, expected_samples=5) as writer:
+            writer.write_batch(tree)
+
+        # Check manifest
+        with open(output_dir / "manifest.json") as f:
+            manifest = json.load(f)
+
+        assert manifest["single_audiotree"] is True
+        assert manifest["sample_rate"] == 44100
+        assert manifest["num_samples"] == 5
+        # Fields should be unprefixed
+        assert "audio_data" in manifest["fields"]
+        assert "loudness" in manifest["fields"]
+        assert "mel" in manifest["fields"]

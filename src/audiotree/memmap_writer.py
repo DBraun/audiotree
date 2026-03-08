@@ -8,6 +8,12 @@ import json
 
 import numpy as np
 
+
+def _is_audio_data_field(name: str) -> bool:
+    """Check if a field name refers to audio data (with or without prefix)."""
+    return name == "audio_data" or name.endswith("_audio_data")
+
+
 # Avoid circular import: import AudioTree utilities lazily
 HAS_AUDIOTREE = False
 AudioTree = None
@@ -119,6 +125,7 @@ class MemmapWriter:
         self._is_open = False
         self._schema_inferred = False
         self._audiotree_fields: Dict[str, bool] = {}
+        self._single_audiotree_mode = False
 
     def _create_memmaps(self):
         """Create memory-mapped files for all fields."""
@@ -161,7 +168,7 @@ class MemmapWriter:
         # Cast audio fields to audio_dtype before inferring schema
         if self.audio_dtype is not None:
             for key in extracted:
-                if key.endswith("_audio_data"):
+                if _is_audio_data_field(key):
                     extracted[key] = extracted[key].astype(self.audio_dtype)
 
         # Infer FieldSpec from extracted fields
@@ -203,7 +210,7 @@ class MemmapWriter:
         # Cast audio fields to audio_dtype
         if self.audio_dtype is not None:
             for key in extracted:
-                if key.endswith("_audio_data"):
+                if _is_audio_data_field(key):
                     extracted[key] = extracted[key].astype(self.audio_dtype)
 
         return extracted
@@ -246,6 +253,17 @@ class MemmapWriter:
         if not self._is_open:
             raise RuntimeError("Writer is not open. Call open() first.")
 
+        # Handle single AudioTree input
+        _ensure_audiotree_imported()
+        if AudioTree is not None and isinstance(data, AudioTree):
+            self._single_audiotree_mode = True
+            self.metadata["sample_rate"] = data.sample_rate
+            data = AudioTreeFieldExtractor.extract_fields(data, prefix="")
+            if self.audio_dtype is not None:
+                for key in list(data.keys()):
+                    if _is_audio_data_field(key):
+                        data[key] = data[key].astype(self.audio_dtype)
+
         # Infer schema on first write if needed
         if self.infer_schema and not self._schema_inferred:
             self._infer_schema_from_batch(data)
@@ -262,7 +280,7 @@ class MemmapWriter:
             if self.audio_dtype is not None:
                 extracted_data = dict(extracted_data)
                 for key in extracted_data:
-                    if key.endswith("_audio_data"):
+                    if _is_audio_data_field(key):
                         extracted_data[key] = np.asarray(extracted_data[key]).astype(
                             self.audio_dtype
                         )
@@ -324,20 +342,28 @@ class MemmapWriter:
 
     def write_sample(
         self,
-        data: Dict[str, np.ndarray],
+        data: Union[Dict[str, np.ndarray], "AudioTree"],
         strings: Optional[Dict[str, str]] = None,
     ) -> int:
         """Write a single sample to the memmap files.
 
         Convenience method that adds batch dimension and calls write_batch.
+        If an AudioTree is passed, it is written directly (AudioTree always
+        has a batch dimension).
 
         Args:
-            data: Dict mapping field names to numpy arrays (no batch dimension)
+            data: Dict mapping field names to numpy arrays (no batch dimension),
+                or a single AudioTree instance
             strings: Optional dict mapping string field names to single strings
 
         Returns:
-            1 (number of samples written)
+            Number of samples written
         """
+        # AudioTree already has batch dimension, delegate directly
+        _ensure_audiotree_imported()
+        if AudioTree is not None and isinstance(data, AudioTree):
+            return self.write_batch(data, strings)
+
         # Add batch dimension to each array
         batched_data = {name: arr[np.newaxis, ...] for name, arr in data.items()}
 
@@ -384,6 +410,10 @@ class MemmapWriter:
         # Store audio_dtype in manifest for documentation
         if self.audio_dtype is not None:
             manifest["audio_dtype"] = str(self.audio_dtype)
+
+        # Store single AudioTree mode flag
+        if self._single_audiotree_mode:
+            manifest["single_audiotree"] = True
 
         # Store AudioTree reconstruction info if any AudioTree objects were written
         if self._audiotree_fields:
