@@ -6,13 +6,63 @@
 
 .. _writer:
 
-Writing Audio and Manifests
-============================
+Writing Datasets
+=================
 
-The :class:`~audiotree.writer.AudioWriter` class provides a powerful way to write AudioTree objects to disk with automatic manifest generation for tracking metadata. This is particularly useful for creating datasets, exporting processed audio, and maintaining organized collections of audio files with their associated metadata.
+AudioTree provides two writers for different use cases:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 42 42
+
+   * -
+     - :class:`~audiotree.writer.AudioWriter`
+     - :class:`~audiotree.tree_writer.TreeWriter`
+   * - **Storage**
+     - Individual WAV files + NPZ manifest
+     - Memory-mapped binary files + JSON manifest
+   * - **Read speed**
+     - Decodes audio on each access
+     - Zero-copy memmap slice
+   * - **Human-readable**
+     - Yes (playable audio files)
+     - No (raw binary)
+   * - **Best for**
+     - Exporting audio for sharing, inspection, or external tools
+     - Fast random-access datasets for ML training
+
+**Use AudioWriter** when you need playable audio files on disk — for listening, sharing with collaborators,
+or feeding into non-Python tools. It writes standard WAV files and tracks per-sample metadata (loudness, tags, etc.)
+in an NPZ manifest that supports filtering.
+
+**Use TreeWriter** when you need a fast pre-rendered dataset for training. It stores the entire pytree
+(AudioTree, dicts of AudioTrees, nested structures) as memory-mapped arrays — one ``.bin`` file per leaf.
+Reading is a memmap slice with no decoding overhead. Use :class:`~audiotree.sources.tree.TreeDataSource`
+to read it back as a Grain ``RandomAccessDataSource``.
+
+.. code-block:: python
+
+    from audiotree import TreeWriter
+    from audiotree.sources import TreeDataSource
+
+    # Write a dataset
+    with TreeWriter("dataset/", expected_samples=10000) as w:
+        for batch in dataloader:
+            w.write(batch)
+
+    # Read it back (Grain-compatible)
+    ds = TreeDataSource.from_directory("dataset/")
+    sample = ds[0]  # reconstructed AudioTree
+
+----
+
+AudioWriter
+-----------
+
+The :class:`~audiotree.writer.AudioWriter` class writes AudioTree objects as individual audio files with automatic manifest generation. This is useful for creating datasets, exporting processed audio, and maintaining organized collections of audio files with their associated metadata.
 
 Basic Usage
------------
+~~~~~~~~~~~
 
 AudioWriter sequentially writes AudioTree batches to disk, automatically handling file naming and optional manifest generation:
 
@@ -37,12 +87,12 @@ AudioWriter sequentially writes AudioTree batches to disk, automatically handlin
     'audio_0000.wav'
 
 Manifest Formats
-----------------
+~~~~~~~~~~~~~~~~
 
 AudioWriter generates manifests in NPZ format to track written files and their metadata:
 
 NPZ Format
-~~~~~~~~~~
+^^^^^^^^^^
 
 NPZ is the recommended format for all use cases, especially for large datasets:
 
@@ -61,7 +111,7 @@ NPZ is the recommended format for all use cases, especially for large datasets:
 - **Scalability**: Efficient storage for datasets with thousands of files
 
 NPZ Compression Options
------------------------
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Control NPZ file compression for different trade-offs:
 
@@ -76,7 +126,7 @@ Control NPZ file compression for different trade-offs:
 Compression is recommended for most cases as the size savings (often 5-10x) outweigh the minimal performance impact.
 
 Metadata Tracking
------------------
+~~~~~~~~~~~~~~~~~
 
 AudioWriter automatically tracks all AudioTree metadata in the manifest:
 
@@ -104,7 +154,7 @@ The manifest will contain:
 - **Custom tags**: Any additional metadata passed via the ``tags`` parameter
 
 Timestamp Control
------------------
+~~~~~~~~~~~~~~~~~
 
 Control whether to include timestamps in manifest entries:
 
@@ -123,7 +173,7 @@ Timestamps are useful for:
 - Audit trails for data processing
 
 Resampling During Write
------------------------
+~~~~~~~~~~~~~~~~~~~~~~~
 
 AudioWriter can automatically resample audio to a target sample rate:
 
@@ -144,7 +194,7 @@ This is useful when:
 - Preparing data for models that require specific sample rates
 
 Sequential Writing
-------------------
+~~~~~~~~~~~~~~~~~~
 
 AudioWriter maintains state for sequential writing across multiple batches:
 
@@ -175,7 +225,7 @@ AudioWriter maintains state for sequential writing across multiple batches:
     manifest_path = writer.save_manifest()
 
 Progress Bars
-~~~~~~~~~~~~~
+^^^^^^^^^^^^^
 
 AudioWriter supports progress tracking via tqdm integration:
 
@@ -224,7 +274,7 @@ AudioWriter supports progress tracking via tqdm integration:
 The progress bar is updated by the batch size of each AudioTree written, providing accurate progress tracking even with variable batch sizes.
 
 Pattern Formatting
-~~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^^
 
 The ``pattern`` parameter supports Python string formatting:
 
@@ -240,7 +290,7 @@ The ``pattern`` parameter supports Python string formatting:
     pattern="train_{index:05d}.wav"  # train_00000.wav, train_00001.wav, ...
 
 Reading Written Data
---------------------
+~~~~~~~~~~~~~~~~~~~~
 
 Use :class:`~audiotree.sources.manifest.ManifestDataSource` to read AudioWriter output:
 
@@ -269,7 +319,7 @@ Use :class:`~audiotree.sources.manifest.ManifestDataSource` to read AudioWriter 
     train_source = source.filter_by_tag("split", "train")
 
 Integration with Data Pipelines
--------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 AudioWriter integrates seamlessly with data processing pipelines:
 
@@ -291,7 +341,7 @@ AudioWriter integrates seamlessly with data processing pipelines:
     source = ManifestDataSource.from_writer_output("processed_output")
 
 Metadata Flow Example
----------------------
+~~~~~~~~~~~~~~~~~~~~~
 
 Here's how metadata flows through AudioTree transformations and into the manifest:
 
@@ -338,7 +388,7 @@ Here's how metadata flows through AudioTree transformations and into the manifes
     True
 
 Best Practices
---------------
+~~~~~~~~~~~~~~
 
 1. **Use NPZ for large datasets**: The compression benefits become significant with 100+ files
 2. **Include relevant metadata**: Track processing parameters, data sources, and versions
@@ -348,7 +398,7 @@ Best Practices
 6. **Consider sample rates**: Resample during writing to avoid repeated resampling later
 
 Example: Creating a Training Dataset
-------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Here's a complete example of creating a training dataset with AudioWriter:
 

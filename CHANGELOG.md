@@ -4,6 +4,10 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## Unreleased
 
+### New Features
+
+* **New `TreeWriter` and `TreeDataSource`**: A pytree-native writer and reader for memory-mapped datasets. Instead of manually extracting and reconstructing AudioTree fields, uses `jax.tree_util` to decompose any pytree into leaves—each leaf becomes a separate memmap file. A JSON structure descriptor in the manifest enables exact reconstruction. Accepts AudioTree objects, dicts of arrays, dicts of AudioTrees, or nested combinations, all through a single `write()` method. The reader implements Grain's `RandomAccessDataSource` with a minimal interface (`__len__`, `__getitem__`). Drops `FieldSpec`, `AudioTreeFieldExtractor`, `audio_dtype`, string fields, and `transform_fn` in favor of a cleaner, more composable design.
+
 ### Breaking Changes
 
 * **Separate NumPy and JAX transform backends**: Transforms now have two implementations:

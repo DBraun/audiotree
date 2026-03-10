@@ -76,6 +76,7 @@ Content
    audiotree_api/sources
    audiotree_api/transforms
    audiotree_api/writer
+   audiotree_api/tree
 
 .. toctree::
    :maxdepth: 1
