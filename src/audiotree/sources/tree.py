@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Dict, SupportsIndex, Union
+from typing import Dict, List, SupportsIndex, Union
 
 import numpy as np
 from grain.sources import RandomAccessDataSource
@@ -47,6 +47,10 @@ class TreeDataSource(RandomAccessDataSource):
     into RAM. Data is read from memory-mapped binary files and reconstructed
     into the original pytree structure (AudioTree, dict, etc.).
 
+    Memmaps are opened lazily on first access and cached for the lifetime of
+    the process. This avoids per-item mmap syscall overhead while remaining
+    pickle-safe for grain's multiprocessing DataLoader.
+
     Args:
         manifest_path: Path to the manifest.json file
         raw: If True, return a flat Dict[str, np.ndarray] keyed by leaf path
@@ -84,14 +88,37 @@ class TreeDataSource(RandomAccessDataSource):
         self._structure = self.manifest["structure"]
         self._leaf_info = self.manifest["leaves"]
 
+        # Lazily initialized per-process; not set here so the object stays
+        # picklable for grain worker processes.
+        self._memmaps: List[np.memmap] = []
+        self._leaf_names: List[str] = []
+
+    def _open_memmaps(self):
+        """Open all memmap files. Called once per process on first access."""
+        self._leaf_names = list(self._leaf_info.keys())
+        for name in self._leaf_names:
+            info = self._leaf_info[name]
+            full_shape = tuple([self._num_samples] + info["shape_per_sample"])
+            mm = np.memmap(
+                self.data_dir / info["file"],
+                dtype=np.dtype(info["dtype"]),
+                mode="r",
+                shape=full_shape,
+            )
+            self._memmaps.append(mm)
+
+    def __getstate__(self):
+        """Drop memmaps before pickling (they reopen lazily in workers)."""
+        state = self.__dict__.copy()
+        state["_memmaps"] = []
+        state["_leaf_names"] = []
+        return state
+
     def __len__(self) -> int:
         return self._num_samples
 
     def __getitem__(self, record_key: SupportsIndex):
         """Load a single sample by index.
-
-        Recreates the memmap on each access to avoid memory leaks
-        with long-running data loaders.
 
         Args:
             record_key: Index of the record to load
@@ -107,18 +134,12 @@ class TreeDataSource(RandomAccessDataSource):
         if idx < 0 or idx >= self._num_samples:
             raise IndexError(f"Index {idx} out of range [0, {self._num_samples})")
 
+        if not self._memmaps:
+            self._open_memmaps()
+
         leaf_arrays = {}
-        for name, info in self._leaf_info.items():
-            full_shape = tuple([self._num_samples] + info["shape_per_sample"])
-            mm = np.memmap(
-                self.data_dir / info["file"],
-                dtype=np.dtype(info["dtype"]),
-                mode="r",
-                shape=full_shape,
-            )
-            # Copy to regular ndarray and add batch dimension
+        for name, mm in zip(self._leaf_names, self._memmaps):
             leaf_arrays[name] = np.array(mm[idx])[np.newaxis, ...]
-            del mm
 
         if self.raw:
             return leaf_arrays
