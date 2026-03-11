@@ -34,6 +34,7 @@ def _reconstruct(node, leaf_arrays: Dict[str, np.ndarray]):
         children = {
             k: _reconstruct(v, leaf_arrays) for k, v in node["children"].items()
         }
+        children.setdefault("audio_data", None)
         return AudioTree(sample_rate=node["sample_rate"], **children)
 
     raise ValueError(f"Unknown structure node type: {node_type}")
