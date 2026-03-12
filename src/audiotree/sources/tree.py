@@ -52,26 +52,26 @@ class TreeDataSource(RandomAccessDataSource):
     pickle-safe for grain's multiprocessing DataLoader.
 
     Args:
-        manifest_path: Path to the manifest.json file
+        directory: Path to the directory containing manifest.json and
+            memory-mapped data files.
         raw: If True, return a flat Dict[str, np.ndarray] keyed by leaf path
             strings instead of reconstructing the pytree. Default False.
 
     Example:
-        >>> ds = TreeDataSource("dataset/manifest.json")
+        >>> ds = TreeDataSource("dataset/")
         >>> sample = ds[0]
         >>> print(type(sample))  # <class 'AudioTree'>
-
-        >>> ds = TreeDataSource.from_directory("dataset/")
-        >>> print(len(ds))  # number of samples
     """
 
     def __init__(
         self,
-        manifest_path: Union[str, Path],
+        directory: Union[str, Path],
         raw: bool = False,
     ):
-        self.manifest_path = Path(manifest_path)
-        self.data_dir = self.manifest_path.parent
+        self.data_dir = Path(directory)
+        self.manifest_path = self.data_dir / "manifest.json"
+        if not self.manifest_path.exists():
+            raise FileNotFoundError(f"Manifest not found: {self.manifest_path}")
         self.raw = raw
 
         with open(self.manifest_path) as f:
@@ -154,23 +154,3 @@ class TreeDataSource(RandomAccessDataSource):
         """
         return dict(self.manifest.get("metadata", {}))
 
-    @classmethod
-    def from_directory(
-        cls,
-        directory: Union[str, Path],
-        **kwargs,
-    ) -> "TreeDataSource":
-        """Convenience constructor that finds manifest.json in directory.
-
-        Args:
-            directory: Directory containing memmap files and manifest.json
-            **kwargs: Additional arguments passed to TreeDataSource
-
-        Returns:
-            TreeDataSource configured for the directory
-        """
-        directory = Path(directory)
-        manifest_path = directory / "manifest.json"
-        if not manifest_path.exists():
-            raise FileNotFoundError(f"Manifest not found: {manifest_path}")
-        return cls(manifest_path, **kwargs)

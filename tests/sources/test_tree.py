@@ -27,7 +27,7 @@ def test_round_trip_audiotree():
         with TreeWriter(output_dir, expected_samples=5) as w:
             w.write(tree)
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
         assert len(source) == 5
 
         for i in range(5):
@@ -56,7 +56,7 @@ def test_round_trip_audiotree_with_metadata():
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
 
         for i in range(3):
             sample = source[i]
@@ -84,7 +84,7 @@ def test_round_trip_nested_metadata():
         with TreeWriter(output_dir, expected_samples=2) as w:
             w.write(tree)
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
         sample = source[0]
 
         assert isinstance(sample, AudioTree)
@@ -111,7 +111,7 @@ def test_round_trip_dict_of_audiotrees():
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write({"dry": dry, "wet": wet})
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
         assert len(source) == 3
 
         sample = source[0]
@@ -137,7 +137,7 @@ def test_round_trip_plain_dict():
         with TreeWriter(output_dir, expected_samples=5) as w:
             w.write({"x": x, "y": y})
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
         assert len(source) == 5
 
         for i in range(5):
@@ -160,7 +160,7 @@ def test_round_trip_multiple_writes():
             w.write(AudioTree(audio_data=audio1, sample_rate=44100))
             w.write(AudioTree(audio_data=audio2, sample_rate=44100))
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
         assert len(source) == 5
 
         # First batch
@@ -195,7 +195,7 @@ def test_raw_mode():
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
 
-        source = TreeDataSource.from_directory(output_dir, raw=True)
+        source = TreeDataSource(output_dir, raw=True)
         sample = source[0]
 
         assert isinstance(sample, dict)
@@ -205,30 +205,14 @@ def test_raw_mode():
         assert sample["audio_data"].shape == (1, 2, 100)
 
 
-# === from_directory ===
+# === Missing manifest ===
 
 
-def test_from_directory():
-    """from_directory convenience constructor."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        output_dir = Path(tmpdir)
-        tree = AudioTree(
-            audio_data=np.zeros((2, 1, 10), dtype=np.float32),
-            sample_rate=44100,
-        )
-
-        with TreeWriter(output_dir, expected_samples=2) as w:
-            w.write(tree)
-
-        source = TreeDataSource.from_directory(output_dir)
-        assert len(source) == 2
-
-
-def test_from_directory_missing():
-    """from_directory raises FileNotFoundError for missing manifest."""
+def test_missing_manifest():
+    """Constructor raises FileNotFoundError for missing manifest."""
     with tempfile.TemporaryDirectory() as tmpdir:
         with pytest.raises(FileNotFoundError, match="Manifest not found"):
-            TreeDataSource.from_directory(tmpdir)
+            TreeDataSource(tmpdir)
 
 
 # === Error handling ===
@@ -246,7 +230,7 @@ def test_index_out_of_range():
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
 
         with pytest.raises(IndexError):
             _ = source[10]
@@ -268,7 +252,7 @@ def test_version_check():
             json.dump(manifest, f)
 
         with pytest.raises(ValueError, match="Unsupported manifest version"):
-            TreeDataSource(output_dir / "manifest.json")
+            TreeDataSource(output_dir)
 
 
 # === Metadata ===
@@ -286,7 +270,7 @@ def test_get_metadata():
         ) as w:
             w.write({"x": np.zeros((2,), dtype=np.float32)})
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
         meta = source.get_metadata()
         assert meta["description"] == "test"
         assert meta["version"] == 1
@@ -308,7 +292,7 @@ def test_empty_metadata_round_trip():
         with TreeWriter(output_dir, expected_samples=2) as w:
             w.write(tree)
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
         sample = source[0]
         assert isinstance(sample, AudioTree)
         assert sample.metadata == {}
@@ -326,7 +310,7 @@ def test_none_fields_default():
         with TreeWriter(output_dir, expected_samples=2) as w:
             w.write(tree)
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
         sample = source[0]
         assert sample.pitch is None
         assert sample.velocity is None
@@ -350,7 +334,7 @@ def test_grain_protocol():
         with TreeWriter(output_dir, expected_samples=5) as w:
             w.write(tree)
 
-        source = TreeDataSource.from_directory(output_dir)
+        source = TreeDataSource(output_dir)
 
         # len() and __getitem__ are required
         assert len(source) == 5
