@@ -177,6 +177,10 @@ class TreeWriter:
         output_dir: Directory where memmap files will be written
         expected_samples: Total number of samples to pre-allocate
         metadata: Optional dict of user metadata to store in manifest
+        pbar: Optional tqdm progress bar instance. Updated by ``batch_size``
+            after each ``write()`` call.
+        close_pbar: If True, close the progress bar when the writer closes.
+            Default False.
 
     Example:
         >>> tree = AudioTree(audio_data=audio, sample_rate=44100, loudness=loud)
@@ -190,10 +194,14 @@ class TreeWriter:
         output_dir: Union[str, Path],
         expected_samples: int,
         metadata: Optional[Dict[str, Any]] = None,
+        pbar=None,
+        close_pbar: bool = False,
     ):
         self.output_dir = Path(output_dir)
         self.expected_samples = expected_samples
         self.metadata = metadata or {}
+        self._pbar = pbar
+        self._close_pbar = close_pbar
 
         self._current_index = 0
         self._memmaps: List[np.memmap] = []
@@ -350,6 +358,8 @@ class TreeWriter:
                 writer.write(s.encode("utf-8"))
 
         self._current_index += batch_size
+        if self._pbar is not None:
+            self._pbar.update(batch_size)
         return batch_size
 
     def flush(self):
@@ -387,6 +397,9 @@ class TreeWriter:
 
         with open(self.output_dir / "manifest.json", "w") as f:
             json.dump(manifest, f, indent=2)
+
+        if self._close_pbar and self._pbar is not None:
+            self._pbar.close()
 
         self._is_open = False
 
