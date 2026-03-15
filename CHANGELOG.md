@@ -7,6 +7,7 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 ### New Features
 
 * **New `TreeWriter` and `TreeDataSource`**: A pytree-native writer and reader for memory-mapped datasets. Instead of manually extracting and reconstructing AudioTree fields, uses `jax.tree_util` to decompose any pytree into leaves—each leaf becomes a separate memmap file. A JSON structure descriptor in the manifest enables exact reconstruction. Accepts AudioTree objects, dicts of arrays, dicts of AudioTrees, or nested combinations, all through a single `write()` method. The reader takes a directory path and implements Grain's `RandomAccessDataSource` with a minimal interface (`__len__`, `__getitem__`). Drops `FieldSpec`, `AudioTreeFieldExtractor`, `audio_dtype`, string fields, and `transform_fn` in favor of a cleaner, more composable design.
+* **String leaf support in `TreeWriter` / `TreeDataSource`**: `write()` now accepts `str` or `List[str]` leaves alongside arrays and AudioTrees. Strings are stored in [Bagz](https://github.com/google/bagz) files (one per string leaf) with no length limits or truncation. Single-sample reads return a bare `str`, and `AudioTree.batch_fn` naturally collects them into `List[str]`. Requires the optional `bagz` dependency (`pip install bagz`); array-only trees work without it.
 
 ### Breaking Changes
 

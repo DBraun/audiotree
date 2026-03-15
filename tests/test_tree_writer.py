@@ -336,3 +336,82 @@ def test_writer_not_open_error():
 
         with pytest.raises(RuntimeError, match="not open"):
             writer.write({"x": np.zeros((2,), dtype=np.float32)})
+
+
+# === String leaf tests ===
+
+
+def test_write_string_list_with_audiotree():
+    """Write a dict with List[str] and AudioTree leaves."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        pytree = {
+            "labels": ["cat", "dog", "bird"],
+            "audio": AudioTree(
+                audio_data=np.zeros((3, 1, 100), dtype=np.float32),
+                sample_rate=44100,
+            ),
+        }
+
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            w.write(pytree)
+
+        assert (output_dir / "labels.bagz").exists()
+        assert (output_dir / "audio.audio_data.bin").exists()
+
+        with open(output_dir / "manifest.json") as f:
+            manifest = json.load(f)
+        assert "labels" in manifest["string_leaves"]
+        assert manifest["string_leaves"]["labels"]["file"] == "labels.bagz"
+        assert manifest["num_samples"] == 3
+
+
+def test_write_multiple_string_leaves():
+    """Multiple string leaves each get their own bagz file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        pytree = {
+            "labels": ["cat", "dog"],
+            "source": ["train", "val"],
+            "x": np.zeros((2, 3), dtype=np.float32),
+        }
+
+        with TreeWriter(output_dir, expected_samples=2) as w:
+            w.write(pytree)
+
+        assert (output_dir / "labels.bagz").exists()
+        assert (output_dir / "source.bagz").exists()
+
+        with open(output_dir / "manifest.json") as f:
+            manifest = json.load(f)
+        assert "labels" in manifest["string_leaves"]
+        assert "source" in manifest["string_leaves"]
+
+
+def test_write_string_batch_size_mismatch():
+    """String leaf with wrong batch size raises ValueError."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        pytree = {
+            "labels": ["cat", "dog"],  # batch 2
+            "x": np.zeros((3, 5), dtype=np.float32),  # batch 3
+        }
+
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            with pytest.raises(ValueError, match="Inconsistent batch sizes"):
+                w.write(pytree)
+
+
+def test_get_stats_with_strings():
+    """get_stats includes string leaf names."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            w.write({
+                "labels": ["a", "b", "c"],
+                "x": np.zeros((3,), dtype=np.float32),
+            })
+            stats = w.get_stats()
+            assert "labels" in stats["string_leaves"]
+            assert "x" in stats["leaves"]

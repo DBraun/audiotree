@@ -319,6 +319,201 @@ def test_none_fields_default():
         assert sample.latents is None
 
 
+# === String leaf round-trip tests ===
+
+
+def test_round_trip_string_list_with_audiotree():
+    """List[str] + AudioTree round-trips correctly."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        strings = ["hello", "world", "foo"]
+        audio = np.random.randn(3, 1, 100).astype(np.float32)
+
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            w.write({
+                "strings": strings,
+                "wet": AudioTree(audio_data=audio, sample_rate=44100),
+            })
+
+        source = TreeDataSource(output_dir)
+        assert len(source) == 3
+
+        for i in range(3):
+            sample = source[i]
+            assert isinstance(sample, dict)
+            assert sample["strings"] == strings[i]
+            assert isinstance(sample["wet"], AudioTree)
+            np.testing.assert_array_almost_equal(
+                sample["wet"].audio_data[0], audio[i], decimal=5
+            )
+
+
+def test_round_trip_multiple_string_leaves():
+    """Multiple string leaves round-trip."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        with TreeWriter(output_dir, expected_samples=2) as w:
+            w.write({
+                "labels": ["cat", "dog"],
+                "sources": ["train", "val"],
+                "x": np.zeros((2, 3), dtype=np.float32),
+            })
+
+        source = TreeDataSource(output_dir)
+        s0 = source[0]
+        assert s0["labels"] == "cat"
+        assert s0["sources"] == "train"
+
+        s1 = source[1]
+        assert s1["labels"] == "dog"
+        assert s1["sources"] == "val"
+
+
+def test_round_trip_single_string():
+    """A single str leaf (batch size 1) round-trips."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        with TreeWriter(output_dir, expected_samples=1) as w:
+            w.write({
+                "label": "cat",
+                "x": np.zeros((1, 3), dtype=np.float32),
+            })
+
+        source = TreeDataSource(output_dir)
+        sample = source[0]
+        assert sample["label"] == "cat"
+
+
+def test_round_trip_long_strings():
+    """Strings longer than 256 chars survive round-trip (no truncation)."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        long_str = "x" * 1000
+        with TreeWriter(output_dir, expected_samples=1) as w:
+            w.write({"s": [long_str], "x": np.zeros((1,), dtype=np.float32)})
+
+        source = TreeDataSource(output_dir)
+        assert source[0]["s"] == long_str
+
+
+def test_round_trip_empty_string():
+    """Empty strings survive round-trip."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        with TreeWriter(output_dir, expected_samples=2) as w:
+            w.write({
+                "s": ["", "hello"],
+                "x": np.zeros((2,), dtype=np.float32),
+            })
+
+        source = TreeDataSource(output_dir)
+        assert source[0]["s"] == ""
+        assert source[1]["s"] == "hello"
+
+
+def test_round_trip_unicode_strings():
+    """Unicode strings survive round-trip."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        strings = ["cafe\u0301", "\u4f60\u597d", "\U0001f3b5"]
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            w.write({"s": strings, "x": np.zeros((3,), dtype=np.float32)})
+
+        source = TreeDataSource(output_dir)
+        for i, expected in enumerate(strings):
+            assert source[i]["s"] == expected
+
+
+def test_round_trip_strings_multiple_writes():
+    """String leaves written across multiple batches read correctly."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        with TreeWriter(output_dir, expected_samples=5) as w:
+            w.write({
+                "s": ["a", "b", "c"],
+                "x": np.zeros((3,), dtype=np.float32),
+            })
+            w.write({
+                "s": ["d", "e"],
+                "x": np.ones((2,), dtype=np.float32),
+            })
+
+        source = TreeDataSource(output_dir)
+        assert len(source) == 5
+        assert source[0]["s"] == "a"
+        assert source[2]["s"] == "c"
+        assert source[3]["s"] == "d"
+        assert source[4]["s"] == "e"
+
+
+def test_raw_mode_with_strings():
+    """raw=True includes decoded string values."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        with TreeWriter(output_dir, expected_samples=2) as w:
+            w.write({
+                "label": ["cat", "dog"],
+                "x": np.zeros((2, 3), dtype=np.float32),
+            })
+
+        source = TreeDataSource(output_dir, raw=True)
+        sample = source[0]
+        assert isinstance(sample, dict)
+        assert sample["label"] == "cat"
+        assert isinstance(sample["x"], np.ndarray)
+
+
+def test_batch_fn_with_strings():
+    """AudioTree.batch_fn correctly batches string leaves into List[str]."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        with TreeWriter(output_dir, expected_samples=4) as w:
+            w.write({
+                "strings": ["a", "b", "c", "d"],
+                "wet": AudioTree(
+                    audio_data=np.arange(4 * 100, dtype=np.float32).reshape(
+                        4, 1, 100
+                    ),
+                    sample_rate=44100,
+                ),
+            })
+
+        source = TreeDataSource(output_dir)
+        items = [source[i] for i in range(4)]
+        batched = AudioTree.batch_fn(items)
+
+        assert batched["strings"] == ["a", "b", "c", "d"]
+        assert isinstance(batched["wet"], AudioTree)
+        assert batched["wet"].audio_data.shape == (4, 1, 100)
+
+
+def test_backward_compat_no_string_leaves():
+    """Old manifests without string_leaves key still work."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree = AudioTree(
+            audio_data=np.zeros((2, 1, 10), dtype=np.float32),
+            sample_rate=44100,
+        )
+
+        with TreeWriter(output_dir, expected_samples=2) as w:
+            w.write(tree)
+
+        # Simulate old manifest by removing string_leaves key
+        import json
+
+        manifest_path = output_dir / "manifest.json"
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+        manifest.pop("string_leaves", None)
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f)
+
+        source = TreeDataSource(output_dir)
+        sample = source[0]
+        assert isinstance(sample, AudioTree)
+
+
 # === Grain integration ===
 
 

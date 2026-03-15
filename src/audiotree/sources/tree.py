@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Dict, List, SupportsIndex, Union
+from typing import Any, Dict, List, SupportsIndex, Union
 
 import numpy as np
 from grain.sources import RandomAccessDataSource
@@ -10,29 +10,37 @@ from grain.sources import RandomAccessDataSource
 from audiotree.core import AudioTree
 
 
-def _reconstruct(node, leaf_arrays: Dict[str, np.ndarray]):
-    """Reconstruct a pytree from its structure description and leaf arrays.
+def _reconstruct(node, leaf_values: Dict[str, Any]):
+    """Reconstruct a pytree from its structure description and leaf values.
 
     Args:
-        node: A structure node from the manifest. Strings are leaf references,
-            dicts with "type" are internal nodes.
-        leaf_arrays: Dict mapping leaf path strings to numpy arrays.
+        node: A structure node from the manifest. Strings are array leaf
+            references, dicts with "type" are internal nodes.
+        leaf_values: Dict mapping leaf path strings to values (numpy arrays
+            for array leaves, Python str for string leaves).
 
     Returns:
-        Reconstructed pytree (AudioTree, dict, or array).
+        Reconstructed pytree (AudioTree, dict, array, or str).
     """
-    # String -> leaf reference
+    # String -> array leaf reference
     if isinstance(node, str):
-        return leaf_arrays[node]
+        return leaf_values[node]
 
     node_type = node["type"]
 
+    if node_type == "string_leaf":
+        return leaf_values[node["leaf"]]
+
     if node_type == "dict":
-        return {k: _reconstruct(v, leaf_arrays) for k, v in node["children"].items()}
+        return {
+            k: _reconstruct(v, leaf_values)
+            for k, v in node["children"].items()
+        }
 
     if node_type == "AudioTree":
         children = {
-            k: _reconstruct(v, leaf_arrays) for k, v in node["children"].items()
+            k: _reconstruct(v, leaf_values)
+            for k, v in node["children"].items()
         }
         children.setdefault("audio_data", None)
         return AudioTree(sample_rate=node["sample_rate"], **children)
@@ -87,14 +95,16 @@ class TreeDataSource(RandomAccessDataSource):
         self._num_samples = self.manifest["num_samples"]
         self._structure = self.manifest["structure"]
         self._leaf_info = self.manifest["leaves"]
+        self._string_leaf_info = self.manifest.get("string_leaves", {})
 
         # Lazily initialized per-process; not set here so the object stays
         # picklable for grain worker processes.
         self._memmaps: List[np.memmap] = []
         self._leaf_names: List[str] = []
+        self._bagz_readers: Dict = {}
 
-    def _open_memmaps(self):
-        """Open all memmap files. Called once per process on first access."""
+    def _open_data_files(self):
+        """Open all memmap and bagz files. Called once per process on first access."""
         self._leaf_names = list(self._leaf_info.keys())
         for name in self._leaf_names:
             info = self._leaf_info[name]
@@ -107,11 +117,25 @@ class TreeDataSource(RandomAccessDataSource):
             )
             self._memmaps.append(mm)
 
+        if self._string_leaf_info:
+            try:
+                import bagz
+            except ImportError:
+                raise ImportError(
+                    "The 'bagz' package is required for reading string leaves. "
+                    "Install it with: pip install bagz"
+                ) from None
+            for name, info in self._string_leaf_info.items():
+                self._bagz_readers[name] = bagz.Reader(
+                    str(self.data_dir / info["file"])
+                )
+
     def __getstate__(self):
-        """Drop memmaps before pickling (they reopen lazily in workers)."""
+        """Drop memmaps/readers before pickling (they reopen lazily in workers)."""
         state = self.__dict__.copy()
         state["_memmaps"] = []
         state["_leaf_names"] = []
+        state["_bagz_readers"] = {}
         return state
 
     def __len__(self) -> int:
@@ -134,17 +158,20 @@ class TreeDataSource(RandomAccessDataSource):
         if idx < 0 or idx >= self._num_samples:
             raise IndexError(f"Index {idx} out of range [0, {self._num_samples})")
 
-        if not self._memmaps:
-            self._open_memmaps()
+        if not self._memmaps and not self._bagz_readers:
+            self._open_data_files()
 
-        leaf_arrays = {}
+        leaf_values: Dict[str, Any] = {}
         for name, mm in zip(self._leaf_names, self._memmaps):
-            leaf_arrays[name] = np.array(mm[idx])[np.newaxis, ...]
+            leaf_values[name] = np.array(mm[idx])[np.newaxis, ...]
+
+        for name, reader in self._bagz_readers.items():
+            leaf_values[name] = reader[idx].decode("utf-8")
 
         if self.raw:
-            return leaf_arrays
+            return leaf_values
 
-        return _reconstruct(self._structure, leaf_arrays)
+        return _reconstruct(self._structure, leaf_values)
 
     def get_metadata(self) -> Dict:
         """Get user metadata from the manifest.
