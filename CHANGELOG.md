@@ -4,6 +4,10 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## Unreleased
 
+### Enhancements - TreeWriter
+
+* **`TreeWriter` handles under/overshoot gracefully**: `expected_samples` is now an allocation hint rather than an exact requirement. If a batch would exceed the allocated size, it is silently trimmed to fit. On `close()`, if fewer samples were written than allocated, memmap files are truncated to the actual sample count via `os.truncate()`. This avoids errors when the exact dataset size isn't known ahead of time (e.g., split-dependent counts) and eliminates wasted disk space.
+
 ### New Features
 
 * **New `TreeWriter` and `TreeDataSource`**: A pytree-native writer and reader for memory-mapped datasets. Instead of manually extracting and reconstructing AudioTree fields, uses `jax.tree_util` to decompose any pytree into leaves—each leaf becomes a separate memmap file. A JSON structure descriptor in the manifest enables exact reconstruction. Accepts AudioTree objects, dicts of arrays, dicts of AudioTrees, or nested combinations, all through a single `write()` method. The reader takes a directory path and implements Grain's `RandomAccessDataSource` with a minimal interface (`__len__`, `__getitem__`). Drops `FieldSpec`, `AudioTreeFieldExtractor`, `audio_dtype`, string fields, and `transform_fn` in favor of a cleaner, more composable design.

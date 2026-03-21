@@ -1,6 +1,8 @@
 """TreeWriter: pytree-native writer for memory-mapped datasets."""
 
+import logging
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -321,11 +323,15 @@ class TreeWriter:
 
         end_idx = self._current_index + batch_size
 
+        # Trim batch to fit within expected_samples (last batch may overshoot)
         if end_idx > self.expected_samples:
-            raise ValueError(
-                f"Writing {batch_size} samples would exceed expected_samples "
-                f"({self._current_index} + {batch_size} > {self.expected_samples})"
-            )
+            actual_batch = self.expected_samples - self._current_index
+            if actual_batch <= 0:
+                return 0
+            array_leaves = [leaf[:actual_batch] for leaf in array_leaves]
+            string_data = {k: v[:actual_batch] for k, v in string_data.items()}
+            batch_size = actual_batch
+            end_idx = self._current_index + batch_size
 
         # Write array leaves to memmaps
         for i, (mm, leaf) in enumerate(zip(self._memmaps, array_leaves)):
@@ -368,15 +374,38 @@ class TreeWriter:
             mm.flush()
 
     def close(self):
-        """Close all memmap and bagz files and write manifest."""
+        """Close all memmap and bagz files and write manifest.
+
+        If fewer samples were written than ``expected_samples``, the memmap
+        files are truncated to the actual sample count so no disk space is
+        wasted and readers see the correct size.
+        """
         if not self._is_open:
             return
+
+        actual_samples = self._current_index
 
         # Flush and release memmaps
         for mm in self._memmaps:
             mm.flush()
             del mm
         self._memmaps.clear()
+
+        # Truncate memmap files if we wrote fewer samples than allocated
+        if actual_samples < self.expected_samples:
+            logger = logging.getLogger(__name__)
+            logger.info(
+                "Wrote %d / %d expected samples; truncating memmap files.",
+                actual_samples,
+                self.expected_samples,
+            )
+            for name in self._leaf_names:
+                filepath = self.output_dir / self._leaf_info[name]["file"]
+                shape_per_sample = self._leaf_info[name]["shape_per_sample"]
+                dtype = np.dtype(self._leaf_info[name]["dtype"])
+                elems = int(np.prod(shape_per_sample)) if shape_per_sample else 1
+                actual_bytes = actual_samples * elems * dtype.itemsize
+                os.truncate(filepath, actual_bytes)
 
         # Close bagz writers
         for writer in self._bagz_writers.values():

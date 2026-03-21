@@ -197,18 +197,69 @@ def test_shape_validation():
                 w.write(tree2)
 
 
-def test_overflow_detection():
-    """Writing more than expected_samples raises ValueError."""
+def test_overflow_trimming():
+    """Batch exceeding expected_samples is trimmed to fit."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        audio = np.arange(30, dtype=np.float32).reshape(3, 1, 10)
+        tree = AudioTree(audio_data=audio, sample_rate=44100)
+
+        with TreeWriter(output_dir, expected_samples=2) as w:
+            n = w.write(tree)
+            assert n == 2  # trimmed from 3 to 2
+
+        with open(output_dir / "manifest.json") as f:
+            manifest = json.load(f)
+        assert manifest["num_samples"] == 2
+
+        # Memmap should contain only the first 2 samples
+        mm = np.memmap(
+            output_dir / "audio_data.bin", dtype=np.float32, mode="r", shape=(2, 1, 10)
+        )
+        np.testing.assert_array_equal(mm[0], audio[0])
+        np.testing.assert_array_equal(mm[1], audio[1])
+        del mm
+
+
+def test_overflow_returns_zero_when_full():
+    """Writing after expected_samples is reached returns 0."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((3, 1, 10), dtype=np.float32),
+            audio_data=np.zeros((2, 1, 10), dtype=np.float32),
             sample_rate=44100,
         )
 
         with TreeWriter(output_dir, expected_samples=2) as w:
-            with pytest.raises(ValueError, match="exceed expected_samples"):
-                w.write(tree)
+            w.write(tree)
+            n = w.write(tree)  # already full
+            assert n == 0
+
+
+def test_undershoot_truncates_memmaps():
+    """When fewer samples are written than expected, memmaps are truncated on close."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        audio = np.arange(20, dtype=np.float32).reshape(2, 1, 10)
+        tree = AudioTree(audio_data=audio, sample_rate=44100)
+
+        with TreeWriter(output_dir, expected_samples=100) as w:
+            w.write(tree)  # write only 2 of 100
+
+        with open(output_dir / "manifest.json") as f:
+            manifest = json.load(f)
+        assert manifest["num_samples"] == 2
+        assert manifest["expected_samples"] == 100
+
+        # Memmap file should be truncated to actual size (2 samples)
+        filepath = output_dir / "audio_data.bin"
+        expected_bytes = 2 * 1 * 10 * 4  # 2 samples * shape * float32
+        assert filepath.stat().st_size == expected_bytes
+
+        mm = np.memmap(filepath, dtype=np.float32, mode="r", shape=(2, 1, 10))
+        np.testing.assert_array_equal(mm[0], audio[0])
+        np.testing.assert_array_equal(mm[1], audio[1])
+        del mm
 
 
 def test_flush():
