@@ -539,3 +539,275 @@ def test_grain_protocol():
         # Iteration via indexing
         items = [source[i] for i in range(5)]
         assert len(items) == 5
+
+
+# === exclude_prefixes ===
+
+
+def test_exclude_audio_data():
+    """Excluding wet.audio_data gives None audio but keeps dry and metadata."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        dry_audio = np.random.randn(3, 2, 100).astype(np.float32)
+        wet_audio = np.random.randn(3, 2, 100).astype(np.float32)
+        mel = np.random.randn(3, 16).astype(np.float32)
+        dry = AudioTree(audio_data=dry_audio, sample_rate=44100)
+        wet = AudioTree(
+            audio_data=wet_audio, sample_rate=44100, metadata={"mel": mel}
+        )
+
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            w.write({"dry": dry, "wet": wet})
+
+        source = TreeDataSource(output_dir, exclude_prefixes=["wet.audio_data"])
+        sample = source[0]
+
+        # wet.audio_data excluded -> None
+        assert sample["wet"].audio_data is None
+        # wet metadata still present
+        np.testing.assert_array_almost_equal(
+            sample["wet"].metadata["mel"][0], mel[0], decimal=5
+        )
+        # dry.audio_data NOT excluded
+        np.testing.assert_array_almost_equal(
+            sample["dry"].audio_data[0], dry_audio[0], decimal=5
+        )
+
+
+def test_exclude_metadata_field():
+    """Excluding a metadata field removes its key from the metadata dict."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        mel = np.random.randn(3, 16).astype(np.float32)
+        mfcc = np.random.randn(3, 8).astype(np.float32)
+        tree = AudioTree(
+            audio_data=np.zeros((3, 1, 10), dtype=np.float32),
+            sample_rate=44100,
+            metadata={"mel": mel, "mfcc": mfcc},
+        )
+
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            w.write(tree)
+
+        source = TreeDataSource(output_dir, exclude_prefixes=["metadata.mel"])
+        sample = source[0]
+
+        assert "mel" not in sample.metadata
+        assert "mfcc" in sample.metadata
+        np.testing.assert_array_almost_equal(
+            sample.metadata["mfcc"][0], mfcc[0], decimal=5
+        )
+
+
+def test_exclude_string_leaf():
+    """Excluding a string leaf removes it from the output dict."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        with TreeWriter(output_dir, expected_samples=2) as w:
+            w.write({
+                "label": ["cat", "dog"],
+                "x": np.zeros((2, 3), dtype=np.float32),
+            })
+
+        source = TreeDataSource(output_dir, exclude_prefixes=["label"])
+        sample = source[0]
+
+        assert "label" not in sample
+        assert "x" in sample
+
+
+def test_exclude_prefix_with_subtree():
+    """Prefix 'dry' excludes all dry.* leaves."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        dry = AudioTree(
+            audio_data=np.random.randn(2, 1, 50).astype(np.float32),
+            sample_rate=44100,
+            metadata={"mel": np.random.randn(2, 8).astype(np.float32)},
+        )
+        wet = AudioTree(
+            audio_data=np.random.randn(2, 1, 50).astype(np.float32),
+            sample_rate=44100,
+        )
+
+        with TreeWriter(output_dir, expected_samples=2) as w:
+            w.write({"dry": dry, "wet": wet})
+
+        source = TreeDataSource(output_dir, exclude_prefixes=["dry"])
+        sample = source[0]
+
+        # dry AudioTree is reconstructed but all its leaves are excluded
+        assert sample["dry"].audio_data is None
+        assert sample["dry"].metadata == {}
+        # wet is untouched
+        assert sample["wet"].audio_data is not None
+
+
+def test_exclude_pickle_roundtrip():
+    """exclude_prefixes survives pickle/unpickle (grain multiprocessing)."""
+    import pickle
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        audio = np.random.randn(3, 1, 20).astype(np.float32)
+        mel = np.random.randn(3, 8).astype(np.float32)
+        tree = AudioTree(
+            audio_data=audio, sample_rate=44100, metadata={"mel": mel}
+        )
+
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            w.write(tree)
+
+        source = TreeDataSource(output_dir, exclude_prefixes=["audio_data"])
+
+        # Force data files open, then pickle/unpickle
+        _ = source[0]
+        restored = pickle.loads(pickle.dumps(source))
+
+        sample = restored[0]
+        assert sample.audio_data is None
+        assert "mel" in sample.metadata
+        np.testing.assert_array_almost_equal(
+            sample.metadata["mel"][0], mel[0], decimal=5
+        )
+
+
+def test_exclude_empty_default():
+    """Empty exclude_prefixes behaves identically to no argument."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        audio = np.random.randn(2, 1, 10).astype(np.float32)
+        tree = AudioTree(audio_data=audio, sample_rate=44100)
+
+        with TreeWriter(output_dir, expected_samples=2) as w:
+            w.write(tree)
+
+        source_default = TreeDataSource(output_dir)
+        source_empty = TreeDataSource(output_dir, exclude_prefixes=[])
+
+        for i in range(2):
+            s1 = source_default[i]
+            s2 = source_empty[i]
+            np.testing.assert_array_equal(s1.audio_data, s2.audio_data)
+
+
+# === load_into_memory ===
+
+
+def test_load_into_memory_matches_lazy():
+    """load_into_memory=True returns identical results to lazy memmap access."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        audio = np.random.randn(5, 2, 100).astype(np.float32)
+        mel = np.random.randn(5, 16).astype(np.float32)
+        tree = AudioTree(
+            audio_data=audio, sample_rate=44100, metadata={"mel": mel}
+        )
+
+        with TreeWriter(output_dir, expected_samples=5) as w:
+            w.write(tree)
+
+        lazy = TreeDataSource(output_dir)
+        eager = TreeDataSource(output_dir, load_into_memory=True)
+
+        for i in range(5):
+            s_lazy = lazy[i]
+            s_eager = eager[i]
+            np.testing.assert_array_equal(s_lazy.audio_data, s_eager.audio_data)
+            np.testing.assert_array_equal(
+                s_lazy.metadata["mel"], s_eager.metadata["mel"]
+            )
+
+
+def test_load_into_memory_with_exclude():
+    """load_into_memory combined with exclude_prefixes."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        audio = np.random.randn(3, 1, 50).astype(np.float32)
+        mel = np.random.randn(3, 8).astype(np.float32)
+        tree = AudioTree(
+            audio_data=audio, sample_rate=44100, metadata={"mel": mel}
+        )
+
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            w.write(tree)
+
+        source = TreeDataSource(
+            output_dir,
+            exclude_prefixes=["audio_data"],
+            load_into_memory=True,
+        )
+
+        sample = source[0]
+        assert sample.audio_data is None
+        np.testing.assert_array_almost_equal(
+            sample.metadata["mel"][0], mel[0], decimal=5
+        )
+
+
+def test_load_into_memory_with_strings():
+    """load_into_memory loads string leaves into a list."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            w.write({
+                "label": ["cat", "dog", "bird"],
+                "x": np.arange(3, dtype=np.float32),
+            })
+
+        source = TreeDataSource(output_dir, load_into_memory=True)
+        assert source[0]["label"] == "cat"
+        assert source[1]["label"] == "dog"
+        assert source[2]["label"] == "bird"
+
+
+def test_load_into_memory_pickle_roundtrip():
+    """In-memory data survives pickle for fork-based workers."""
+    import pickle
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        audio = np.random.randn(3, 1, 20).astype(np.float32)
+        tree = AudioTree(audio_data=audio, sample_rate=44100)
+
+        with TreeWriter(output_dir, expected_samples=3) as w:
+            w.write(tree)
+
+        source = TreeDataSource(output_dir, load_into_memory=True)
+        restored = pickle.loads(pickle.dumps(source))
+
+        sample = restored[0]
+        np.testing.assert_array_almost_equal(
+            sample.audio_data[0], audio[0], decimal=5
+        )
+
+
+# === cache_memmaps ===
+
+
+def test_cache_memmaps_false_matches_default():
+    """cache_memmaps=False returns identical results to cached memmaps."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        audio = np.random.randn(5, 2, 100).astype(np.float32)
+        mel = np.random.randn(5, 16).astype(np.float32)
+        tree = AudioTree(
+            audio_data=audio, sample_rate=44100, metadata={"mel": mel}
+        )
+
+        with TreeWriter(output_dir, expected_samples=5) as w:
+            w.write(tree)
+
+        cached = TreeDataSource(output_dir, cache_memmaps=True)
+        uncached = TreeDataSource(output_dir, cache_memmaps=False)
+
+        for i in range(5):
+            s1 = cached[i]
+            s2 = uncached[i]
+            np.testing.assert_array_equal(s1.audio_data, s2.audio_data)
+            np.testing.assert_array_equal(
+                s1.metadata["mel"], s2.metadata["mel"]
+            )
+
+        # Uncached source should not hold any memmaps
+        assert uncached._memmaps == []

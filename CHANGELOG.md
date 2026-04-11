@@ -4,6 +4,12 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## Unreleased
 
+### Enhancements - TreeDataSource
+
+* **Selective field loading via `exclude_prefixes`**: `TreeDataSource` accepts an `exclude_prefixes` parameter to skip loading specific leaves by dot-separated name prefix. For example, `exclude_prefixes=["wet.audio_data"]` skips the audio memmap, and `exclude_prefixes=["dry"]` skips all leaves under the `dry` subtree. Excluded leaves are omitted from the reconstructed pytree (AudioTree fields default to `None`, metadata keys are absent). Prefix matching uses exact-or-dot semantics (`"dry"` matches `"dry"` and `"dry.audio_data"` but not `"dryness"`).
+* **`load_into_memory` for zero-copy worker access**: `TreeDataSource` accepts `load_into_memory=True` to load all non-excluded array and string leaves into RAM at init time. With fork-based multiprocessing (default on Linux), workers inherit the parent's data via copy-on-write, eliminating disk I/O entirely. String leaves (bagz) are read into a `List[str]`.
+* **`cache_memmaps` toggle for page cache control**: `TreeDataSource` accepts `cache_memmaps=False` to reopen memmap files on every `__getitem__` call instead of caching them. This lets the OS reclaim pages between accesses, preventing the page cache from growing unboundedly when randomly accessing large files. Trades a small CPU overhead for controlled memory. Ignored when `load_into_memory=True`. See [nanoGPT](https://github.com/karpathy/nanoGPT/blob/3adf61e/train.py#L117-L118) for the same pattern.
+
 ### Enhancements - TreeWriter
 
 * **`TreeWriter` handles under/overshoot gracefully**: `expected_samples` is now an allocation hint rather than an exact requirement. If a batch would exceed the allocated size, it is silently trimmed to fit. On `close()`, if fewer samples were written than allocated, memmap files are truncated to the actual sample count via `os.truncate()`. This avoids errors when the exact dataset size isn't known ahead of time (e.g., split-dependent counts) and eliminates wasted disk space.
