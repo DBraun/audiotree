@@ -95,8 +95,8 @@ class TreeDataSource(RandomAccessDataSource):
             I/O. With fork-based multiprocessing (default on Linux), the
             parent's data is shared with workers via copy-on-write.
             Default False.
-        cache_memmaps: If True (default), memmap file handles are opened
-            once and cached for the lifetime of the process. If False,
+        cache_memmaps: If True, memmap file handles are opened once and
+            cached for the lifetime of the process. If False (default),
             memmaps are reopened on every ``__getitem__`` call, allowing
             the OS to reclaim pages between accesses and preventing page
             cache from growing unboundedly. The False setting trades a
@@ -122,7 +122,7 @@ class TreeDataSource(RandomAccessDataSource):
         raw: bool = False,
         exclude_prefixes: Optional[List[str]] = None,
         load_into_memory: bool = False,
-        cache_memmaps: bool = True,
+        cache_memmaps: bool = False,
     ):
         self.data_dir = Path(directory)
         self.manifest_path = self.data_dir / "manifest.json"
