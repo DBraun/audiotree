@@ -4,7 +4,6 @@ __author__ = "David Braun"
 from .core import AudioTree
 from .core import SaliencyParams
 from .writer import AudioWriter
-from .memmap_writer import MemmapWriter, FieldSpec
 from .tree_writer import TreeWriter
 from . import sources
 from . import transforms
@@ -13,9 +12,7 @@ __all__ = [
     "AudioTree",
     "SaliencyParams",
     "AudioWriter",
-    "MemmapWriter",
     "TreeWriter",
-    "FieldSpec",
     "sources",
     "transforms",
 ]

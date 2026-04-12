@@ -45,4 +45,8 @@ The `load_audio_with_saliency()` function handles saliency-based excerpt selecti
 
 1. **Writer (`audiotree.writer`)**: The `AudioWriter` class provides sequential writing of AudioTree batches to disk with automatic manifest generation.
 Manifests can be saved as NPZ (default, best for large datasets), JSON, or CSV formats, tracking metadata like loudness, pitch, and file paths.
-The `MemmapWriter` class writes AudioTree data to memory-mapped files for efficient random access without loading entire datasets into RAM.
+The `TreeWriter` class (`audiotree.tree_writer`) writes arbitrary pytrees — AudioTrees, dicts of AudioTrees, or nested structures — to memory-mapped binary files (with `bagz` for string leaves), enabling zero-copy random access via `audiotree.sources.TreeDataSource` as a Grain `RandomAccessDataSource`.
+
+## Changelog
+
+User-facing changes are tracked in `CHANGELOG.md`. When making changes that affect the public API, behavior, or dependencies, add a bullet under the `## Unreleased` section in the appropriate subsection (e.g., `### Enhancements`, `### Breaking Changes`, `### New Features`).

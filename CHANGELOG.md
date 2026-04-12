@@ -65,10 +65,7 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Enhancements
 
-* **Enhanced `MemmapWriter`**: Now supports AudioTree objects with automatic schema inference. Set `infer_schema=True` (default) to automatically detect and decompose AudioTree objects without manual `FieldSpec` creation. Metadata PyTrees (nested dicts) are preserved and can be reconstructed on read. Accepts a single `AudioTree` directly in `write_batch()` and `write_sample()` (not just `Dict[str, AudioTree]`). Fields are stored without a prefix and the manifest includes `"single_audiotree": true` so that `MemmapDataSource` can return an `AudioTree` directly.
-* **Enhanced `MemmapDataSource`**: Now supports automatic AudioTree reconstruction. Set `reconstruct_audiotree=True` (default) to automatically rebuild AudioTree objects from flattened fields based on manifest metadata. When a dataset was written with a single `AudioTree`, `__getitem__()` and `get_slice()` return an `AudioTree` directly instead of a dict. Supports train/val/test splits via `split`, `split_ratios`, and `split_seed` parameters. Use `load_into_memory=True` to load the entire dataset into RAM for faster access.
 * **Enhanced loudness computation**: `AudioTree.replace_loudness()` now uses the [loudness](https://github.com/iver56/loudness/) library for numpy arrays and [jaxloudnorm](https://github.com/DBraun/jaxloudnorm) for JAX arrays.
-* **New module**: `audiotree_utils.py` with `AudioTreeFieldExtractor` class for decomposing and reconstructing AudioTree objects from flat arrays.
 
 ### Testing & Documentation
 
