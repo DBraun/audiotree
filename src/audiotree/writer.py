@@ -29,6 +29,12 @@ class AudioWriter:
         compress_manifest: Whether to compress NPZ manifest files (only applies to npz format)
         write_audio: Whether to write audio files to disk (default True). When False,
             only manifest is generated with metadata
+        subtype: Optional soundfile subtype string (e.g. ``"PCM_16"``, ``"PCM_24"``,
+            ``"FLOAT"``). Forwarded to ``soundfile.write``. When ``None`` (default),
+            soundfile picks its format default — ``PCM_16`` for WAV. Use ``"PCM_24"``
+            or ``"FLOAT"`` when writing quiet / high-dynamic-range material that will
+            be read back after further processing, to avoid 16-bit quantization
+            artifacts.
         pbar: Optional tqdm progress bar instance to update during writing
         close_pbar: Whether to close the progress bar on exit (default False)
         show_progress: Create an internal tqdm progress bar (requires tqdm installed)
@@ -56,6 +62,7 @@ class AudioWriter:
         include_timestamp: bool = False,
         compress_manifest: bool = True,
         write_audio: bool = True,
+        subtype: Optional[str] = None,
         pbar: Optional[Any] = None,
         close_pbar: bool = False,
         show_progress: bool = False,
@@ -68,6 +75,7 @@ class AudioWriter:
         self.include_timestamp = include_timestamp
         self.compress_manifest = compress_manifest
         self.write_audio = write_audio
+        self.subtype = subtype
         self.index = 0
         self.written_paths = []
         self.manifest_data = []
@@ -157,7 +165,9 @@ class AudioWriter:
             if self.write_audio:
                 # Convert to numpy and transpose for soundfile (channels, samples) -> (samples, channels)
                 audio = np.array(tree.audio_data[i].T)
-                soundfile.write(str(filepath), audio, tree.sample_rate)
+                soundfile.write(
+                    str(filepath), audio, tree.sample_rate, subtype=self.subtype
+                )
                 self.written_paths.append(filepath)
 
             paths.append(filepath)
