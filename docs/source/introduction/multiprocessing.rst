@@ -238,7 +238,7 @@ add an extra dimension.
     iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
 
     for batch in iter_ds:
-        print(batch.audio_data.shape)  # (32, channels, samples)
+        print(batch.waveform.shape)  # (32, channels, samples)
 
 ``batch_fn`` also handles dict structures containing AudioTrees:
 
@@ -249,7 +249,7 @@ add an extra dimension.
 
     for batch in iter_ds:
         # batch is a dict with batched AudioTrees
-        print(batch["src"].audio_data.shape)  # (32, channels, samples)
+        print(batch["src"].waveform.shape)  # (32, channels, samples)
 
 See :ref:`dict_batches` for more details on working with dict structures.
 
@@ -291,8 +291,8 @@ Common Patterns
             break
 
         # Convert to JAX array and train
-        audio_data = jnp.array(batch.audio_data)  # (32, channels, samples)
-        loss = train_step(audio_data)
+        waveform = jnp.array(batch.waveform)  # (32, channels, samples)
+        loss = train_step(waveform)
 
 **Validation with Deterministic Order**
 
@@ -469,8 +469,8 @@ Complete example with batching and all optimizations:
             break
 
         # Your training code here
-        audio_data = jnp.array(batch.audio_data)  # (32, channels, samples)
-        loss = train_step(audio_data)
+        waveform = jnp.array(batch.waveform)  # (32, channels, samples)
+        loss = train_step(waveform)
 
         if step % 1000 == 0:
             print(f"Step {step}, Loss: {loss}")

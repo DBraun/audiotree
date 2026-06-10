@@ -278,8 +278,8 @@ Full example using dict batches with scope:
             break
 
         # Extract clean and augmented
-        clean = jax.numpy.array(batch['clean'].audio_data)
-        augmented = jax.numpy.array(batch['augmented'].audio_data)
+        clean = jax.numpy.array(batch['clean'].waveform)
+        augmented = jax.numpy.array(batch['augmented'].waveform)
 
         # Train model
         loss = train_step(clean, augmented)
@@ -570,8 +570,8 @@ Full training pipeline with dict batches:
             break
 
         # Extract signals
-        dry = jax.numpy.array(batch['dry'].audio_data)
-        wet = jax.numpy.array(batch['wet'].audio_data)
+        dry = jax.numpy.array(batch['dry'].waveform)
+        wet = jax.numpy.array(batch['wet'].waveform)
 
         # Train
         loss = train_step(dry, wet)
@@ -751,7 +751,7 @@ by default with shape ``(batch, channels, samples)``.
     iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
 
     for batch in iter_ds:
-        print(batch.audio_data.shape)  # (32, channels, samples)
+        print(batch.waveform.shape)  # (32, channels, samples)
 
 **Batching dict structures:**
 
@@ -774,8 +774,8 @@ by default with shape ``(batch, channels, samples)``.
 
     for batch in iter_ds:
         # batch is {"src": AudioTree, "tgt": AudioTree} with batched arrays
-        print(batch["src"].audio_data.shape)  # (32, channels, samples)
-        print(batch["tgt"].audio_data.shape)  # (32, channels, samples)
+        print(batch["src"].waveform.shape)  # (32, channels, samples)
+        print(batch["tgt"].waveform.shape)  # (32, channels, samples)
 
 **Nested structures:**
 
@@ -828,8 +828,8 @@ they have a leading batch dimension.
     )
 
     for batch in iter_ds:
-        clean = batch["clean"].audio_data      # (32, channels, samples)
-        augmented = batch["augmented"].audio_data  # (32, channels, samples)
+        clean = batch["clean"].waveform  # (32, channels, samples)
+        augmented = batch["augmented"].waveform  # (32, channels, samples)
         # Train model...
 
 See Also

@@ -87,8 +87,8 @@ class AudioTree:
         .. _flax.struct.dataclass: https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass
 
     Args:
-        audio_data (jnp.ndarray): Audio waveform data shaped ``(Samples)``, ``(Channels, Samples)``, or ``(Batch, Channels, Samples)``
-        sample_rate (int): Sample rate of ``audio_data``, such as 44100 Hz.
+        waveform (jnp.ndarray): Audio waveform data shaped ``(Samples)``, ``(Channels, Samples)``, or ``(Batch, Channels, Samples)``
+        sample_rate (int): Sample rate of ``waveform``, such as 44100 Hz.
         loudness (jnp.ndarray, optional): Loudness of the audio waveform in LUFs. You may not need to set this when initializing. Instead,
             use ``replace_loudness()`` to create a new AudioTree with ``loudness`` calculated.
         pitch (jnp.ndarray, optional): The MIDI pitch where 60 is middle C. The shape is ``(Batch,)``.
@@ -104,7 +104,7 @@ class AudioTree:
         If new fields are added to this class, update ``_AUDIOTREE_FIELDS`` in ``audiotree/writer.py``.
     """
 
-    audio_data: np.ndarray
+    waveform: np.ndarray
     sample_rate: int = struct.field(pytree_node=False)
     loudness: np.ndarray = None
     pitch: np.ndarray = None
@@ -117,7 +117,7 @@ class AudioTree:
     @classmethod
     def create(
         cls,
-        audio_data: np.ndarray,
+        waveform: np.ndarray,
         sample_rate: int,
         loudness: np.ndarray = None,
         pitch: np.ndarray = None,
@@ -130,10 +130,10 @@ class AudioTree:
     ) -> Self:
         """Create an AudioTree with automatic audio dimensionality handling and filepath processing."""
         # Handle audio dimensionality - ensure it's (Batch, Channels, Samples)
-        if audio_data.ndim == 1:
-            audio_data = audio_data[None, None, :]  # Add batch and channel dimension
-        elif audio_data.ndim == 2:
-            audio_data = audio_data[None, :, :]  # Add batch dimension
+        if waveform.ndim == 1:
+            waveform = waveform[None, None, :]  # Add batch and channel dimension
+        elif waveform.ndim == 2:
+            waveform = waveform[None, :, :]  # Add batch dimension
 
         # Handle metadata and filepaths
         if metadata is None:
@@ -145,7 +145,7 @@ class AudioTree:
             metadata["filepath"] = cls._encode_filepaths(filepaths)
 
         return cls(
-            audio_data=audio_data,
+            waveform=waveform,
             sample_rate=sample_rate,
             loudness=loudness,
             pitch=pitch,
@@ -174,14 +174,14 @@ class AudioTree:
 
             Will raise ValueError if audio has more than 5 channels.
         """
-        if isinstance(self.audio_data, np.ndarray):
+        if isinstance(self.waveform, np.ndarray):
             # integrated_loudness requires at least 400ms of audio
             min_samples = int(np.ceil(0.4 * self.sample_rate))
-            audio_data = self.audio_data
-            if audio_data.shape[-1] < min_samples:
-                pad_right = min_samples - audio_data.shape[-1]
-                audio_data = np.pad(audio_data, ((0, 0), (0, 0), (0, pad_right)))
-            audio_transposed = np.transpose(audio_data, (0, 2, 1)) # [B, T, C]
+            waveform = self.waveform
+            if waveform.shape[-1] < min_samples:
+                pad_right = min_samples - waveform.shape[-1]
+                waveform = np.pad(waveform, ((0, 0), (0, 0), (0, pad_right)))
+            audio_transposed = np.transpose(waveform, (0, 2, 1)) # [B, T, C]
             loudness_values = []
             for audio_item in audio_transposed:
                 lufs = loudness.integrated_loudness(audio_item, self.sample_rate)
@@ -189,7 +189,7 @@ class AudioTree:
             loudness_array = np.array(loudness_values, dtype=np.float32)
         else:
             loudness_array = jit_integrated_loudness(
-                jnp.array(self.audio_data), self.sample_rate, zeros=512
+                jnp.array(self.waveform), self.sample_rate, zeros=512
             )
         return self.replace(loudness=loudness_array)
 
@@ -198,7 +198,7 @@ class AudioTree:
 
         Computes the current loudness (if not already set), then scales the audio
         to achieve the target LUFS. The returned AudioTree has both updated
-        ``audio_data`` and ``loudness`` fields.
+        ``waveform`` and ``loudness`` fields.
 
         Args:
             target_lufs: Target loudness in LUFS (e.g., -18.0 for broadcast standard).
@@ -217,17 +217,17 @@ class AudioTree:
         else:
             tree = self
 
-        numpy = np if isinstance(self.audio_data, np.ndarray) else jnp
+        numpy = np if isinstance(self.waveform, np.ndarray) else jnp
         linear_gain = numpy.power(10.0, (target_lufs - tree.loudness) / 20.0)
         # Cast to audio dtype to avoid float64 promotion
-        linear_gain = linear_gain.astype(tree.audio_data.dtype)
+        linear_gain = linear_gain.astype(tree.waveform.dtype)
         # Expand gain for broadcasting: [B] -> [B, 1, 1] for [B, C, T] audio
         linear_gain = linear_gain[:, None, None]
-        scaled_audio = tree.audio_data * linear_gain
+        scaled_waveform = tree.waveform * linear_gain
 
         # Update loudness to target (shape [B])
         target_loudness = numpy.full(tree.loudness.shape, target_lufs, dtype=numpy.float32)
-        return tree.replace(audio_data=scaled_audio, loudness=target_loudness)
+        return tree.replace(waveform=scaled_waveform, loudness=target_loudness)
 
     @staticmethod
     def _encode_string(s: str) -> np.ndarray:
@@ -294,6 +294,11 @@ class AudioTree:
         if "source" not in self.metadata:
             return []
         return [self._decode_string(data) for data in self.metadata["source"]]
+
+    @property
+    def samples(self) -> int:
+        """Return the number of samples in the ``waveform`` (its last dimension)."""
+        return self.waveform.shape[-1]
 
     @classmethod
     def from_file(
@@ -413,7 +418,7 @@ class AudioTree:
                 return val
 
         return cls(
-            audio_data=data,
+            waveform=data,
             sample_rate=sample_rate,
             metadata=combined_metadata,
             loudness=wrap_if_scalar(loudness, np.float32),
@@ -447,7 +452,7 @@ class AudioTree:
         Example:
             >>> # Load all items from manifest
             >>> tree = AudioTree.from_manifest("output/manifest.npz")
-            >>> tree.audio_data.shape
+            >>> tree.waveform.shape
             (100, 2, 44100)  # 100 items, stereo, 1 second each
 
             >>> # Load with filtering
@@ -503,7 +508,7 @@ class AudioTree:
         # Check if audio files exist
         if files_written:
             # Load audio from files
-            audio_data = []
+            waveform = []
             for idx in indices:
                 filename = manifest_data['filename'][idx]
                 audio_path = audio_dir / filename
@@ -518,12 +523,12 @@ class AudioTree:
                 elif data.ndim == 2:
                     pass  # Already (channels, samples)
 
-                audio_data.append(data)
+                waveform.append(data)
 
-            audio_data = np.stack(audio_data, axis=0)  # (batch, channels, samples)
+            waveform = np.stack(waveform, axis=0)  # (batch, channels, samples)
         else:
             # No audio files - create zeros
-            audio_data = np.zeros((len(indices), channels, samples), dtype=np.float32)
+            waveform = np.zeros((len(indices), channels, samples), dtype=np.float32)
 
         # Build metadata dictionary
         metadata = {}
@@ -545,7 +550,7 @@ class AudioTree:
             if field_name in manifest_data:
                 tree_kwargs[field_name] = manifest_data[field_name][indices]
 
-        return cls.create(audio_data, **tree_kwargs)
+        return cls.create(waveform, **tree_kwargs)
 
     @classmethod
     def excerpt(
@@ -640,7 +645,7 @@ class AudioTree:
                 new_excerpt = cls.from_file(
                     audio_path=audio_path, offset=random_offset, **kwargs
                 )
-                if new_excerpt.audio_data.shape[-1] == 0:
+                if new_excerpt.waveform.shape[-1] == 0:
                     logging.warning(
                         f"Empty audio loaded from {audio_path} at offset "
                         f"{random_offset:.2f}s (file_duration={file_duration:.2f}s)"
@@ -656,29 +661,29 @@ class AudioTree:
         return excerpt
 
     def to_mono(self) -> Self:
-        """Reduce the ``audio_data`` to mono.
+        """Reduce the ``waveform`` to mono.
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
         """
-        audio_data = self.audio_data
-        B, C, T = audio_data.shape
+        waveform = self.waveform
+        B, C, T = waveform.shape
         if C == 1:
             return self
-        audio_data = audio_data.mean(axis=1, keepdims=True)
-        return self.replace(audio_data=audio_data, loudness=None)
+        waveform = waveform.mean(axis=1, keepdims=True)
+        return self.replace(waveform=waveform, loudness=None)
 
     def to_stereo(self) -> Self:
-        """Make the ``audio_data`` stereo.
+        """Make the ``waveform`` stereo.
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
         """
-        audio_data = self.audio_data
-        B, C, T = audio_data.shape
+        waveform = self.waveform
+        B, C, T = waveform.shape
         if C == 1:
-            audio_data = np.tile(audio_data, (1, 2, 1))
-            return self.replace(audio_data=audio_data)
+            waveform = np.tile(waveform, (1, 2, 1))
+            return self.replace(waveform=waveform)
         elif C == 2:
             return self
         else:
@@ -693,7 +698,7 @@ class AudioTree:
         full: bool = False,
     ) -> Self:
         """
-        Resample the AudioTree's ``audio_data`` to a new sample rate. The algorithm is a JAX port of ``ResampleFrac``
+        Resample the AudioTree's ``waveform`` to a new sample rate. The algorithm is a JAX port of ``ResampleFrac``
         from the PyTorch library `Julius`_.
 
         .. _Julius: https://github.com/adefossez/julius/blob/main/julius/resample.py
@@ -718,8 +723,8 @@ class AudioTree:
         """
         if sample_rate == self.sample_rate:
             return self
-        audio_data = resample(
-            self.audio_data,
+        waveform = resample(
+            self.waveform,
             self.sample_rate,
             sample_rate,
             zeros=zeros,
@@ -728,7 +733,7 @@ class AudioTree:
             full=full,
         )
         return self.replace(
-            audio_data=audio_data, sample_rate=sample_rate, loudness=None
+            waveform=waveform, sample_rate=sample_rate, loudness=None
         )
 
     def split(self, n_splits: int) -> List[Self]:
@@ -746,15 +751,15 @@ class AudioTree:
 
         Example:
             >>> big_tree = AudioTree(np.zeros((12, 1, 44100)), 44100)
-            >>> big_tree.audio_data.shape
+            >>> big_tree.waveform.shape
             (12, 1, 44100)
             >>> split_trees = big_tree.split(2)
             >>> len(split_trees)
             2
-            >>> split_trees[0].audio_data.shape
+            >>> split_trees[0].waveform.shape
             (6, 1, 44100)  # Each tree has half the original batch size
         """
-        total_batch_size = self.audio_data.shape[0]
+        total_batch_size = self.waveform.shape[0]
         assert total_batch_size % n_splits == 0, \
             f"Total batch size {total_batch_size} must be divisible by number of splits {n_splits}"
 
@@ -781,10 +786,10 @@ class AudioTree:
         Example:
             >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
             >>> x_batched = x.reshape_mini_batches(3)
-            >>> x_batched.audio_data.shape
+            >>> x_batched.waveform.shape
             (4, 3, 1, 44100)  # 4 mini-batches of size 3
         """
-        B, C, _ = self.audio_data.shape
+        B, C, _ = self.waveform.shape
 
         # Calculate number of mini-batches (assuming B is evenly divisible)
         assert B % mini_batch_size == 0
@@ -812,17 +817,17 @@ class AudioTree:
         Example:
             >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
             >>> x_batched = x.reshape_mini_batches(3)
-            >>> x_batched.audio_data.shape
+            >>> x_batched.waveform.shape
             (4, 3, 1, 44100)  # 4 mini-batches of size 3
             >>> x_unbatched = x_batched.flatten_mini_batches()
-            >>> x_unbatched.audio_data.shape
+            >>> x_unbatched.waveform.shape
             (12, 1, 44100)  # Back to original shape
         """
-        # Assuming the audio_data has shape (num_mini_batches, mini_batch_size, C, T)
+        # Assuming the waveform has shape (num_mini_batches, mini_batch_size, C, T)
         # We want to reshape to (num_mini_batches * mini_batch_size, C, T)
 
         # Get the current shape
-        shape = self.audio_data.shape
+        shape = self.waveform.shape
 
         # We expect at least 4 dimensions for mini-batched data
         assert len(shape) >= 4, (
@@ -840,11 +845,11 @@ class AudioTree:
         return flattened_audio_tree
 
     def filter(self, filter_fn: Callable) -> Self:
-        B = self.audio_data.shape[0]
+        B = self.waveform.shape[0]
         audio_trees = self.split(B)
         audio_trees = list(filter(filter_fn, audio_trees))
 
-        numpy = np if isinstance(self.audio_data, np.ndarray) else jnp
+        numpy = np if isinstance(self.waveform, np.ndarray) else jnp
 
         if len(audio_trees) == 0:
             return tree_util.tree_map(
@@ -882,7 +887,7 @@ class AudioTree:
             >>> ds = create_audio_dataset("/path/to/audio", duration=1.0)
             >>> iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
             >>> for batch in iter_ds:
-            ...     print(batch.audio_data.shape)  # (32, channels, samples)
+            ...     print(batch.waveform.shape)  # (32, channels, samples)
         """
         items = list(items)
 

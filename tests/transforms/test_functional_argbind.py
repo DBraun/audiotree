@@ -37,9 +37,9 @@ with argbind.scope(args):
         sample_rate=44100,
     )
     result = transform.map(audio_tree)
-    print(f"Length: {result.audio_data.shape[-1]}")
+    print(f"Length: {result.waveform.shape[-1]}")
     expected = int(4.0 * 44100)
-    assert result.audio_data.shape[-1] == expected, f"Expected {expected}, got {result.audio_data.shape[-1]}"
+    assert result.waveform.shape[-1] == expected, f"Expected {expected}, got {result.waveform.shape[-1]}"
     print("SUCCESS")
 '''
 
@@ -191,7 +191,7 @@ with argbind.scope(args):
     )
     result = transform.map(audio_tree)
     expected = int(4.0 * 44100)
-    assert result.audio_data.shape[-1] == expected, f"Expected {{expected}}, got {{result.audio_data.shape[-1]}}"
+    assert result.waveform.shape[-1] == expected, f"Expected {{expected}}, got {{result.waveform.shape[-1]}}"
     print("SUCCESS")
 '''
 

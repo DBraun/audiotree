@@ -16,19 +16,19 @@ def test_basic_write_audiotree():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         audio = np.random.randn(5, 2, 100).astype(np.float32)
-        tree = AudioTree(audio_data=audio, sample_rate=44100)
+        tree = AudioTree(waveform=audio, sample_rate=44100)
 
         with TreeWriter(output_dir, expected_samples=5) as w:
             w.write(tree)
 
-        assert (output_dir / "audio_data.bin").exists()
+        assert (output_dir / "waveform.bin").exists()
         assert (output_dir / "manifest.json").exists()
 
         with open(output_dir / "manifest.json") as f:
             manifest = json.load(f)
         assert manifest["version"] == "2.0"
         assert manifest["num_samples"] == 5
-        assert "audio_data" in manifest["leaves"]
+        assert "waveform" in manifest["leaves"]
 
 
 def test_manifest_structure_audiotree():
@@ -36,7 +36,7 @@ def test_manifest_structure_audiotree():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((3, 1, 50), dtype=np.float32),
+            waveform=np.zeros((3, 1, 50), dtype=np.float32),
             sample_rate=48000,
             loudness=np.zeros(3, dtype=np.float32),
         )
@@ -50,7 +50,7 @@ def test_manifest_structure_audiotree():
         structure = manifest["structure"]
         assert structure["type"] == "AudioTree"
         assert structure["sample_rate"] == 48000
-        assert "audio_data" in structure["children"]
+        assert "waveform" in structure["children"]
         assert "loudness" in structure["children"]
         # pitch etc. should be absent (None)
         assert "pitch" not in structure["children"]
@@ -61,7 +61,7 @@ def test_write_audiotree_with_metadata():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((3, 2, 100), dtype=np.float32),
+            waveform=np.zeros((3, 2, 100), dtype=np.float32),
             sample_rate=44100,
             metadata={"mel": np.zeros((3, 32), dtype=np.float32)},
         )
@@ -81,7 +81,7 @@ def test_write_audiotree_nested_metadata():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((2, 1, 50), dtype=np.float32),
+            waveform=np.zeros((2, 1, 50), dtype=np.float32),
             sample_rate=44100,
             metadata={
                 "features": {
@@ -103,19 +103,19 @@ def test_write_dict_of_audiotrees():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         dry = AudioTree(
-            audio_data=np.zeros((3, 2, 100), dtype=np.float32),
+            waveform=np.zeros((3, 2, 100), dtype=np.float32),
             sample_rate=44100,
         )
         wet = AudioTree(
-            audio_data=np.zeros((3, 2, 100), dtype=np.float32),
+            waveform=np.zeros((3, 2, 100), dtype=np.float32),
             sample_rate=44100,
         )
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write({"dry": dry, "wet": wet})
 
-        assert (output_dir / "dry.audio_data.bin").exists()
-        assert (output_dir / "wet.audio_data.bin").exists()
+        assert (output_dir / "dry.waveform.bin").exists()
+        assert (output_dir / "wet.waveform.bin").exists()
 
 
 def test_write_plain_dict():
@@ -143,7 +143,7 @@ def test_none_fields_excluded():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((3, 1, 50), dtype=np.float32),
+            waveform=np.zeros((3, 1, 50), dtype=np.float32),
             sample_rate=44100,
             # pitch, velocity, etc. are all None
         )
@@ -161,11 +161,11 @@ def test_multiple_writes():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree1 = AudioTree(
-            audio_data=np.ones((3, 1, 10), dtype=np.float32),
+            waveform=np.ones((3, 1, 10), dtype=np.float32),
             sample_rate=44100,
         )
         tree2 = AudioTree(
-            audio_data=np.ones((2, 1, 10), dtype=np.float32) * 2,
+            waveform=np.ones((2, 1, 10), dtype=np.float32) * 2,
             sample_rate=44100,
         )
 
@@ -183,11 +183,11 @@ def test_shape_validation():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree1 = AudioTree(
-            audio_data=np.zeros((3, 2, 100), dtype=np.float32),
+            waveform=np.zeros((3, 2, 100), dtype=np.float32),
             sample_rate=44100,
         )
         tree2 = AudioTree(
-            audio_data=np.zeros((2, 2, 200), dtype=np.float32),  # wrong samples dim
+            waveform=np.zeros((2, 2, 200), dtype=np.float32),  # wrong samples dim
             sample_rate=44100,
         )
 
@@ -202,7 +202,7 @@ def test_overflow_trimming():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         audio = np.arange(30, dtype=np.float32).reshape(3, 1, 10)
-        tree = AudioTree(audio_data=audio, sample_rate=44100)
+        tree = AudioTree(waveform=audio, sample_rate=44100)
 
         with TreeWriter(output_dir, expected_samples=2) as w:
             n = w.write(tree)
@@ -214,7 +214,7 @@ def test_overflow_trimming():
 
         # Memmap should contain only the first 2 samples
         mm = np.memmap(
-            output_dir / "audio_data.bin", dtype=np.float32, mode="r", shape=(2, 1, 10)
+            output_dir / "waveform.bin", dtype=np.float32, mode="r", shape=(2, 1, 10)
         )
         np.testing.assert_array_equal(mm[0], audio[0])
         np.testing.assert_array_equal(mm[1], audio[1])
@@ -226,7 +226,7 @@ def test_overflow_returns_zero_when_full():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((2, 1, 10), dtype=np.float32),
+            waveform=np.zeros((2, 1, 10), dtype=np.float32),
             sample_rate=44100,
         )
 
@@ -241,7 +241,7 @@ def test_undershoot_truncates_memmaps():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         audio = np.arange(20, dtype=np.float32).reshape(2, 1, 10)
-        tree = AudioTree(audio_data=audio, sample_rate=44100)
+        tree = AudioTree(waveform=audio, sample_rate=44100)
 
         with TreeWriter(output_dir, expected_samples=100) as w:
             w.write(tree)  # write only 2 of 100
@@ -252,7 +252,7 @@ def test_undershoot_truncates_memmaps():
         assert manifest["expected_samples"] == 100
 
         # Memmap file should be truncated to actual size (2 samples)
-        filepath = output_dir / "audio_data.bin"
+        filepath = output_dir / "waveform.bin"
         expected_bytes = 2 * 1 * 10 * 4  # 2 samples * shape * float32
         assert filepath.stat().st_size == expected_bytes
 
@@ -267,7 +267,7 @@ def test_flush():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         audio = np.array([[[1.0, 2.0]]], dtype=np.float32)  # (1, 1, 2)
-        tree = AudioTree(audio_data=audio, sample_rate=44100)
+        tree = AudioTree(waveform=audio, sample_rate=44100)
 
         writer = TreeWriter(output_dir, expected_samples=5)
         writer.open()
@@ -275,7 +275,7 @@ def test_flush():
         writer.flush()
 
         mm = np.memmap(
-            output_dir / "audio_data.bin",
+            output_dir / "waveform.bin",
             dtype=np.float32,
             mode="r",
             shape=(5, 1, 2),
@@ -293,7 +293,7 @@ def test_context_manager():
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             tree = AudioTree(
-                audio_data=np.zeros((3, 1, 10), dtype=np.float32),
+                waveform=np.zeros((3, 1, 10), dtype=np.float32),
                 sample_rate=44100,
             )
             w.write(tree)
@@ -308,7 +308,7 @@ def test_get_stats():
 
         with TreeWriter(output_dir, expected_samples=10) as w:
             tree = AudioTree(
-                audio_data=np.zeros((3, 1, 10), dtype=np.float32),
+                waveform=np.zeros((3, 1, 10), dtype=np.float32),
                 sample_rate=44100,
             )
             w.write(tree)
@@ -317,7 +317,7 @@ def test_get_stats():
             assert stats["samples_written"] == 3
             assert stats["expected_samples"] == 10
             assert stats["is_open"] is True
-            assert "audio_data" in stats["leaves"]
+            assert "waveform" in stats["leaves"]
 
 
 def test_different_dtypes():
@@ -345,7 +345,7 @@ def test_empty_metadata():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((2, 1, 10), dtype=np.float32),
+            waveform=np.zeros((2, 1, 10), dtype=np.float32),
             sample_rate=44100,
             metadata={},
         )
@@ -399,7 +399,7 @@ def test_write_string_list_with_audiotree():
         pytree = {
             "labels": ["cat", "dog", "bird"],
             "audio": AudioTree(
-                audio_data=np.zeros((3, 1, 100), dtype=np.float32),
+                waveform=np.zeros((3, 1, 100), dtype=np.float32),
                 sample_rate=44100,
             ),
         }
@@ -408,7 +408,7 @@ def test_write_string_list_with_audiotree():
             w.write(pytree)
 
         assert (output_dir / "labels.bagz").exists()
-        assert (output_dir / "audio.audio_data.bin").exists()
+        assert (output_dir / "audio.waveform.bin").exists()
 
         with open(output_dir / "manifest.json") as f:
             manifest = json.load(f)

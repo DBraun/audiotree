@@ -25,14 +25,14 @@ def test_istft_invariance(hop_factor: float, n_frames: int):
     length = hop_length * n_frames
     window = "hann"
 
-    audio_data = random.uniform(random.key(0), shape=(1, 1, length), minval=-0.5, maxval=0.5)
+    waveform = random.uniform(random.key(0), shape=(1, 1, length), minval=-0.5, maxval=0.5)
 
     stft_data = librosax.stft(
-        audio_data, n_fft=frame_length, hop_length=hop_length, window=window, center=True
+        waveform, n_fft=frame_length, hop_length=hop_length, window=window, center=True
     )
 
     recons = librosax.istft(
         stft_data, n_fft=frame_length, hop_length=hop_length, window=window, center=True, length=length
     )
 
-    assert jnp.allclose(recons, audio_data, atol=1e-5, rtol=1e-5)
+    assert jnp.allclose(recons, waveform, atol=1e-5, rtol=1e-5)

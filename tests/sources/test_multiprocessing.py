@@ -56,8 +56,8 @@ class TestMultithreading:
             count = 0
             for item in iter_ds:
                 assert isinstance(item, AudioTree)
-                assert item.audio_data.shape[0] == 1  # batch size 1
-                assert item.audio_data.shape[1] == 1  # mono
+                assert item.waveform.shape[0] == 1  # batch size 1
+                assert item.waveform.shape[1] == 1  # mono
                 assert item.sample_rate == 44100
                 count += 1
 
@@ -92,7 +92,7 @@ class TestMultithreading:
             sources_found = set()
             for item in iter_ds:
                 assert isinstance(item, AudioTree)
-                assert item.audio_data.shape[0] == 1  # batch size 1
+                assert item.waveform.shape[0] == 1  # batch size 1
                 assert item.sample_rate == 44100
                 sources_found.add(item.source[0])
                 count += 1
@@ -129,8 +129,8 @@ class TestMultiprocessing:
             count = 0
             for item in iter_ds:
                 assert isinstance(item, AudioTree)
-                assert item.audio_data.shape[0] == 1  # batch size 1
-                assert item.audio_data.shape[1] == 1  # mono
+                assert item.waveform.shape[0] == 1  # batch size 1
+                assert item.waveform.shape[1] == 1  # mono
                 assert item.sample_rate == 44100
                 count += 1
 
@@ -165,7 +165,7 @@ class TestMultiprocessing:
             sources_found = set()
             for item in iter_ds:
                 assert isinstance(item, AudioTree)
-                assert item.audio_data.shape[0] == 1  # batch size 1
+                assert item.waveform.shape[0] == 1  # batch size 1
                 assert item.sample_rate == 44100
                 sources_found.add(item.source[0])
                 count += 1

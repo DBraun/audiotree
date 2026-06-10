@@ -75,7 +75,7 @@ class TestBasicChaining:
             # Load item and verify transform was applied
             item = ds[0]
             expected_length = int(3.0 * 44100)
-            assert item.audio_data.shape[-1] == expected_length
+            assert item.waveform.shape[-1] == expected_length
 
     def test_multiple_transform_chain(self):
         """Test chaining multiple transforms."""
@@ -110,7 +110,7 @@ class TestBasicChaining:
 
             # Check Trim was applied
             expected_length = int(3.0 * 44100)
-            assert item.audio_data.shape[-1] == expected_length
+            assert item.waveform.shape[-1] == expected_length
 
 
 class TestBalancedDatasetChaining:
@@ -143,7 +143,7 @@ class TestBalancedDatasetChaining:
             # Verify transforms applied and source tracking preserved
             item = ds[0]
             assert item.loudness is not None
-            assert item.audio_data.shape[-1] == int(3.0 * 44100)
+            assert item.waveform.shape[-1] == int(3.0 * 44100)
             assert item.source[0] in ["group1", "group2"]
 
     def test_transform_order_matters(self):
@@ -178,8 +178,8 @@ class TestBalancedDatasetChaining:
             item1 = ds1[0]
             item2 = ds2[0]
 
-            assert item1.audio_data.shape[-1] == int(3.0 * 44100)
-            assert item2.audio_data.shape[-1] == int(3.0 * 44100)
+            assert item1.waveform.shape[-1] == int(3.0 * 44100)
+            assert item2.waveform.shape[-1] == int(3.0 * 44100)
             assert item1.loudness is not None
             assert item2.loudness is not None
 
@@ -214,7 +214,7 @@ class TestProbabilisticTransforms:
             # All items should load successfully
             assert len(items) == 20
             for item in items:
-                assert item.audio_data is not None
+                assert item.waveform is not None
 
 
 class TestLazyEvaluation:
@@ -274,4 +274,4 @@ class TestStereoMonoChaining:
 
             # Load item and verify it's mono
             item = ds[0]
-            assert item.audio_data.shape[1] == 1  # 1 channel
+            assert item.waveform.shape[1] == 1  # 1 channel

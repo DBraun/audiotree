@@ -51,7 +51,7 @@ def _reconstruct(node, leaf_values: Dict[str, Any]):
             val = _reconstruct(v, leaf_values)
             if val is not _EXCLUDED:
                 children[k] = val
-        children.setdefault("audio_data", None)
+        children.setdefault("waveform", None)
         return AudioTree(sample_rate=node["sample_rate"], **children)
 
     raise ValueError(f"Unknown structure node type: {node_type}")
@@ -61,7 +61,7 @@ def _is_excluded(name: str, exclude_prefixes: List[str]) -> bool:
     """Check if a leaf name matches any exclude prefix.
 
     Matching semantics: ``"dry"`` matches ``"dry"`` exactly or any name
-    starting with ``"dry."`` (e.g. ``"dry.audio_data"``), but does NOT
+    starting with ``"dry."`` (e.g. ``"dry.waveform"``), but does NOT
     match ``"dryness"``.
     """
     return any(name == p or name.startswith(p + ".") for p in exclude_prefixes)
@@ -84,8 +84,8 @@ class TreeDataSource(RandomAccessDataSource):
         raw: If True, return a flat Dict[str, np.ndarray] keyed by leaf path
             strings instead of reconstructing the pytree. Default False.
         exclude_prefixes: List of dot-separated leaf name prefixes to skip
-            loading. For example, ``["wet.audio_data"]`` skips the
-            ``wet.audio_data`` memmap, and ``["dry"]`` skips all leaves
+            loading. For example, ``["wet.waveform"]`` skips the
+            ``wet.waveform`` memmap, and ``["dry"]`` skips all leaves
             under the ``dry`` subtree. Excluded leaves are omitted from
             the reconstructed pytree (AudioTree fields default to None).
             Default: load all leaves.
@@ -108,9 +108,9 @@ class TreeDataSource(RandomAccessDataSource):
         >>> sample = ds[0]
         >>> print(type(sample))  # <class 'AudioTree'>
 
-        >>> ds = TreeDataSource("dataset/", exclude_prefixes=["wet.audio_data"])
+        >>> ds = TreeDataSource("dataset/", exclude_prefixes=["wet.waveform"])
         >>> sample = ds[0]
-        >>> assert sample["wet"].audio_data is None  # excluded
+        >>> assert sample["wet"].waveform is None  # excluded
 
         >>> ds = TreeDataSource("dataset/", load_into_memory=True)
         >>> sample = ds[0]  # reads from RAM, no disk I/O

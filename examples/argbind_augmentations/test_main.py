@@ -113,4 +113,4 @@ def test_trim_binding():
         audio_tree_trimmed = transform.map(audio_tree)
 
     expected_length = int(1.0 * 44100)
-    assert audio_tree_trimmed.audio_data.shape[-1] == expected_length
+    assert audio_tree_trimmed.waveform.shape[-1] == expected_length

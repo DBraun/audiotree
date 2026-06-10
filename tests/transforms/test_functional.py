@@ -91,7 +91,7 @@ class TestRandomTransformDecorator:
         result = transform.random_map(audio_tree, rng)
 
         # Verify audio was changed
-        assert not np.array_equal(result.audio_data, audio_tree.audio_data)
+        assert not np.array_equal(result.waveform, audio_tree.waveform)
 
     def test_invert_phase_basic(self):
         """Test invert_phase function transform."""
@@ -109,8 +109,8 @@ class TestRandomTransformDecorator:
 
         # Verify phase was inverted
         np.testing.assert_array_almost_equal(
-            result.audio_data,
-            -audio_tree.audio_data,
+            result.waveform,
+            -audio_tree.waveform,
         )
 
 
@@ -132,7 +132,7 @@ class TestMapTransformDecorator:
 
         # Verify length
         expected_length = int(3.0 * 44100)
-        assert result.audio_data.shape[-1] == expected_length
+        assert result.waveform.shape[-1] == expected_length
 
     def test_trim_shorter_audio(self):
         """Test trim with audio shorter than target pads audio."""
@@ -148,7 +148,7 @@ class TestMapTransformDecorator:
         result = transform.map(audio_tree)
 
         # Audio should be padded to target length
-        assert result.audio_data.shape[-1] == int(5.0 * 44100)
+        assert result.waveform.shape[-1] == int(5.0 * 44100)
 
     def test_mono_conversion(self):
         """Test mono function transform."""
@@ -164,7 +164,7 @@ class TestMapTransformDecorator:
         result = transform.map(audio_tree)
 
         # Verify mono
-        assert result.audio_data.shape[1] == 1
+        assert result.waveform.shape[1] == 1
 
     def test_stereo_conversion(self):
         """Test stereo function transform."""
@@ -180,7 +180,7 @@ class TestMapTransformDecorator:
         result = transform.map(audio_tree)
 
         # Verify stereo
-        assert result.audio_data.shape[1] == 2
+        assert result.waveform.shape[1] == 2
 
 
 class TestDatasetChaining:
@@ -209,7 +209,7 @@ class TestDatasetChaining:
 
             # Verify transforms were applied
             assert item.loudness is not None
-            assert item.audio_data.shape[-1] == int(3.0 * 44100)
+            assert item.waveform.shape[-1] == int(3.0 * 44100)
 
     def test_multiple_random_transforms(self):
         """Test chaining multiple random transforms."""
@@ -289,7 +289,7 @@ class TestArgBindIntegration:
 
         # Verify length
         expected_length = int(2.0 * 44100)
-        assert result.audio_data.shape[-1] == expected_length
+        assert result.waveform.shape[-1] == expected_length
 
     def test_bind_with_dataset(self):
         """Test argbind with dataset chaining."""
@@ -326,7 +326,7 @@ class TestArgBindIntegration:
 
             # Verify transforms applied with correct parameters
             assert item.loudness is not None
-            assert item.audio_data.shape[-1] == int(3.0 * 44100)
+            assert item.waveform.shape[-1] == int(3.0 * 44100)
 
 
 class TestDefaultParameters:
@@ -365,4 +365,4 @@ class TestDefaultParameters:
 
         # Verify default length was used
         expected_length = int(1.0 * 44100)
-        assert result.audio_data.shape[-1] == expected_length
+        assert result.waveform.shape[-1] == expected_length

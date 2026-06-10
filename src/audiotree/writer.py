@@ -10,7 +10,7 @@ import soundfile
 from .core import AudioTree
 
 
-# AudioTree fields that should be tracked (excluding audio_data, sample_rate, metadata)
+# AudioTree fields that should be tracked (excluding waveform, sample_rate, metadata)
 _AUDIOTREE_FIELDS = ['loudness', 'pitch', 'velocity', 'note_duration', 'codes', 'latents']
 
 
@@ -152,7 +152,7 @@ class AudioWriter:
                     f"All AudioTrees written to the same manifest must have consistent fields."
                 )
 
-        batch_size = tree.audio_data.shape[0]
+        batch_size = tree.waveform.shape[0]
         paths = []
 
         for i in range(batch_size):
@@ -164,7 +164,7 @@ class AudioWriter:
             # Write audio file if requested
             if self.write_audio:
                 # Convert to numpy and transpose for soundfile (channels, samples) -> (samples, channels)
-                audio = np.array(tree.audio_data[i].T)
+                audio = np.array(tree.waveform[i].T)
                 soundfile.write(
                     str(filepath), audio, tree.sample_rate, subtype=self.subtype
                 )
@@ -206,9 +206,9 @@ class AudioWriter:
             'index': np.int32(self.index),
             'filename': filename,
             'sample_rate': np.int32(tree.sample_rate),
-            'channels': np.int32(tree.audio_data.shape[1]),
-            'samples': np.int32(tree.audio_data.shape[2]),
-            'duration_seconds': np.float32(tree.audio_data.shape[2] / tree.sample_rate),
+            'channels': np.int32(tree.waveform.shape[1]),
+            'samples': np.int32(tree.waveform.shape[2]),
+            'duration_seconds': np.float32(tree.waveform.shape[2] / tree.sample_rate),
             'files_written': self.write_audio
         }
 

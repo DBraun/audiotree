@@ -56,9 +56,9 @@ def main():
     print("After again:", loudness_after)
 
     # Apply trim transform (deterministic - trims to specified length)
-    print("length:", audio_tree.audio_data.shape[-1])
+    print("length:", audio_tree.waveform.shape[-1])
     audio_tree = trim().map(audio_tree)
-    print("after length:", audio_tree.audio_data.shape[-1])
+    print("after length:", audio_tree.waveform.shape[-1])
 
 
 if __name__ == "__main__":

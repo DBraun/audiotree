@@ -16,8 +16,8 @@ def test_basic_sequential_writing():
         output_dir = Path(tmpdir)
 
         # Create test AudioTree with batch of 3
-        audio_data = np.random.randn(3, 2, 44100)  # 3 batch, 2 channels, 1 second
-        audio_tree = AudioTree.create(audio_data, sample_rate=44100)
+        waveform = np.random.randn(3, 2, 44100)  # 3 batch, 2 channels, 1 second
+        audio_tree = AudioTree.create(waveform, sample_rate=44100)
 
         # Write with AudioWriter
         with AudioWriter(output_dir, pattern="test_{index:03d}.wav") as writer:
@@ -167,9 +167,9 @@ def test_npz_manifest():
         output_dir = Path(tmpdir)
 
         # Create AudioTree with metadata
-        audio_data = np.random.randn(3, 1, 44100)
+        waveform = np.random.randn(3, 1, 44100)
         audio_tree = AudioTree.create(
-            audio_data,
+            waveform,
             sample_rate=44100,
             loudness=np.array([-20.0, -15.0, -18.0]),
             pitch=np.array([60.0, 62.0, 64.0]),
@@ -395,9 +395,9 @@ def test_manifest_datasource_npz():
         output_dir = Path(tmpdir)
 
         # Create and write AudioTree with metadata
-        audio_data = np.random.randn(3, 2, 16000)
+        waveform = np.random.randn(3, 2, 16000)
         audio_tree = AudioTree.create(
-            audio_data,
+            waveform,
             sample_rate=16000,
             loudness=np.array([-20.0, -15.0, -25.0]),
             pitch=np.array([60.0, 62.0, 58.0]),
@@ -417,7 +417,7 @@ def test_manifest_datasource_npz():
         # Check first item
         loaded_tree = source[0]
         assert loaded_tree.sample_rate == 16000
-        assert loaded_tree.audio_data.shape == (1, 2, 16000)
+        assert loaded_tree.waveform.shape == (1, 2, 16000)
         assert np.allclose(loaded_tree.loudness, [-20.0])
         assert np.allclose(loaded_tree.pitch, [60.0])
         assert np.allclose(loaded_tree.velocity, [64])
@@ -521,9 +521,9 @@ def test_manifest_only_generation():
         output_dir = Path(tmpdir)
 
         # Create AudioTree with metadata
-        audio_data = np.random.randn(3, 2, 22050)
+        waveform = np.random.randn(3, 2, 22050)
         audio_tree = AudioTree.create(
-            audio_data,
+            waveform,
             sample_rate=22050,
             loudness=np.array([-20.0, -18.0, -22.0]),
             pitch=np.array([60.0, 62.0, 64.0]),
@@ -769,7 +769,7 @@ def test_metadata_different_batch_sizes():
             assert loaded_tree.metadata['frame_id'][0] == expected_frame_id, f"Item {idx}: frame_id value mismatch"
 
             # Verify AudioTree field shapes
-            assert loaded_tree.audio_data.shape == (1, 1, 8000), f"Item {idx}: audio_data shape mismatch"
+            assert loaded_tree.waveform.shape == (1, 1, 8000), f"Item {idx}: waveform shape mismatch"
             assert loaded_tree.loudness is not None, f"Item {idx}: loudness should not be None"
             assert loaded_tree.loudness.shape == (1,), f"Item {idx}: loudness shape mismatch"
 
@@ -811,7 +811,7 @@ def test_audiotree_from_manifest():
         combined = AudioTree.from_manifest(output_dir / "manifest.npz")
 
         # Should have 2 + 3 = 5 items in batch dimension
-        assert combined.audio_data.shape == (5, 2, 8000)
+        assert combined.waveform.shape == (5, 2, 8000)
         assert combined.sample_rate == 8000
 
         # AudioTree fields should be concatenated
@@ -850,8 +850,8 @@ def test_audiotree_from_manifest_without_audio_files():
         combined = AudioTree.from_manifest(output_dir / "manifest.npz")
 
         # Should have correct shape with zero audio data
-        assert combined.audio_data.shape == (3, 2, 16000)
-        assert np.all(combined.audio_data == 0.0)
+        assert combined.waveform.shape == (3, 2, 16000)
+        assert np.all(combined.waveform == 0.0)
 
         # Metadata should be preserved
         assert combined.loudness.shape == (3,)
@@ -883,7 +883,7 @@ def test_audiotree_from_manifest_with_filter():
         )
 
         # Should only have 2 items: -18.0 and -15.0
-        assert filtered.audio_data.shape == (2, 1, 8000)
+        assert filtered.waveform.shape == (2, 1, 8000)
         assert filtered.loudness.shape == (2,)
         assert np.allclose(filtered.loudness, [-18.0, -15.0])
 
@@ -894,9 +894,9 @@ def test_manifest_datasource_without_audio_files():
         output_dir = Path(tmpdir)
 
         # Create AudioTree with metadata
-        audio_data = np.random.randn(3, 2, 16000)
+        waveform = np.random.randn(3, 2, 16000)
         audio_tree = AudioTree.create(
-            audio_data,
+            waveform,
             sample_rate=16000,
             loudness=np.array([-20.0, -15.0, -25.0]),
             pitch=np.array([60.0, 62.0, 58.0]),
@@ -927,8 +927,8 @@ def test_manifest_datasource_without_audio_files():
             assert loaded_tree.sample_rate == 16000
 
             # Audio data should be zeros with correct shape
-            assert loaded_tree.audio_data.shape == (1, 2, 16000)
-            assert np.all(loaded_tree.audio_data == 0.0)
+            assert loaded_tree.waveform.shape == (1, 2, 16000)
+            assert np.all(loaded_tree.waveform == 0.0)
 
             # Metadata should be preserved
             assert loaded_tree.loudness is not None
@@ -1033,16 +1033,16 @@ def test_write_filtered_empty_audiotree():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        audio_data = np.random.randn(3, 2, 44100)
+        waveform = np.random.randn(3, 2, 44100)
         audio_tree = AudioTree.create(
-            audio_data,
+            waveform,
             sample_rate=44100,
             loudness=np.array([-20.0, -15.0, -18.0])
         )
 
         filtered_tree = audio_tree.filter(lambda x: False)
 
-        assert filtered_tree.audio_data.shape[0] == 0
+        assert filtered_tree.waveform.shape[0] == 0
         assert filtered_tree.loudness.shape[0] == 0
 
         with AudioWriter(output_dir) as writer:
@@ -1068,7 +1068,7 @@ def test_write_empty_with_metadata_arrays():
             "frame_id": np.array([], dtype=np.int32)
         })
 
-        assert empty_tree.audio_data.shape == (0, 2, 44100)
+        assert empty_tree.waveform.shape == (0, 2, 44100)
         assert empty_tree.metadata['params'].shape == (0, 10)
         assert empty_tree.metadata['frame_id'].shape == (0,)
 
@@ -1082,9 +1082,9 @@ def test_write_empty_with_metadata_arrays():
 
 def test_filter_with_partial_match():
     """Test filtering AudioTree where some items match."""
-    audio_data = np.random.randn(5, 1, 8000)
+    waveform = np.random.randn(5, 1, 8000)
     audio_tree = AudioTree.create(
-        audio_data,
+        waveform,
         sample_rate=8000,
         loudness=np.array([-30.0, -18.0, -25.0, -15.0, -22.0])
     )
@@ -1094,7 +1094,7 @@ def test_filter_with_partial_match():
 
     filtered = audio_tree.filter(lambda x: x.loudness[0] > -20.0)
 
-    assert filtered.audio_data.shape[0] == 2
+    assert filtered.waveform.shape[0] == 2
     assert filtered.loudness.shape[0] == 2
     assert np.allclose(filtered.loudness, [-18.0, -15.0])
     assert filtered.metadata['params'].shape == (2, 10)
@@ -1102,9 +1102,9 @@ def test_filter_with_partial_match():
 
 def test_filter_with_no_match():
     """Test filtering AudioTree where no items match."""
-    audio_data = np.random.randn(3, 1, 8000)
+    waveform = np.random.randn(3, 1, 8000)
     audio_tree = AudioTree.create(
-        audio_data,
+        waveform,
         sample_rate=8000,
         loudness=np.array([-20.0, -18.0, -22.0])
     )
@@ -1114,23 +1114,23 @@ def test_filter_with_no_match():
 
     filtered = audio_tree.filter(lambda x: x.loudness[0] > 0.0)
 
-    assert filtered.audio_data.shape[0] == 0
+    assert filtered.waveform.shape[0] == 0
     assert filtered.loudness.shape[0] == 0
     assert filtered.metadata['params'].shape == (0, 10)
 
 
 def test_filter_with_all_match():
     """Test filtering AudioTree where all items match."""
-    audio_data = np.random.randn(3, 1, 8000)
+    waveform = np.random.randn(3, 1, 8000)
     audio_tree = AudioTree.create(
-        audio_data,
+        waveform,
         sample_rate=8000,
         loudness=np.array([-20.0, -18.0, -22.0])
     )
 
     filtered = audio_tree.filter(lambda x: x.loudness[0] < 0.0)
 
-    assert filtered.audio_data.shape[0] == 3
+    assert filtered.waveform.shape[0] == 3
     assert np.allclose(filtered.loudness, [-20.0, -18.0, -22.0])
 
 

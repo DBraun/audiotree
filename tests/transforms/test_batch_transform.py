@@ -17,11 +17,11 @@ def test_batch_transform_with_dataloader():
 
     for i in range(10):
         # Create fake audio data
-        audio_data = np.random.randn(1, num_samples).astype(np.float32)
+        waveform = np.random.randn(1, num_samples).astype(np.float32)
 
         # Create AudioTree with filepath metadata
         audio_tree = audiotree.AudioTree.create(
-            audio_data=audio_data,
+            waveform=waveform,
             sample_rate=sample_rate,
             filepaths=f"/fake/path/audio_{i:04d}.wav"
         )
@@ -42,7 +42,7 @@ def test_batch_transform_with_dataloader():
         batch_count += 1
 
         # Check that we have an AudioTree object
-        assert audio_tree.audio_data.ndim == 3
+        assert audio_tree.waveform.ndim == 3
 
         # Get the filepaths - should be a list of 4 (or less for last batch)
         filepaths = audio_tree.filepath
@@ -74,9 +74,9 @@ def test_batch_fn_with_iter_dataset():
     num_samples = int(sample_rate * duration)
 
     for i in range(10):
-        audio_data = np.random.randn(1, num_samples).astype(np.float32)
+        waveform = np.random.randn(1, num_samples).astype(np.float32)
         audio_tree = AudioTree.create(
-            audio_data=audio_data,
+            waveform=waveform,
             sample_rate=sample_rate,
             filepaths=f"/fake/path/audio_{i:04d}.wav"
         )
@@ -92,14 +92,14 @@ def test_batch_fn_with_iter_dataset():
         batch_count += 1
 
         # Verify shape: should be (batch, channels, samples), not (batch, 1, channels, samples)
-        assert batch.audio_data.ndim == 3, f"Expected 3D array, got {batch.audio_data.ndim}D"
+        assert batch.waveform.ndim == 3, f"Expected 3D array, got {batch.waveform.ndim}D"
 
         # Verify batch size
         if batch_count < 3:
-            assert batch.audio_data.shape[0] == 4
+            assert batch.waveform.shape[0] == 4
             assert len(batch.filepath) == 4
         else:
-            assert batch.audio_data.shape[0] == 2
+            assert batch.waveform.shape[0] == 2
             assert len(batch.filepath) == 2
 
     assert batch_count == 3
@@ -113,9 +113,9 @@ def test_batch_fn_drop_remainder():
     num_samples = int(sample_rate * 0.1)
 
     for i in range(10):
-        audio_data = np.random.randn(1, num_samples).astype(np.float32)
+        waveform = np.random.randn(1, num_samples).astype(np.float32)
         audio_tree = AudioTree.create(
-            audio_data=audio_data,
+            waveform=waveform,
             sample_rate=sample_rate,
         )
         audio_trees.append(audio_tree)
@@ -128,7 +128,7 @@ def test_batch_fn_drop_remainder():
     # With drop_remainder=True, 10 items / 4 batch size = 2 complete batches
     assert len(batches) == 2
     for batch in batches:
-        assert batch.audio_data.shape[0] == 4
+        assert batch.waveform.shape[0] == 4
 
 
 def test_batch_fn_with_dict_elements():
@@ -144,12 +144,12 @@ def test_batch_fn_with_dict_elements():
         tgt_data = np.random.randn(1, num_samples).astype(np.float32)
 
         src_tree = AudioTree.create(
-            audio_data=src_data,
+            waveform=src_data,
             sample_rate=sample_rate,
             filepaths=f"/fake/path/src_{i:04d}.wav",
         )
         tgt_tree = AudioTree.create(
-            audio_data=tgt_data,
+            waveform=tgt_data,
             sample_rate=sample_rate,
             filepaths=f"/fake/path/tgt_{i:04d}.wav",
         )
@@ -168,18 +168,18 @@ def test_batch_fn_with_dict_elements():
         assert "tgt" in batch
 
         # Each value should be a batched AudioTree
-        assert batch["src"].audio_data.ndim == 3, f"Expected 3D array, got {batch['src'].audio_data.ndim}D"
-        assert batch["tgt"].audio_data.ndim == 3, f"Expected 3D array, got {batch['tgt'].audio_data.ndim}D"
+        assert batch["src"].waveform.ndim == 3, f"Expected 3D array, got {batch['src'].waveform.ndim}D"
+        assert batch["tgt"].waveform.ndim == 3, f"Expected 3D array, got {batch['tgt'].waveform.ndim}D"
 
         # Verify batch sizes
         if batch_count < 3:
-            assert batch["src"].audio_data.shape[0] == 4
-            assert batch["tgt"].audio_data.shape[0] == 4
+            assert batch["src"].waveform.shape[0] == 4
+            assert batch["tgt"].waveform.shape[0] == 4
             assert len(batch["src"].filepath) == 4
             assert len(batch["tgt"].filepath) == 4
         else:
-            assert batch["src"].audio_data.shape[0] == 2
-            assert batch["tgt"].audio_data.shape[0] == 2
+            assert batch["src"].waveform.shape[0] == 2
+            assert batch["tgt"].waveform.shape[0] == 2
             assert len(batch["src"].filepath) == 2
             assert len(batch["tgt"].filepath) == 2
 

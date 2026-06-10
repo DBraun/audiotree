@@ -116,8 +116,8 @@ class TestCreateBalancedAudioDataset:
 
             # Same seed + no shuffle should give same data
             for i in range(10):
-                audio1 = ds1[i].audio_data
-                audio2 = ds2[i].audio_data
+                audio1 = ds1[i].waveform
+                audio2 = ds2[i].waveform
                 np.testing.assert_array_equal(audio1, audio2)
 
     def test_different_seeds(self):
@@ -145,8 +145,8 @@ class TestCreateBalancedAudioDataset:
             # Different seeds should (very likely) give different orderings
             different = False
             for i in range(10):
-                audio1 = ds1[i].audio_data
-                audio2 = ds2[i].audio_data
+                audio1 = ds1[i].waveform
+                audio2 = ds2[i].waveform
                 if not np.array_equal(audio1, audio2):
                     different = True
                     break
@@ -858,7 +858,7 @@ class TestBalancedDatasetHierarchical:
                 item2 = ds2[i]
                 assert item1.filepath[0] == item2.filepath[0]
                 assert item1.source[0] == item2.source[0]
-                np.testing.assert_array_equal(item1.audio_data, item2.audio_data)
+                np.testing.assert_array_equal(item1.waveform, item2.waveform)
 
     def test_weight_normalization(self):
         """Test 12: Verify weights are normalized correctly (don't need to sum to 1.0)."""

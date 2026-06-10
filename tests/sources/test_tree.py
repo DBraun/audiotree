@@ -21,7 +21,7 @@ def test_round_trip_audiotree():
         audio = np.random.randn(5, 2, 100).astype(np.float32)
         loudness = np.random.randn(5).astype(np.float32)
         tree = AudioTree(
-            audio_data=audio, sample_rate=44100, loudness=loudness
+            waveform=audio, sample_rate=44100, loudness=loudness
         )
 
         with TreeWriter(output_dir, expected_samples=5) as w:
@@ -35,7 +35,7 @@ def test_round_trip_audiotree():
             assert isinstance(sample, AudioTree)
             assert sample.sample_rate == 44100
             np.testing.assert_array_almost_equal(
-                sample.audio_data[0], audio[i], decimal=5
+                sample.waveform[0], audio[i], decimal=5
             )
             np.testing.assert_array_almost_equal(
                 sample.loudness[0], loudness[i], decimal=5
@@ -50,7 +50,7 @@ def test_round_trip_audiotree_with_metadata():
         audio = np.random.randn(3, 1, 50).astype(np.float32)
         mel = np.random.randn(3, 32).astype(np.float32)
         tree = AudioTree(
-            audio_data=audio, sample_rate=44100, metadata={"mel": mel}
+            waveform=audio, sample_rate=44100, metadata={"mel": mel}
         )
 
         with TreeWriter(output_dir, expected_samples=3) as w:
@@ -62,7 +62,7 @@ def test_round_trip_audiotree_with_metadata():
             sample = source[i]
             assert isinstance(sample, AudioTree)
             np.testing.assert_array_almost_equal(
-                sample.audio_data[0], audio[i], decimal=5
+                sample.waveform[0], audio[i], decimal=5
             )
             np.testing.assert_array_almost_equal(
                 sample.metadata["mel"][0], mel[i], decimal=5
@@ -76,7 +76,7 @@ def test_round_trip_nested_metadata():
         mel = np.random.randn(2, 16).astype(np.float32)
         mfcc = np.random.randn(2, 8).astype(np.float32)
         tree = AudioTree(
-            audio_data=np.zeros((2, 1, 10), dtype=np.float32),
+            waveform=np.zeros((2, 1, 10), dtype=np.float32),
             sample_rate=44100,
             metadata={"features": {"mel": mel, "mfcc": mfcc}},
         )
@@ -105,8 +105,8 @@ def test_round_trip_dict_of_audiotrees():
         output_dir = Path(tmpdir)
         dry_audio = np.random.randn(3, 2, 100).astype(np.float32)
         wet_audio = np.random.randn(3, 2, 100).astype(np.float32)
-        dry = AudioTree(audio_data=dry_audio, sample_rate=44100)
-        wet = AudioTree(audio_data=wet_audio, sample_rate=44100)
+        dry = AudioTree(waveform=dry_audio, sample_rate=44100)
+        wet = AudioTree(waveform=wet_audio, sample_rate=44100)
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write({"dry": dry, "wet": wet})
@@ -120,10 +120,10 @@ def test_round_trip_dict_of_audiotrees():
         assert isinstance(sample["dry"], AudioTree)
         assert isinstance(sample["wet"], AudioTree)
         np.testing.assert_array_almost_equal(
-            sample["dry"].audio_data[0], dry_audio[0], decimal=5
+            sample["dry"].waveform[0], dry_audio[0], decimal=5
         )
         np.testing.assert_array_almost_equal(
-            sample["wet"].audio_data[0], wet_audio[0], decimal=5
+            sample["wet"].waveform[0], wet_audio[0], decimal=5
         )
 
 
@@ -157,8 +157,8 @@ def test_round_trip_multiple_writes():
         audio2 = np.ones((2, 1, 10), dtype=np.float32) * 2
 
         with TreeWriter(output_dir, expected_samples=5) as w:
-            w.write(AudioTree(audio_data=audio1, sample_rate=44100))
-            w.write(AudioTree(audio_data=audio2, sample_rate=44100))
+            w.write(AudioTree(waveform=audio1, sample_rate=44100))
+            w.write(AudioTree(waveform=audio2, sample_rate=44100))
 
         source = TreeDataSource(output_dir)
         assert len(source) == 5
@@ -167,14 +167,14 @@ def test_round_trip_multiple_writes():
         for i in range(3):
             sample = source[i]
             np.testing.assert_array_almost_equal(
-                sample.audio_data[0], audio1[i], decimal=5
+                sample.waveform[0], audio1[i], decimal=5
             )
 
         # Second batch
         for i in range(2):
             sample = source[3 + i]
             np.testing.assert_array_almost_equal(
-                sample.audio_data[0], audio2[i], decimal=5
+                sample.waveform[0], audio2[i], decimal=5
             )
 
 
@@ -186,7 +186,7 @@ def test_raw_mode():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((3, 2, 100), dtype=np.float32),
+            waveform=np.zeros((3, 2, 100), dtype=np.float32),
             sample_rate=44100,
             loudness=np.zeros(3, dtype=np.float32),
             metadata={"mel": np.zeros((3, 16), dtype=np.float32)},
@@ -199,10 +199,10 @@ def test_raw_mode():
         sample = source[0]
 
         assert isinstance(sample, dict)
-        assert "audio_data" in sample
+        assert "waveform" in sample
         assert "loudness" in sample
         assert "metadata.mel" in sample
-        assert sample["audio_data"].shape == (1, 2, 100)
+        assert sample["waveform"].shape == (1, 2, 100)
 
 
 # === Missing manifest ===
@@ -223,7 +223,7 @@ def test_index_out_of_range():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((3, 1, 10), dtype=np.float32),
+            waveform=np.zeros((3, 1, 10), dtype=np.float32),
             sample_rate=44100,
         )
 
@@ -284,7 +284,7 @@ def test_empty_metadata_round_trip():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((2, 1, 10), dtype=np.float32),
+            waveform=np.zeros((2, 1, 10), dtype=np.float32),
             sample_rate=44100,
             metadata={},
         )
@@ -303,7 +303,7 @@ def test_none_fields_default():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((2, 1, 10), dtype=np.float32),
+            waveform=np.zeros((2, 1, 10), dtype=np.float32),
             sample_rate=44100,
         )
 
@@ -332,7 +332,7 @@ def test_round_trip_string_list_with_audiotree():
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write({
                 "strings": strings,
-                "wet": AudioTree(audio_data=audio, sample_rate=44100),
+                "wet": AudioTree(waveform=audio, sample_rate=44100),
             })
 
         source = TreeDataSource(output_dir)
@@ -344,7 +344,7 @@ def test_round_trip_string_list_with_audiotree():
             assert sample["strings"] == strings[i]
             assert isinstance(sample["wet"], AudioTree)
             np.testing.assert_array_almost_equal(
-                sample["wet"].audio_data[0], audio[i], decimal=5
+                sample["wet"].waveform[0], audio[i], decimal=5
             )
 
 
@@ -471,7 +471,7 @@ def test_batch_fn_with_strings():
             w.write({
                 "strings": ["a", "b", "c", "d"],
                 "wet": AudioTree(
-                    audio_data=np.arange(4 * 100, dtype=np.float32).reshape(
+                    waveform=np.arange(4 * 100, dtype=np.float32).reshape(
                         4, 1, 100
                     ),
                     sample_rate=44100,
@@ -484,7 +484,7 @@ def test_batch_fn_with_strings():
 
         assert batched["strings"] == ["a", "b", "c", "d"]
         assert isinstance(batched["wet"], AudioTree)
-        assert batched["wet"].audio_data.shape == (4, 1, 100)
+        assert batched["wet"].waveform.shape == (4, 1, 100)
 
 
 def test_backward_compat_no_string_leaves():
@@ -492,7 +492,7 @@ def test_backward_compat_no_string_leaves():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((2, 1, 10), dtype=np.float32),
+            waveform=np.zeros((2, 1, 10), dtype=np.float32),
             sample_rate=44100,
         )
 
@@ -522,7 +522,7 @@ def test_grain_protocol():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
-            audio_data=np.zeros((5, 1, 10), dtype=np.float32),
+            waveform=np.zeros((5, 1, 10), dtype=np.float32),
             sample_rate=44100,
         )
 
@@ -545,32 +545,32 @@ def test_grain_protocol():
 
 
 def test_exclude_audio_data():
-    """Excluding wet.audio_data gives None audio but keeps dry and metadata."""
+    """Excluding wet.waveform gives None audio but keeps dry and metadata."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         dry_audio = np.random.randn(3, 2, 100).astype(np.float32)
         wet_audio = np.random.randn(3, 2, 100).astype(np.float32)
         mel = np.random.randn(3, 16).astype(np.float32)
-        dry = AudioTree(audio_data=dry_audio, sample_rate=44100)
+        dry = AudioTree(waveform=dry_audio, sample_rate=44100)
         wet = AudioTree(
-            audio_data=wet_audio, sample_rate=44100, metadata={"mel": mel}
+            waveform=wet_audio, sample_rate=44100, metadata={"mel": mel}
         )
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write({"dry": dry, "wet": wet})
 
-        source = TreeDataSource(output_dir, exclude_prefixes=["wet.audio_data"])
+        source = TreeDataSource(output_dir, exclude_prefixes=["wet.waveform"])
         sample = source[0]
 
-        # wet.audio_data excluded -> None
-        assert sample["wet"].audio_data is None
+        # wet.waveform excluded -> None
+        assert sample["wet"].waveform is None
         # wet metadata still present
         np.testing.assert_array_almost_equal(
             sample["wet"].metadata["mel"][0], mel[0], decimal=5
         )
-        # dry.audio_data NOT excluded
+        # dry.waveform NOT excluded
         np.testing.assert_array_almost_equal(
-            sample["dry"].audio_data[0], dry_audio[0], decimal=5
+            sample["dry"].waveform[0], dry_audio[0], decimal=5
         )
 
 
@@ -581,7 +581,7 @@ def test_exclude_metadata_field():
         mel = np.random.randn(3, 16).astype(np.float32)
         mfcc = np.random.randn(3, 8).astype(np.float32)
         tree = AudioTree(
-            audio_data=np.zeros((3, 1, 10), dtype=np.float32),
+            waveform=np.zeros((3, 1, 10), dtype=np.float32),
             sample_rate=44100,
             metadata={"mel": mel, "mfcc": mfcc},
         )
@@ -621,12 +621,12 @@ def test_exclude_prefix_with_subtree():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         dry = AudioTree(
-            audio_data=np.random.randn(2, 1, 50).astype(np.float32),
+            waveform=np.random.randn(2, 1, 50).astype(np.float32),
             sample_rate=44100,
             metadata={"mel": np.random.randn(2, 8).astype(np.float32)},
         )
         wet = AudioTree(
-            audio_data=np.random.randn(2, 1, 50).astype(np.float32),
+            waveform=np.random.randn(2, 1, 50).astype(np.float32),
             sample_rate=44100,
         )
 
@@ -637,10 +637,10 @@ def test_exclude_prefix_with_subtree():
         sample = source[0]
 
         # dry AudioTree is reconstructed but all its leaves are excluded
-        assert sample["dry"].audio_data is None
+        assert sample["dry"].waveform is None
         assert sample["dry"].metadata == {}
         # wet is untouched
-        assert sample["wet"].audio_data is not None
+        assert sample["wet"].waveform is not None
 
 
 def test_exclude_pickle_roundtrip():
@@ -652,20 +652,20 @@ def test_exclude_pickle_roundtrip():
         audio = np.random.randn(3, 1, 20).astype(np.float32)
         mel = np.random.randn(3, 8).astype(np.float32)
         tree = AudioTree(
-            audio_data=audio, sample_rate=44100, metadata={"mel": mel}
+            waveform=audio, sample_rate=44100, metadata={"mel": mel}
         )
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
 
-        source = TreeDataSource(output_dir, exclude_prefixes=["audio_data"])
+        source = TreeDataSource(output_dir, exclude_prefixes=["waveform"])
 
         # Force data files open, then pickle/unpickle
         _ = source[0]
         restored = pickle.loads(pickle.dumps(source))
 
         sample = restored[0]
-        assert sample.audio_data is None
+        assert sample.waveform is None
         assert "mel" in sample.metadata
         np.testing.assert_array_almost_equal(
             sample.metadata["mel"][0], mel[0], decimal=5
@@ -677,7 +677,7 @@ def test_exclude_empty_default():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         audio = np.random.randn(2, 1, 10).astype(np.float32)
-        tree = AudioTree(audio_data=audio, sample_rate=44100)
+        tree = AudioTree(waveform=audio, sample_rate=44100)
 
         with TreeWriter(output_dir, expected_samples=2) as w:
             w.write(tree)
@@ -688,7 +688,7 @@ def test_exclude_empty_default():
         for i in range(2):
             s1 = source_default[i]
             s2 = source_empty[i]
-            np.testing.assert_array_equal(s1.audio_data, s2.audio_data)
+            np.testing.assert_array_equal(s1.waveform, s2.waveform)
 
 
 # === load_into_memory ===
@@ -701,7 +701,7 @@ def test_load_into_memory_matches_lazy():
         audio = np.random.randn(5, 2, 100).astype(np.float32)
         mel = np.random.randn(5, 16).astype(np.float32)
         tree = AudioTree(
-            audio_data=audio, sample_rate=44100, metadata={"mel": mel}
+            waveform=audio, sample_rate=44100, metadata={"mel": mel}
         )
 
         with TreeWriter(output_dir, expected_samples=5) as w:
@@ -713,7 +713,7 @@ def test_load_into_memory_matches_lazy():
         for i in range(5):
             s_lazy = lazy[i]
             s_eager = eager[i]
-            np.testing.assert_array_equal(s_lazy.audio_data, s_eager.audio_data)
+            np.testing.assert_array_equal(s_lazy.waveform, s_eager.waveform)
             np.testing.assert_array_equal(
                 s_lazy.metadata["mel"], s_eager.metadata["mel"]
             )
@@ -726,7 +726,7 @@ def test_load_into_memory_with_exclude():
         audio = np.random.randn(3, 1, 50).astype(np.float32)
         mel = np.random.randn(3, 8).astype(np.float32)
         tree = AudioTree(
-            audio_data=audio, sample_rate=44100, metadata={"mel": mel}
+            waveform=audio, sample_rate=44100, metadata={"mel": mel}
         )
 
         with TreeWriter(output_dir, expected_samples=3) as w:
@@ -734,12 +734,12 @@ def test_load_into_memory_with_exclude():
 
         source = TreeDataSource(
             output_dir,
-            exclude_prefixes=["audio_data"],
+            exclude_prefixes=["waveform"],
             load_into_memory=True,
         )
 
         sample = source[0]
-        assert sample.audio_data is None
+        assert sample.waveform is None
         np.testing.assert_array_almost_equal(
             sample.metadata["mel"][0], mel[0], decimal=5
         )
@@ -768,7 +768,7 @@ def test_load_into_memory_pickle_roundtrip():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         audio = np.random.randn(3, 1, 20).astype(np.float32)
-        tree = AudioTree(audio_data=audio, sample_rate=44100)
+        tree = AudioTree(waveform=audio, sample_rate=44100)
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
@@ -778,7 +778,7 @@ def test_load_into_memory_pickle_roundtrip():
 
         sample = restored[0]
         np.testing.assert_array_almost_equal(
-            sample.audio_data[0], audio[0], decimal=5
+            sample.waveform[0], audio[0], decimal=5
         )
 
 
@@ -792,7 +792,7 @@ def test_cache_memmaps_false_matches_default():
         audio = np.random.randn(5, 2, 100).astype(np.float32)
         mel = np.random.randn(5, 16).astype(np.float32)
         tree = AudioTree(
-            audio_data=audio, sample_rate=44100, metadata={"mel": mel}
+            waveform=audio, sample_rate=44100, metadata={"mel": mel}
         )
 
         with TreeWriter(output_dir, expected_samples=5) as w:
@@ -804,7 +804,7 @@ def test_cache_memmaps_false_matches_default():
         for i in range(5):
             s1 = cached[i]
             s2 = uncached[i]
-            np.testing.assert_array_equal(s1.audio_data, s2.audio_data)
+            np.testing.assert_array_equal(s1.waveform, s2.waveform)
             np.testing.assert_array_equal(
                 s1.metadata["mel"], s2.metadata["mel"]
             )

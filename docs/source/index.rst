@@ -39,7 +39,7 @@ apply balanced sampling across groups, and chain augmentations:
 
     # Access batched AudioTrees
     batch = next(iter(iter_ds))
-    print(batch.audio_data.shape)  # (32, channels, 132300)
+    print(batch.waveform.shape)    # (32, channels, 132300)
     print(batch.source)            # ["speech", "music", ...]
 
 Transforms work on any `Pytree`_ of AudioTrees, including dictionaries and lists.

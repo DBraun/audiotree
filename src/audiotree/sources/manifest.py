@@ -256,7 +256,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             samples = entry.get('samples', 0)
 
             # Create zero audio data with correct shape
-            audio_data = np.zeros((1, channels, samples), dtype=np.float32)
+            waveform = np.zeros((1, channels, samples), dtype=np.float32)
 
             # Build kwargs for AudioTree.create
             tree_kwargs = {
@@ -275,7 +275,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                         tree_kwargs[field_name] = np.array([value])
 
             # Create AudioTree with zero audio data
-            audio_tree = AudioTree.create(audio_data, **tree_kwargs)
+            audio_tree = AudioTree.create(waveform, **tree_kwargs)
 
         return audio_tree
 

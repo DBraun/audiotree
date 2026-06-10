@@ -47,7 +47,7 @@ Given this Python code:
         audio_tree = volume_norm().random_map(audio_tree, rng)
         audio_tree = trim().map(audio_tree)
 
-        print("Final shape:", audio_tree.audio_data.shape)
+        print("Final shape:", audio_tree.waveform.shape)
 
     if __name__ == "__main__":
         args = argbind.parse_args()

@@ -16,7 +16,7 @@ from audiotree.core import AudioTree
 # AudioTree pytree field names in declaration order (matching Flax flatten order).
 # sample_rate is excluded (pytree_node=False).
 _AUDIOTREE_FIELD_ORDER = [
-    "audio_data",
+    "waveform",
     "loudness",
     "pitch",
     "velocity",
@@ -31,9 +31,9 @@ def _path_to_string(path: Tuple) -> str:
     """Convert a JAX key path to a dot-separated string.
 
     Examples:
-        (GetAttrKey('audio_data'),) -> "audio_data"
+        (GetAttrKey('waveform'),) -> "waveform"
         (GetAttrKey('metadata'), DictKey('mel')) -> "metadata.mel"
-        (DictKey('dry'), GetAttrKey('audio_data')) -> "dry.audio_data"
+        (DictKey('dry'), GetAttrKey('waveform')) -> "dry.waveform"
     """
     parts = []
     for key in path:
@@ -185,7 +185,7 @@ class TreeWriter:
             Default False.
 
     Example:
-        >>> tree = AudioTree(audio_data=audio, sample_rate=44100, loudness=loud)
+        >>> tree = AudioTree(waveform=audio, sample_rate=44100, loudness=loud)
         >>> with TreeWriter("output/", expected_samples=10000) as w:
         ...     for batch in dataloader:
         ...         w.write(batch)

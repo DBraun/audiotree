@@ -267,9 +267,9 @@ Use decorators to create custom transforms:
     @random_transform
     def my_augmentation(audio_tree, rng, strength=1.0):
         # Your augmentation logic here
-        noise = jax.random.normal(rng, audio_tree.audio_data.shape) * strength
-        audio_data = audio_tree.audio_data + noise
-        return audio_tree.replace(audio_data=audio_data)
+        noise = jax.random.normal(rng, audio_tree.waveform.shape) * strength
+        waveform = audio_tree.waveform + noise
+        return audio_tree.replace(waveform=waveform)
 
     # Use it
     transform = my_augmentation(strength=0.1, prob=0.8)

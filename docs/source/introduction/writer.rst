@@ -262,7 +262,7 @@ AudioWriter supports progress tracking via tqdm integration:
 
     # Count total samples that will be written
     loud_trees = [t for t in trees if t.loudness.mean() > -30]
-    total_samples = sum(t.audio_data.shape[0] for t in loud_trees)
+    total_samples = sum(t.waveform.shape[0] for t in loud_trees)
 
     pbar = tqdm(total=total_samples, desc="Writing loud samples")
     with AudioWriter("output", pbar=pbar, close_pbar=True) as writer:

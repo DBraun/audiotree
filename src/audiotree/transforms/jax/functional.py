@@ -240,7 +240,7 @@ def encode_with_codec(
     @map_transform
     def _encode_with_codec_transform(audio_tree: AudioTree) -> AudioTree:
         if audio_tree.codes is None:
-            B, C, T = audio_tree.audio_data.shape
+            B, C, T = audio_tree.waveform.shape
             codes = encoder_fn(audio_tree)
             codes = rearrange(
                 codes,

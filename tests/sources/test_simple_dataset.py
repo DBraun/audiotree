@@ -82,8 +82,8 @@ def test_no_shuffle():
 
         # Same seed + no shuffle should give same data
         for i in range(5):
-            audio1 = ds1[i].audio_data
-            audio2 = ds2[i].audio_data
+            audio1 = ds1[i].waveform
+            audio2 = ds2[i].waveform
             np.testing.assert_array_equal(audio1, audio2)
 
 
@@ -111,8 +111,8 @@ def test_shuffle():
         # Different seeds should (very likely) give different orderings
         different = False
         for i in range(10):
-            audio1 = ds1[i].audio_data
-            audio2 = ds2[i].audio_data
+            audio1 = ds1[i].waveform
+            audio2 = ds2[i].waveform
             if not np.array_equal(audio1, audio2):
                 different = True
                 break
@@ -174,7 +174,7 @@ def test_with_saliency():
         # Should load excerpts successfully
         item = ds[0]
         assert isinstance(item, AudioTree)
-        assert item.audio_data.shape[2] == 44100  # 1 second at 44.1kHz
+        assert item.waveform.shape[2] == 44100  # 1 second at 44.1kHz
 
 
 def test_mono_conversion():
@@ -196,7 +196,7 @@ def test_mono_conversion():
         )
 
         item = ds[0]
-        assert item.audio_data.shape[1] == 1  # Should be mono
+        assert item.waveform.shape[1] == 1  # Should be mono
 
 
 def test_empty_directory():

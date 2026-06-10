@@ -106,7 +106,7 @@ Build complex augmentation pipelines:
     # Transforms applied when accessing items
     for item in ds.to_iter_dataset():
         # item has been through full augmentation pipeline
-        print(item.audio_data.shape)  # (1, 1, 132300) for 3s mono at 44.1kHz
+        print(item.waveform.shape)  # (1, 1, 132300) for 3s mono at 44.1kHz
         break
 
 With ArgBind
@@ -299,7 +299,7 @@ Add batching as part of the transform chain:
 
     # Iterate over batches
     for batch in iter_ds:
-        print(batch.audio_data.shape)  # (32, 1, 132300)
+        print(batch.waveform.shape)  # (32, 1, 132300)
         break
 
 Mixing Pre-augmented Datasets
@@ -418,7 +418,7 @@ Chain transforms before adding multiprocessing:
 
     # Transforms are computed in parallel workers
     for item in iter_ds:
-        print(item.audio_data.shape)
+        print(item.waveform.shape)
 
 Complete Training Example
 --------------------------
@@ -478,8 +478,8 @@ Full pipeline with chained transforms, batching, and multiprocessing:
             break
 
         # Convert to JAX and train
-        audio_data = jax.numpy.array(batch.audio_data)
-        loss = train_step(audio_data)
+        waveform = jax.numpy.array(batch.waveform)
+        loss = train_step(waveform)
 
         if step % 100 == 0:
             print(f"Step {step}, Loss: {loss}")

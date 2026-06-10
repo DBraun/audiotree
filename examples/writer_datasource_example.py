@@ -40,7 +40,7 @@ def main():
 
             # Create AudioTree with metadata
             audio_tree = AudioTree.create(
-                audio_data=audio.reshape(1, 1, -1),  # Shape: (batch=1, channels=1, samples)
+                waveform=audio.reshape(1, 1, -1),  # Shape: (batch=1, channels=1, samples)
                 sample_rate=44100,
                 pitch=np.array([pitch]) if pitch else None,
                 velocity=np.array([64 + i * 20]),
@@ -96,7 +96,7 @@ def main():
         # Load and inspect first file
         first_audio = source[0]
         print(f"  First file:")
-        print(f"    - Shape: {first_audio.audio_data.shape}")
+        print(f"    - Shape: {first_audio.waveform.shape}")
         print(f"    - Sample rate: {first_audio.sample_rate}")
         print(f"    - Loudness: {first_audio.loudness[0]:.1f} LUFS")
         if first_audio.pitch is not None:

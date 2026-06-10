@@ -30,10 +30,10 @@ You can create an AudioTree directly from NumPy or JAX NumPy arrays:
 
     # Create from 3D array (B, C, T)
     sample_rate = 44_100
-    audio_data = np.zeros((4, 2, 44_100))  # 4 batches, 2 channels, 1 second
-    audio_tree = AudioTree(audio_data, sample_rate)
+    waveform = np.zeros((4, 2, 44_100))  # 4 batches, 2 channels, 1 second
+    audio_tree = AudioTree(waveform, sample_rate)
 
-    >>> audio_tree.audio_data.shape
+    >>> audio_tree.waveform.shape
     (4, 2, 44100)
     >>> audio_tree.sample_rate
     44100
@@ -48,13 +48,13 @@ The :meth:`~audiotree.core.AudioTree.create` method automatically handles arrays
     # From 1D array (just samples)
     audio_1d = np.zeros(44_100)
     audio_tree = AudioTree.create(audio_1d, 44_100)
-    >>> audio_tree.audio_data.shape
+    >>> audio_tree.waveform.shape
     (1, 1, 44100)  # Automatically adds batch and channel dims
 
     # From 2D array (channels × samples)
     audio_2d = np.zeros((2, 44_100))
     audio_tree = AudioTree.create(audio_2d, 44_100)
-    >>> audio_tree.audio_data.shape
+    >>> audio_tree.waveform.shape
     (1, 2, 44100)  # Automatically adds batch dimension
 
 Loading Audio from Files
@@ -106,7 +106,7 @@ AudioTree objects have several key properties:
     audio_tree = AudioTree.create(np.ones((2, 2, 44_100)), 44_100)
 
     # Core properties
-    >>> audio_tree.audio_data.shape
+    >>> audio_tree.waveform.shape
     (2, 2, 44100)
     >>> audio_tree.sample_rate
     44100
@@ -128,11 +128,11 @@ AudioTree is immutable. Use :meth:`~audiotree.core.AudioTree.replace` to create 
     audio_tree = AudioTree(np.ones((2, 2, 44_100)), 44_100)
 
     # Create a new audio_tree with modified audio data
-    quieter_tree = audio_tree.replace(audio_data=audio_tree.audio_data * 0.5)
+    quieter_tree = audio_tree.replace(waveform=audio_tree.waveform * 0.5)
 
-    >>> np.allclose(audio_tree.audio_data[0, 0, 0], 1.0)  # Original unchanged
+    >>> np.allclose(audio_tree.waveform[0, 0, 0], 1.0)  # Original unchanged
     True
-    >>> np.allclose(quieter_tree.audio_data[0, 0, 0], 0.5)
+    >>> np.allclose(quieter_tree.waveform[0, 0, 0], 0.5)
     True
 
 Computing Loudness
@@ -179,7 +179,7 @@ To change the sample rate of audio, use the :meth:`~audiotree.core.AudioTree.res
     44100
     >>> resampled_tree.sample_rate
     48000
-    >>> resampled_tree.audio_data.shape
+    >>> resampled_tree.waveform.shape
     (1, 2, 48000)  # Audio data is resampled
 
 Batching Operations
@@ -196,17 +196,17 @@ The :meth:`~audiotree.core.AudioTree.mini_batch` method reshapes the batch dimen
 
     # Start with 12 audio samples
     x = AudioTree(np.zeros((12, 1, 44_100)), 44_100)
-    >>> x.audio_data.shape
+    >>> x.waveform.shape
     (12, 1, 44100)
 
     # Reshape into mini-batches of size 3
     x_batched = x.reshape_mini_batches(3)
-    >>> x_batched.audio_data.shape
+    >>> x_batched.waveform.shape
     (4, 3, 1, 44100)  # 4 mini-batches, each with 3 samples
 
     # Flatten back to original shape
     x_unbatched = x_batched.flatten_mini_batches()
-    >>> x_unbatched.audio_data.shape
+    >>> x_unbatched.waveform.shape
     (12, 1, 44100)  # Back to original
 
 Splitting into Multiple Trees
@@ -223,9 +223,9 @@ The :meth:`~audiotree.core.AudioTree.split` method splits a batch into separate 
     split_trees = x.split(2)
     >>> len(split_trees)
     2
-    >>> split_trees[0].audio_data.shape
+    >>> split_trees[0].waveform.shape
     (6, 1, 44100)  # First half
-    >>> split_trees[1].audio_data.shape
+    >>> split_trees[1].waveform.shape
     (6, 1, 44100)  # Second half
 
 Filtering Batch Items
@@ -240,7 +240,7 @@ The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively ke
     noise = np.random.uniform(-1, 1, (1, 44_100))
 
     # Create AudioTree with different loudness levels
-    audio_data = np.array([
+    waveform = np.array([
         noise * 0.0,  # Silent
         noise * 0.1,  # Very quiet
         noise * 0.2,
@@ -254,7 +254,7 @@ The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively ke
         noise * 1.0   # Full scale
     ])
 
-    audio_tree = AudioTree(audio_data, 44_100).replace_loudness()
+    audio_tree = AudioTree(waveform, 44_100).replace_loudness()
 
     # Filter to keep only audio louder than -20 LUFS
     def keep_loud_audio(mini_tree):
@@ -262,7 +262,7 @@ The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively ke
 
     filtered_tree = audio_tree.filter(keep_loud_audio)
 
-    >>> filtered_tree.audio_data.shape
+    >>> filtered_tree.waveform.shape
     (9, 1, 44100)  # 9 batches remain (excluding silent and very quiet ones)
     >>> filtered_tree.loudness  # LUFS values for remaining batches
     Array([-15.69, -12.17, -9.67, -7.73, -6.15, -4.81, -3.65, -2.63, -1.71], dtype=float32)
@@ -279,29 +279,29 @@ You can use Flax's :func:`nnx.scan` to efficiently process mini-batches with neu
     # Define a scan function to process mini-batches
     @nnx.scan(in_axes=0, out_axes=0)
     def process_mini_batches(mini_audio_tree):
-        audio_data = mini_audio_tree.audio_data
-        assert audio_data.ndim == 3  # (batch, channels, samples)
-        audio_data = audio_data * 0.5  # or use a neural network!
-        return mini_audio_tree.replace(audio_data=audio_data)
+        waveform = mini_audio_tree.waveform
+        assert waveform.ndim == 3  # (batch, channels, samples)
+        waveform = waveform * 0.5  # or use a neural network!
+        return mini_audio_tree.replace(waveform=waveform)
 
     # Create AudioTree with 12 samples
     x = AudioTree(np.ones((12, 1, 44_100)), 44_100)
 
     # Create mini-batches of size 3
     x_batched = x.reshape_mini_batches(3)
-    >>> x_batched.audio_data.shape
+    >>> x_batched.waveform.shape
     (4, 3, 1, 44100)  # 4 mini-batches of size 3
 
     # Process all mini-batches sequentially
     processed_batched = process_mini_batches(x_batched)
-    >>> processed_batched.audio_data.shape
+    >>> processed_batched.waveform.shape
     (4, 3, 1, 44100)  # Still mini-batched
 
     # Flatten back to original batch dimension
     full_batch = processed_batched.flatten_mini_batches()
-    >>> full_batch.audio_data.shape
+    >>> full_batch.waveform.shape
     (12, 1, 44100)  # Back to original shape
-    >>> np.allclose(full_batch.audio_data, 0.5)
+    >>> np.allclose(full_batch.waveform, 0.5)
     True  # All values were processed
 
 Working with JAX PyTrees
@@ -330,7 +330,7 @@ You can use :func:`jax.audio_tree.map` to combine multiple AudioTree objects:
         *trees
     )
 
-    >>> big_tree.audio_data.shape
+    >>> big_tree.waveform.shape
     (12, 1, 44100)  # 3 × 4 = 12 batches
 
 Nested Structures
@@ -353,7 +353,7 @@ AudioTree objects can be organized in complex nested structures:
 
     # Apply transformations to all trees in the structure
     def scale_audio(audio_tree):
-        return audio_tree.replace(audio_data=audio_tree.audio_data * 0.5)
+        return audio_tree.replace(waveform=audio_tree.waveform * 0.5)
 
     scaled_batch = jax.audio_tree.map(
         scale_audio,
@@ -361,9 +361,9 @@ AudioTree objects can be organized in complex nested structures:
         is_leaf=lambda x: isinstance(x, AudioTree)
     )
 
-    >>> scaled_batch["input"].audio_data[0, 0, 0]
+    >>> scaled_batch["input"].waveform[0, 0, 0]
     0.5  # Scaled from 1.0
-    >>> scaled_batch["augmented"][1].audio_data[0, 0, 0]
+    >>> scaled_batch["augmented"][1].waveform[0, 0, 0]
     0.0  # Scaled from 0.0 (remains 0)
 
 audio_tree Flattening and Unflattening
@@ -382,7 +382,7 @@ JAX can flatten AudioTree objects for operations requiring flat arrays:
     # Then reconstruct the audio_tree
     reconstructed = jax.audio_tree.unflatten(treedef, leaves)
 
-    >>> np.array_equal(reconstructed.audio_data, audio_tree.audio_data)
+    >>> np.array_equal(reconstructed.waveform, audio_tree.waveform)
     True
 
 Metadata and Filepaths
@@ -452,7 +452,7 @@ Metadata should contain array-like data with a batch dimension:
         tree1, tree2
     )
 
-    >>> combined.audio_data.shape
+    >>> combined.waveform.shape
     (4, 1, 44100)  # Batched from 2+2
     >>> combined.metadata["energy"].shape
     (4,)  # Metadata was concatenated

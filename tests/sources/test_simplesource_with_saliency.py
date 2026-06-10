@@ -33,7 +33,7 @@ def test_load_audio_with_saliency_basic():
     )
 
     assert isinstance(result, AudioTree)
-    assert result.audio_data.shape == (1, 1, sample_rate)
+    assert result.waveform.shape == (1, 1, sample_rate)
     assert result.sample_rate == sample_rate
 
     # Test with saliency enabled but no loudness cutoff
@@ -49,7 +49,7 @@ def test_load_audio_with_saliency_basic():
     )
 
     assert isinstance(result, AudioTree)
-    assert result.audio_data.shape == (1, 1, sample_rate)
+    assert result.waveform.shape == (1, 1, sample_rate)
 
 
 def test_saliency_variety_with_repetition():
@@ -79,7 +79,7 @@ def test_saliency_variety_with_repetition():
     # Compute a simple hash of each excerpt to check for uniqueness
     def audio_hash(audio_tree):
         # Use mean and std as a simple signature
-        return (float(np.mean(audio_tree.audio_data)), float(np.std(audio_tree.audio_data)))
+        return (float(np.mean(audio_tree.waveform)), float(np.std(audio_tree.waveform)))
 
     hashes = [audio_hash(e) for e in excerpts]
     unique_hashes = len(set(hashes))
@@ -116,8 +116,8 @@ def test_saliency_determinism():
 
     # Check that results are identical
     for i in range(10):
-        audio1 = ds1[i].audio_data
-        audio2 = ds2[i].audio_data
+        audio1 = ds1[i].waveform
+        audio2 = ds2[i].waveform
         assert np.allclose(audio1, audio2), f"Excerpt {i} differs between runs"
 
     print("Determinism test passed!")
@@ -158,7 +158,7 @@ def test_create_balanced_audio_dataset_with_saliency():
         assert len(items) == num_files
         for item in items:
             assert isinstance(item, AudioTree)
-            assert item.audio_data.shape == (1, 1, sample_rate)
+            assert item.waveform.shape == (1, 1, sample_rate)
 
         # Use grain.DataLoader with Batch transform
         batch_size = 4
@@ -174,8 +174,8 @@ def test_create_balanced_audio_dataset_with_saliency():
         for batch in dataloader:
             batch_count += 1
             assert isinstance(batch, AudioTree)
-            assert batch.audio_data.ndim == 3
-            current_batch_size = batch.audio_data.shape[0]
+            assert batch.waveform.ndim == 3
+            current_batch_size = batch.waveform.shape[0]
 
             if batch_count < (num_files // batch_size):
                 assert current_batch_size == batch_size
@@ -183,11 +183,11 @@ def test_create_balanced_audio_dataset_with_saliency():
                 assert current_batch_size <= batch_size
 
             assert batch.sample_rate == sample_rate
-            assert batch.audio_data.shape[1] == 1
-            assert batch.audio_data.shape[2] == sample_rate
+            assert batch.waveform.shape[1] == 1
+            assert batch.waveform.shape[2] == sample_rate
 
             total_items += current_batch_size
-            print(f"Batch {batch_count}: {current_batch_size} items, shape={batch.audio_data.shape}")
+            print(f"Batch {batch_count}: {current_batch_size} items, shape={batch.waveform.shape}")
 
         assert total_items == num_files
         assert batch_count == (num_files + batch_size - 1) // batch_size
@@ -225,7 +225,7 @@ def test_repeated_dataset_variety():
 
         # Simple hash for checking uniqueness
         def audio_hash(audio_tree):
-            return (float(np.mean(audio_tree.audio_data)), float(np.std(audio_tree.audio_data)))
+            return (float(np.mean(audio_tree.waveform)), float(np.std(audio_tree.waveform)))
 
         hashes = [audio_hash(e) for e in excerpts]
         unique_hashes = len(set(hashes))

@@ -228,8 +228,8 @@ class TestScopeWithMapTransforms:
         result_batch = transform.map(batch)
 
         # Verify only dry was trimmed
-        assert result_batch['dry'].audio_data.shape[-1] == int(3.0 * 44100)
-        assert result_batch['wet'].audio_data.shape[-1] == int(5.0 * 44100)
+        assert result_batch['dry'].waveform.shape[-1] == int(3.0 * 44100)
+        assert result_batch['wet'].waveform.shape[-1] == int(5.0 * 44100)
 
 
 class TestCommonTrainingPipelinePattern:

@@ -15,9 +15,9 @@ def test_round_trip_npz_manifest():
         output_dir = Path(tmpdir)
 
         # Create test data with metadata
-        audio_data = np.random.randn(3, 2, 22050)  # 3 batch, 2 channels
+        waveform = np.random.randn(3, 2, 22050)  # 3 batch, 2 channels
         audio_tree = AudioTree.create(
-            audio_data,
+            waveform,
             sample_rate=22050,
             loudness=np.array([-20.0, -18.0, -22.0]),
             pitch=np.array([60.0, 62.0, 64.0]),
@@ -40,7 +40,7 @@ def test_round_trip_npz_manifest():
             loaded_tree = source[i]
 
             # Check audio shape (should be single item, not batch)
-            assert loaded_tree.audio_data.shape == (1, 2, 22050)
+            assert loaded_tree.waveform.shape == (1, 2, 22050)
 
             # Check restored metadata
             assert loaded_tree.loudness[0] == audio_tree.loudness[i]
@@ -154,7 +154,7 @@ def test_from_writer_output():
         # Use convenience constructor
         source = ManifestDataSource.from_writer_output(output_dir)
         assert len(source) == 2
-        assert source[0].audio_data.shape == (1, 1, 8000)
+        assert source[0].waveform.shape == (1, 1, 8000)
 
 
 def test_num_records_limit():
@@ -193,7 +193,7 @@ def test_resampling():
 
         loaded = source[0]
         assert loaded.sample_rate == 16000
-        assert loaded.audio_data.shape[2] == 16000  # 1 second at 16kHz
+        assert loaded.waveform.shape[2] == 16000  # 1 second at 16kHz
 
 
 def test_mono_conversion():
@@ -213,7 +213,7 @@ def test_mono_conversion():
         )
 
         loaded = source[0]
-        assert loaded.audio_data.shape[1] == 1  # Mono
+        assert loaded.waveform.shape[1] == 1  # Mono
 
 
 def test_get_entry():
@@ -257,7 +257,7 @@ def test_grain_integration():
         # Test random access
         item3 = source[3]
         assert isinstance(item3, AudioTree)
-        assert item3.audio_data.shape == (1, 1, 8000)
+        assert item3.waveform.shape == (1, 1, 8000)
 
         # Test iteration
         items = [source[i] for i in range(min(3, len(source)))]
@@ -274,8 +274,8 @@ def test_grain_dataloader_with_batch_transform():
 
         # Create test data
         np.random.seed(42)
-        audio_data = np.random.randn(8, 2, 1000).astype(np.float32)
-        audio_tree = AudioTree(audio_data, 44100)
+        waveform = np.random.randn(8, 2, 1000).astype(np.float32)
+        audio_tree = AudioTree(waveform, 44100)
 
         # Add properties that will be preserved
         audio_tree = audio_tree.replace(
@@ -303,13 +303,13 @@ def test_grain_dataloader_with_batch_transform():
 
         # Check first batch
         assert isinstance(batch1, AudioTree)
-        assert batch1.audio_data.shape == (4, 2, 1000)
+        assert batch1.waveform.shape == (4, 2, 1000)
         assert batch1.loudness.shape == (4,)
         assert batch1.pitch.shape == (4,)
         assert batch1.velocity.shape == (4,)
 
         # Check second batch
-        assert batch2.audio_data.shape == (4, 2, 1000)
+        assert batch2.waveform.shape == (4, 2, 1000)
         assert batch2.loudness.shape == (4,)
 
         # Verify data integrity
@@ -336,8 +336,8 @@ def test_manifest_metadata_with_batch_transform():
         batch_size = 8
         param_dim = 185
 
-        audio_data = np.random.randn(batch_size, 2, 1000).astype(np.float32)
-        audio_tree = AudioTree(audio_data, 44100)
+        waveform = np.random.randn(batch_size, 2, 1000).astype(np.float32)
+        audio_tree = AudioTree(waveform, 44100)
 
         # Add metadata arrays that should be preserved through write/read
         audio_tree = audio_tree.replace(
@@ -394,8 +394,8 @@ def test_manifest_with_batch_transform():
 
         # Create test data with 8 audio samples
         np.random.seed(42)
-        audio_data = np.random.randn(8, 2, 1000).astype(np.float32)
-        audio_tree = AudioTree(audio_data, 44100)
+        waveform = np.random.randn(8, 2, 1000).astype(np.float32)
+        audio_tree = AudioTree(waveform, 44100)
 
         # Add some metadata
         audio_tree = audio_tree.replace(
@@ -433,13 +433,13 @@ def test_manifest_with_batch_transform():
 
         # Check first batch
         assert isinstance(batch1, AudioTree)
-        assert batch1.audio_data.shape == (4, 2, 1000)  # 4 samples batched
+        assert batch1.waveform.shape == (4, 2, 1000)  # 4 samples batched
         assert batch1.loudness.shape == (4,)
         assert batch1.pitch.shape == (4,)
         assert batch1.velocity.shape == (4,)
 
         # Check second batch
-        assert batch2.audio_data.shape == (4, 2, 1000)
+        assert batch2.waveform.shape == (4, 2, 1000)
         assert batch2.loudness.shape == (4,)
 
         # Verify data integrity - loudness values should be sequential

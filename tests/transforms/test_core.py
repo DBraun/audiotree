@@ -49,8 +49,8 @@ class AddSomethingTransform(BaseMapTransform):
 
     @staticmethod
     def _apply_transform(audio_tree: AudioTree, offset: int = 1):
-        audio_data = audio_tree.audio_data + offset
-        audio_tree = audio_tree.replace(audio_data=audio_data)
+        waveform = audio_tree.waveform + offset
+        audio_tree = audio_tree.replace(waveform=waveform)
         return audio_tree
 
 
@@ -169,7 +169,7 @@ class Multiply(BaseMapTransform):
 
     @staticmethod
     def _apply_transform(audio_tree: AudioTree, mult: float = 1) -> AudioTree:
-        return audio_tree.replace(audio_data=audio_tree.audio_data * mult)
+        return audio_tree.replace(waveform=audio_tree.waveform * mult)
 
 
 def test_output_key_001():
@@ -282,7 +282,7 @@ def test_output_key_004():
 
 
 def test_volume_change():
-    audio_tree = AudioTree(audio_data=np.ones(shape=(1, 1, 44100), dtype=np.float32), sample_rate=44100)
+    audio_tree = AudioTree(waveform=np.ones(shape=(1, 1, 44100), dtype=np.float32), sample_rate=44100)
 
     config = {
         "min_db": 20,
@@ -295,13 +295,13 @@ def test_volume_change():
         audio_tree, rng=np.random.default_rng(seed)
     )
 
-    assert np.allclose(audio_tree.audio_data * 10, transformed_audio_tree.audio_data)
+    assert np.allclose(audio_tree.waveform * 10, transformed_audio_tree.waveform)
 
 
 def test_transforms():
     """Test that all numpy transforms can be instantiated and applied."""
     # Use numpy arrays for the numpy module transforms
-    audio_tree = AudioTree(audio_data=np.ones(shape=(1, 1, 44100), dtype=np.float32), sample_rate=44100)
+    audio_tree = AudioTree(waveform=np.ones(shape=(1, 1, 44100), dtype=np.float32), sample_rate=44100)
     audio_tree = audio_tree.replace_loudness()  # Required for volume_norm
     rng = np.random.default_rng(0)
 
@@ -320,13 +320,13 @@ def test_only_apply_to_audiotree():
     """Only `src` can have its `latents` set because `src` is an AudioTree while `other` is a simple array."""
 
     def encoder_fn(audio_tree: AudioTree) -> jnp.ndarray:
-        B = audio_tree.audio_data.shape[0]
+        B = audio_tree.waveform.shape[0]
         return jnp.zeros((B,))
 
     B = 2
 
-    audio_data = {
-        "src": AudioTree(audio_data=jnp.zeros(shape=(B, 1, 44100)), sample_rate=44100),
+    waveform = {
+        "src": AudioTree(waveform=jnp.zeros(shape=(B, 1, 44100)), sample_rate=44100),
         "other": jnp.zeros((B,)),
     }
 
@@ -334,7 +334,7 @@ def test_only_apply_to_audiotree():
     # Since encode_latents is a factory function, we need to handle scope differently
     # For now, test without scope since the function doesn't expose it directly
     transform = encode_latents(encoder_fn)
-    out = transform.map(audio_data)
+    out = transform.map(waveform)
     # Both src and other get processed, but only src has latents since it's an AudioTree
     assert out["src"].latents is not None
 
@@ -344,25 +344,25 @@ def test_trim_shorten():
 
     # Create audio with 2 seconds of data at 44100 Hz
     sample_rate = 44_100
-    audio_data = jnp.ones(shape=(1, 1, sample_rate * 2))  # 2 seconds
-    audio_tree = AudioTree(audio_data=audio_data, sample_rate=sample_rate)
+    waveform = jnp.ones(shape=(1, 1, sample_rate * 2))  # 2 seconds
+    audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate)
 
     # Test trimming to 0.5 seconds
     transform = trim(length=0.5)
     trimmed_audio = transform.map(audio_tree)
 
     expected_samples = int(0.5 * sample_rate)  # 22050 samples
-    assert trimmed_audio.audio_data.shape == (1, 1, expected_samples)
+    assert trimmed_audio.waveform.shape == (1, 1, expected_samples)
     # Verify the trimmed audio contains the first part of the original
-    assert jnp.array_equal(trimmed_audio.audio_data, audio_data[:, :, :expected_samples])
+    assert jnp.array_equal(trimmed_audio.waveform, waveform[:, :, :expected_samples])
 
     # Test trimming to 1 second
     transform = trim(length=1.0)
     trimmed_audio = transform.map(audio_tree)
 
     expected_samples = sample_rate  # 44100 samples
-    assert trimmed_audio.audio_data.shape == (1, 1, expected_samples)
-    assert jnp.array_equal(trimmed_audio.audio_data, audio_data[:, :, :expected_samples])
+    assert trimmed_audio.waveform.shape == (1, 1, expected_samples)
+    assert jnp.array_equal(trimmed_audio.waveform, waveform[:, :, :expected_samples])
 
 
 def test_trim_lengthen():
@@ -371,22 +371,22 @@ def test_trim_lengthen():
     # Create audio with 0.5 seconds of data at 44100 Hz
     sample_rate = 44_100
     original_samples = int(0.5 * sample_rate)  # 22050 samples
-    audio_data = jnp.arange(original_samples, dtype=jnp.float32).reshape(1, 1, -1)
-    audio_tree = AudioTree(audio_data=audio_data, sample_rate=sample_rate)
+    waveform = jnp.arange(original_samples, dtype=jnp.float32).reshape(1, 1, -1)
+    audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate)
 
     # Test lengthening to 1 second with "wrap" mode (default)
     transform = trim(length=1.0, mode="wrap")
     lengthened_audio = transform.map(audio_tree)
 
     expected_samples = sample_rate  # 44100 samples
-    assert lengthened_audio.audio_data.shape == (1, 1, expected_samples)
+    assert lengthened_audio.waveform.shape == (1, 1, expected_samples)
 
     # With wrap mode, the audio should repeat to fill the target length
     # Check that the first part matches the original
-    assert jnp.array_equal(lengthened_audio.audio_data[:, :, :original_samples], audio_data)
+    assert jnp.array_equal(lengthened_audio.waveform[:, :, :original_samples], waveform)
     # Check that the wrapped part starts repeating from the beginning
-    wrapped_part = lengthened_audio.audio_data[:, :, original_samples:expected_samples]
-    expected_wrap = audio_data[:, :, :expected_samples - original_samples]
+    wrapped_part = lengthened_audio.waveform[:, :, original_samples:expected_samples]
+    expected_wrap = waveform[:, :, :expected_samples - original_samples]
     assert jnp.array_equal(wrapped_part, expected_wrap)
 
     # Test lengthening to 1.5 seconds with "constant" mode (zero padding)
@@ -394,60 +394,60 @@ def test_trim_lengthen():
     lengthened_audio = transform.map(audio_tree)
 
     expected_samples = int(1.5 * sample_rate)  # 66150 samples
-    assert lengthened_audio.audio_data.shape == (1, 1, expected_samples)
+    assert lengthened_audio.waveform.shape == (1, 1, expected_samples)
 
     # With constant mode, the audio should be padded with zeros
     # Check that the first part matches the original
-    assert jnp.array_equal(lengthened_audio.audio_data[:, :, :original_samples], audio_data)
+    assert jnp.array_equal(lengthened_audio.waveform[:, :, :original_samples], waveform)
     # Check that the padded part is all zeros
-    padded_part = lengthened_audio.audio_data[:, :, original_samples:]
+    padded_part = lengthened_audio.waveform[:, :, original_samples:]
     assert jnp.all(padded_part == 0)
 
 
 def test_roll_wrap_mode():
     """Test roll transform with wrap mode (circular shift)."""
     B, C, T = 2, 2, 100
-    audio_data = np.arange(B * C * T).reshape(B, C, T).astype(np.float32)
+    waveform = np.arange(B * C * T).reshape(B, C, T).astype(np.float32)
     sample_rate = 10000
 
-    audio_tree = AudioTree(audio_data=audio_data, sample_rate=sample_rate)
+    audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate)
     transform = roll(min_seconds=0.001, max_seconds=0.001, mode="wrap")
     rng = np.random.default_rng(42)
     rolled = transform.random_map(audio_tree, rng)
 
-    expected_start = audio_data[0, 0, -10:]
-    actual_start = rolled.audio_data[0, 0, :10]
+    expected_start = waveform[0, 0, -10:]
+    actual_start = rolled.waveform[0, 0, :10]
     assert np.allclose(expected_start, actual_start)
 
 
 def test_roll_constant_mode():
     """Test roll transform with constant mode (zero padding)."""
     B, C, T = 1, 2, 100
-    audio_data = np.ones((B, C, T)).astype(np.float32)
+    waveform = np.ones((B, C, T)).astype(np.float32)
     sample_rate = 10000
-    audio_tree = AudioTree(audio_data=audio_data, sample_rate=sample_rate)
+    audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate)
 
     # Roll right by 0.002 seconds (20 samples)
     transform = roll(min_seconds=0.002, max_seconds=0.002, mode="constant")
     rng = np.random.default_rng(42)
     rolled = transform.random_map(audio_tree, rng)
 
-    assert np.all(rolled.audio_data[0, :, :20] == 0)
-    assert np.all(rolled.audio_data[0, :, 20:] == 1)
+    assert np.all(rolled.waveform[0, :, :20] == 0)
+    assert np.all(rolled.waveform[0, :, 20:] == 1)
 
 
 def test_roll_no_change():
     """Test roll transform with zero roll amount."""
     B, C, T = 1, 2, 100
-    audio_data = np.arange(B * C * T).reshape(B, C, T).astype(np.float32)
+    waveform = np.arange(B * C * T).reshape(B, C, T).astype(np.float32)
     sample_rate = 10000
-    audio_tree = AudioTree(audio_data=audio_data, sample_rate=sample_rate)
+    audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate)
 
     transform = roll(min_seconds=0.0, max_seconds=0.0, mode="wrap")
     rng = np.random.default_rng(42)
     rolled = transform.random_map(audio_tree, rng)
 
-    assert np.array_equal(rolled.audio_data, audio_data)
+    assert np.array_equal(rolled.waveform, waveform)
 
 
 # =============================================================================
@@ -460,7 +460,7 @@ from audiotree.transforms import jax as jax_transforms
 def test_jax_transforms():
     """Test that all JAX transforms can be instantiated and applied."""
     # Use JAX arrays for the JAX module transforms
-    audio_tree = AudioTree(audio_data=jnp.ones(shape=(1, 1, 44100)), sample_rate=44100)
+    audio_tree = AudioTree(waveform=jnp.ones(shape=(1, 1, 44100)), sample_rate=44100)
     audio_tree = audio_tree.replace_loudness()  # Required for volume_norm
     rng = jax.random.key(0)
 
@@ -489,7 +489,7 @@ def test_jax_transforms():
 
 def test_jax_volume_change():
     """Test JAX volume_change transform."""
-    audio_tree = AudioTree(audio_data=jnp.ones(shape=(1, 1, 44100)), sample_rate=44100)
+    audio_tree = AudioTree(waveform=jnp.ones(shape=(1, 1, 44100)), sample_rate=44100)
 
     config = {
         "min_db": 20,
@@ -500,36 +500,36 @@ def test_jax_volume_change():
     rng = jax.random.key(0)
     transformed_audio_tree = transform.random_map(audio_tree, rng)
 
-    assert jnp.allclose(audio_tree.audio_data * 10, transformed_audio_tree.audio_data)
+    assert jnp.allclose(audio_tree.waveform * 10, transformed_audio_tree.waveform)
 
 
 def test_jax_roll_wrap_mode():
     """Test JAX roll transform with wrap mode (circular shift)."""
     B, C, T = 2, 2, 100
-    audio_data = jnp.arange(B * C * T).reshape(B, C, T).astype(jnp.float32)
+    waveform = jnp.arange(B * C * T).reshape(B, C, T).astype(jnp.float32)
     sample_rate = 10000
 
-    audio_tree = AudioTree(audio_data=audio_data, sample_rate=sample_rate)
+    audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate)
     transform = jax_transforms.roll(min_seconds=0.001, max_seconds=0.001, mode="wrap")
     rng = jax.random.key(42)
     rolled = transform.random_map(audio_tree, rng)
 
-    expected_start = audio_data[0, 0, -10:]
-    actual_start = rolled.audio_data[0, 0, :10]
+    expected_start = waveform[0, 0, -10:]
+    actual_start = rolled.waveform[0, 0, :10]
     assert jnp.allclose(expected_start, actual_start)
 
 
 def test_jax_roll_constant_mode():
     """Test JAX roll transform with constant mode (zero padding)."""
     B, C, T = 1, 2, 100
-    audio_data = jnp.ones((B, C, T)).astype(jnp.float32)
+    waveform = jnp.ones((B, C, T)).astype(jnp.float32)
     sample_rate = 10000
-    audio_tree = AudioTree(audio_data=audio_data, sample_rate=sample_rate)
+    audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate)
 
     # Roll right by 0.002 seconds (20 samples)
     transform = jax_transforms.roll(min_seconds=0.002, max_seconds=0.002, mode="constant")
     rng = jax.random.key(42)
     rolled = transform.random_map(audio_tree, rng)
 
-    assert jnp.all(rolled.audio_data[0, :, :20] == 0)
-    assert jnp.all(rolled.audio_data[0, :, 20:] == 1)
+    assert jnp.all(rolled.waveform[0, :, :20] == 0)
+    assert jnp.all(rolled.waveform[0, :, 20:] == 1)
