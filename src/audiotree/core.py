@@ -300,6 +300,68 @@ class AudioTree:
         """Return the number of samples in the ``waveform`` (its last dimension)."""
         return self.waveform.shape[-1]
 
+    @property
+    def batch_size(self) -> int:
+        """Return the size of the leading (batch) axis.
+
+        Derived from ``waveform``, falling back to ``codes`` / ``latents`` for
+        audio-less trees (e.g. token-only training examples).
+        """
+        for value in (self.waveform, self.codes, self.latents):
+            if value is not None:
+                return value.shape[0]
+        raise ValueError(
+            "AudioTree has no waveform, codes, or latents to infer a batch size from."
+        )
+
+    @property
+    def num_channels(self) -> int:
+        """Return the number of audio channels (``waveform.shape[-2]``)."""
+        return self.waveform.shape[-2]
+
+    def __len__(self) -> int:
+        """Number of items in the batch (the leading axis).
+
+        Together with ``__getitem__`` this makes an AudioTree iterable over
+        its batch items, e.g. ``for item in tree: ...`` — each ``item`` is a
+        batch-of-1 AudioTree.
+        """
+        return self.batch_size
+
+    def __getitem__(self, key: Union[int, slice]) -> Self:
+        """Index the batch axis, returning an AudioTree of the selected item(s).
+
+        An integer key selects a single item but keeps the leading batch axis
+        (a batch of 1); a slice selects a sub-batch. Every array field —
+        including ``codes``, ``latents``, and the ``metadata`` arrays — is
+        indexed along the same axis so the fields stay rank-aligned.
+        """
+        if isinstance(key, int):
+            n = self.batch_size
+            if key < -n or key >= n:
+                # Required for the sequence-iteration protocol: `for item in
+                # tree` calls __getitem__(0), (1), ... and stops only on
+                # IndexError (it does NOT consult __len__).
+                raise IndexError(
+                    f"batch index {key} out of range for batch_size {n}"
+                )
+            # Use a length-1 slice rather than a scalar index so the batch
+            # axis survives on every field.
+            key = slice(key, key + 1 or None)
+
+        def _is_string_list(x) -> bool:
+            return (
+                isinstance(x, list) and bool(x)
+                and all(isinstance(s, str) for s in x)
+            )
+
+        def _index(x):
+            if isinstance(x, (np.ndarray, jnp.ndarray)) or _is_string_list(x):
+                return x[key]
+            return x
+
+        return tree_util.tree_map(_index, self, is_leaf=_is_string_list)
+
     @classmethod
     def from_file(
         cls,
@@ -660,8 +722,13 @@ class AudioTree:
 
         return excerpt
 
-    def to_mono(self) -> Self:
+    def to_mono(self, strategy: Literal["average", "left", "right"] = "average") -> Self:
         """Reduce the ``waveform`` to mono.
+
+        Args:
+            strategy: ``"average"`` mixes all channels down (default);
+                ``"left"`` / ``"right"`` select the corresponding channel of a
+                stereo waveform.
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
@@ -670,7 +737,15 @@ class AudioTree:
         B, C, T = waveform.shape
         if C == 1:
             return self
-        waveform = waveform.mean(axis=1, keepdims=True)
+        if strategy == "average":
+            waveform = waveform.mean(axis=-2, keepdims=True)
+        elif strategy in ("left", "right") and C == 2:
+            idx = 0 if strategy == "left" else 1
+            waveform = waveform[:, idx:idx + 1, :]
+        else:
+            raise ValueError(
+                f"Unsupported to_mono strategy {strategy!r} for {C} channels."
+            )
         return self.replace(waveform=waveform, loudness=None)
 
     def to_stereo(self) -> Self:
