@@ -174,10 +174,13 @@ class AudioTree:
 
             Will raise ValueError if audio has more than 5 channels.
         """
-        if isinstance(self.waveform, np.ndarray):
+        # Flatten any leading axes (e.g. after reshape_mini_batches) to a
+        # single batch axis, then restore them on the computed loudness.
+        leading_shape = self.waveform.shape[:-2]
+        waveform = self.waveform.reshape(-1, *self.waveform.shape[-2:])
+        if isinstance(waveform, np.ndarray):
             # integrated_loudness requires at least 400ms of audio
             min_samples = int(np.ceil(0.4 * self.sample_rate))
-            waveform = self.waveform
             if waveform.shape[-1] < min_samples:
                 pad_right = min_samples - waveform.shape[-1]
                 waveform = np.pad(waveform, ((0, 0), (0, 0), (0, pad_right)))
@@ -189,9 +192,9 @@ class AudioTree:
             loudness_array = np.array(loudness_values, dtype=np.float32)
         else:
             loudness_array = jit_integrated_loudness(
-                jnp.array(self.waveform), self.sample_rate, zeros=512
+                jnp.array(waveform), self.sample_rate, zeros=512
             )
-        return self.replace(loudness=loudness_array)
+        return self.replace(loudness=loudness_array.reshape(leading_shape))
 
     def normalize_loudness(self, target_lufs: float) -> Self:
         """Normalize audio to a target LUFS level.
@@ -221,8 +224,9 @@ class AudioTree:
         linear_gain = numpy.power(10.0, (target_lufs - tree.loudness) / 20.0)
         # Cast to audio dtype to avoid float64 promotion
         linear_gain = linear_gain.astype(tree.waveform.dtype)
-        # Expand gain for broadcasting: [B] -> [B, 1, 1] for [B, C, T] audio
-        linear_gain = linear_gain[:, None, None]
+        # Expand gain for broadcasting: [..., 1, 1] over the channel and
+        # sample axes, for any number of leading batch axes.
+        linear_gain = linear_gain[..., None, None]
         scaled_waveform = tree.waveform * linear_gain
 
         # Update loudness to target (shape [B])
@@ -734,14 +738,14 @@ class AudioTree:
             AudioTree: An instance of ``AudioTree``.
         """
         waveform = self.waveform
-        B, C, T = waveform.shape
+        C = self.num_channels
         if C == 1:
             return self
         if strategy == "average":
             waveform = waveform.mean(axis=-2, keepdims=True)
         elif strategy in ("left", "right") and C == 2:
             idx = 0 if strategy == "left" else 1
-            waveform = waveform[:, idx:idx + 1, :]
+            waveform = waveform[..., idx:idx + 1, :]
         else:
             raise ValueError(
                 f"Unsupported to_mono strategy {strategy!r} for {C} channels."
@@ -755,9 +759,10 @@ class AudioTree:
             AudioTree: An instance of ``AudioTree``.
         """
         waveform = self.waveform
-        B, C, T = waveform.shape
+        C = self.num_channels
         if C == 1:
-            waveform = np.tile(waveform, (1, 2, 1))
+            numpy = np if isinstance(waveform, np.ndarray) else jnp
+            waveform = numpy.concatenate([waveform, waveform], axis=-2)
             return self.replace(waveform=waveform)
         elif C == 2:
             return self
@@ -798,8 +803,12 @@ class AudioTree:
         """
         if sample_rate == self.sample_rate:
             return self
+        # The resample kernel is strictly 3-D, so flatten any leading axes
+        # (e.g. after reshape_mini_batches) and restore them afterwards.
+        leading_shape = self.waveform.shape[:-2]
+        flat = self.waveform.reshape(-1, *self.waveform.shape[-2:])
         waveform = resample(
-            self.waveform,
+            flat,
             self.sample_rate,
             sample_rate,
             zeros=zeros,
@@ -807,6 +816,7 @@ class AudioTree:
             output_length=output_length,
             full=full,
         )
+        waveform = waveform.reshape(*leading_shape, *waveform.shape[-2:])
         return self.replace(
             waveform=waveform, sample_rate=sample_rate, loudness=None
         )
@@ -864,7 +874,7 @@ class AudioTree:
             >>> x_batched.waveform.shape
             (4, 3, 1, 44100)  # 4 mini-batches of size 3
         """
-        B, C, _ = self.waveform.shape
+        B = self.waveform.shape[0]
 
         # Calculate number of mini-batches (assuming B is evenly divisible)
         assert B % mini_batch_size == 0

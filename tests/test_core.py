@@ -55,6 +55,54 @@ def test_audiotree_samples_property():
     assert tree.samples == 44100
 
 
+def test_methods_work_after_reshape_mini_batches():
+    """All AudioTree methods must handle the extra leading axis from reshape_mini_batches."""
+    rng = np.random.default_rng(0)
+    sample_rate = 16000
+    audio = rng.uniform(-0.5, 0.5, (4, 2, 8000)).astype(np.float32)
+    tree = AudioTree(audio, sample_rate)
+    mini = tree.reshape_mini_batches(2)
+    assert mini.waveform.shape == (2, 2, 2, 8000)
+
+    assert mini.samples == 8000
+    assert mini.num_channels == 2
+
+    # replace_loudness matches the flat computation, reshaped
+    flat_loudness = tree.replace_loudness().loudness
+    mini_loudness = mini.replace_loudness().loudness
+    assert mini_loudness.shape == (2, 2)
+    np.testing.assert_allclose(mini_loudness, flat_loudness.reshape(2, 2), rtol=1e-5)
+
+    # normalize_loudness
+    normalized = mini.normalize_loudness(-18.0)
+    assert normalized.waveform.shape == mini.waveform.shape
+    np.testing.assert_allclose(
+        normalized.replace_loudness().loudness, -18.0, atol=0.5
+    )
+
+    # to_mono / to_stereo
+    mono = mini.to_mono()
+    assert mono.waveform.shape == (2, 2, 1, 8000)
+    left = mini.to_mono("left")
+    np.testing.assert_array_equal(
+        left.waveform[..., 0, :], mini.waveform[..., 0, :]
+    )
+    stereo = mono.to_stereo()
+    assert stereo.waveform.shape == (2, 2, 2, 8000)
+    np.testing.assert_array_equal(
+        stereo.waveform[..., 0, :], stereo.waveform[..., 1, :]
+    )
+
+    # resample matches the flat computation, reshaped
+    resampled = mini.resample(8000)
+    assert resampled.waveform.shape == (2, 2, 2, 4000)
+    np.testing.assert_allclose(
+        np.asarray(resampled.waveform).reshape(4, 2, 4000),
+        np.asarray(tree.resample(8000).waveform),
+        rtol=1e-5,
+    )
+
+
 def test_audiotree_create_audio_dimensionality():
     """Test that AudioTree.create handles different audio dimensionalities correctly."""
     sample_rate = 44100
