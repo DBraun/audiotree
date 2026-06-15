@@ -1,7 +1,7 @@
 from dataclasses import field
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Self, Sequence, Union
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Self, Sequence, Union
 
 from absl import logging
 from flax import struct
@@ -365,6 +365,18 @@ class AudioTree:
             return x
 
         return tree_util.tree_map(_index, self, is_leaf=_is_string_list)
+
+    def __iter__(self) -> Iterator[Self]:
+        """Iterate over the batch axis, yielding a batch-of-1 AudioTree each.
+
+        This makes AudioTree a proper ``collections.abc.Iterable`` (the
+        sequence protocol via ``__getitem__`` already allowed ``for`` loops,
+        but ``isinstance(tree, Iterable)`` was ``False`` without ``__iter__``).
+        Each yielded item keeps the leading batch axis, e.g. iterating a
+        batch-16 tree yields 16 trees of ``batch_size == 1``.
+        """
+        for i in range(self.batch_size):
+            yield self[i]
 
     @classmethod
     def from_file(

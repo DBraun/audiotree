@@ -53,6 +53,22 @@ def test_getitem_slice_and_iteration():
         np.testing.assert_array_equal(item.waveform[0], tree.waveform[i])
 
 
+def test_is_iterable_and_yields_batch_of_one():
+    from collections.abc import Iterable, Iterator
+
+    tree = _tree(batch=16)
+    # AudioTree advertises itself as a proper Iterable via __iter__.
+    assert isinstance(tree, Iterable)
+    assert isinstance(iter(tree), Iterator)
+
+    count = 0
+    for a_tree_batch_size1 in tree:
+        assert a_tree_batch_size1.waveform.shape[0] == 1
+        assert isinstance(a_tree_batch_size1, AudioTree)
+        count += 1
+    assert count == 16
+
+
 def test_getitem_negative_index():
     tree = _tree(batch=3)
     np.testing.assert_array_equal(tree[-1].waveform[0], tree.waveform[2])
