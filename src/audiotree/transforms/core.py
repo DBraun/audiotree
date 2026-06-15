@@ -23,22 +23,24 @@ class Batch(BatchOperation):
     ``AudioTree.batch_fn`` instead.
 
     Example:
-        from audiotree.transforms import Batch
-        import grain
+        .. code-block:: python
 
-        dataloader = grain.DataLoader(
-            data_source=ds,
-            sampler=grain.samplers.IndexSampler(
-                num_records=len(ds),
-                shuffle=True,
-                seed=0,
-                shard_options=grain.NoSharding(),
-            ),
-            operations=[Batch(batch_size=32)],
-        )
+            from audiotree.transforms import Batch
+            import grain
+
+            dataloader = grain.DataLoader(
+                data_source=ds,
+                sampler=grain.samplers.IndexSampler(
+                    num_records=len(ds),
+                    shuffle=True,
+                    seed=0,
+                    shard_options=grain.NoSharding(),
+                ),
+                operations=[Batch(batch_size=32)],
+            )
 
     See Also:
-        ``AudioTree.batch_fn``: For use with ``IterDataset.batch()``.
+        ``AudioTree.batch_fn`` for use with ``IterDataset.batch()``.
     """
 
     def __post_init__(self):
