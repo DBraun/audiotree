@@ -17,6 +17,7 @@ from audiotree.transforms import (
     shift_phase,
     corrupt_phase,
     rescale_audio,
+    peak_normalize,
     invert_phase,
     swap_stereo,
     encode_latents,
@@ -450,6 +451,100 @@ def test_roll_no_change():
     assert np.array_equal(rolled.waveform, waveform)
 
 
+def test_peak_normalize():
+    """peak_normalize scales each batch item so its peak is 1.0."""
+    # Two items with different peaks (0.5 and 0.25) across channels.
+    waveform = np.zeros((2, 2, 4), dtype=np.float32)
+    waveform[0, 0, 1] = 0.5
+    waveform[0, 1, 2] = -0.25
+    waveform[1, 0, 0] = 0.25
+    waveform[1, 1, 3] = -0.1
+    audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_loudness()
+
+    result = peak_normalize().map(audio_tree)
+
+    # Each item now peaks at exactly 1.0, computed across channels and samples.
+    peaks = np.max(np.abs(result.waveform), axis=(-2, -1))
+    np.testing.assert_allclose(peaks, [1.0, 1.0], atol=1e-6)
+    # Inter-channel balance is preserved (both channels scaled by the same factor).
+    np.testing.assert_allclose(result.waveform[0, 1, 2], -0.5, atol=1e-6)
+    # Volume changed, so cached loudness is invalidated.
+    assert result.loudness is None
+
+
+def test_peak_normalize_silence():
+    """peak_normalize leaves silence untouched without dividing by zero."""
+    audio_tree = AudioTree(waveform=np.zeros((1, 2, 8), dtype=np.float32), sample_rate=44100)
+    result = peak_normalize().map(audio_tree)
+    assert np.all(np.isfinite(result.waveform))
+    assert np.all(result.waveform == 0)
+
+
+def test_trim_invalidates_loudness():
+    """Resizing the waveform invalidates cached loudness; a no-op preserves it."""
+    sample_rate = 44100
+    waveform = np.random.randn(2, 1, sample_rate * 2).astype(np.float32) * 0.1
+    audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate).replace_loudness()
+    assert audio_tree.loudness is not None
+
+    # Shorten -> loudness invalidated.
+    assert trim(length=1.0).map(audio_tree).loudness is None
+    # Lengthen -> loudness invalidated.
+    assert trim(length=3.0).map(audio_tree).loudness is None
+    # Same length is a no-op and keeps the cached loudness.
+    same = trim(length=2.0).map(audio_tree)
+    assert same.loudness is not None
+
+
+def test_roll_loudness_invalidation():
+    """Constant-mode roll invalidates loudness; wrap-mode preserves it."""
+    waveform = np.random.randn(1, 2, 10000).astype(np.float32) * 0.1
+    audio_tree = AudioTree(waveform=waveform, sample_rate=10000).replace_loudness()
+    rng = np.random.default_rng(0)
+
+    wrapped = roll(min_seconds=0.1, max_seconds=0.1, mode="wrap").random_map(
+        audio_tree, rng
+    )
+    assert wrapped.loudness is not None
+
+    constant = roll(min_seconds=0.1, max_seconds=0.1, mode="constant").random_map(
+        audio_tree, rng
+    )
+    assert constant.loudness is None
+
+
+def test_to_stereo_invalidates_loudness():
+    """Duplicating a mono channel changes loudness, so it is invalidated."""
+    mono_tree = AudioTree(
+        waveform=np.random.randn(2, 1, 44100).astype(np.float32) * 0.1,
+        sample_rate=44100,
+    ).replace_loudness()
+    assert mono_tree.loudness is not None
+
+    stereo_tree = mono_tree.to_stereo()
+    assert stereo_tree.num_channels == 2
+    assert stereo_tree.loudness is None
+
+    # Already-stereo audio is unchanged, so its loudness is preserved.
+    assert stereo_tree.replace_loudness().to_stereo().loudness is not None
+
+
+def test_phase_transforms_keep_loudness():
+    """Phase transforms invalidate loudness by default, kept via keep_loudness."""
+    waveform = np.random.randn(2, 1, 44100).astype(np.float32) * 0.1
+    audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_loudness()
+    original_loudness = audio_tree.loudness
+    assert original_loudness is not None
+    rng = np.random.default_rng(0)
+
+    for transform in (shift_phase, corrupt_phase):
+        # Default: loudness invalidated.
+        assert transform().random_map(audio_tree, rng).loudness is None
+        # keep_loudness=True: cached value carried through unchanged.
+        kept = transform(keep_loudness=True).random_map(audio_tree, rng)
+        np.testing.assert_array_equal(kept.loudness, original_loudness)
+
+
 # =============================================================================
 # JAX Module Tests
 # =============================================================================
@@ -484,6 +579,7 @@ def test_jax_transforms():
     jax_transforms.invert_phase().random_map(audio_tree, subkey)
 
     jax_transforms.rescale_audio().map(audio_tree)
+    jax_transforms.peak_normalize().map(audio_tree)
     jax_transforms.identity().map(audio_tree)
 
 
@@ -533,3 +629,15 @@ def test_jax_roll_constant_mode():
 
     assert jnp.all(rolled.waveform[0, :, :20] == 0)
     assert jnp.all(rolled.waveform[0, :, 20:] == 1)
+
+
+def test_jax_peak_normalize():
+    """Test JAX peak_normalize scales each item to a peak of 1.0."""
+    waveform = jnp.array([[[0.0, 0.5, -0.25, 0.1]]], dtype=jnp.float32)  # peak 0.5
+    audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_loudness()
+
+    result = jax_transforms.peak_normalize().map(audio_tree)
+
+    assert jnp.allclose(jnp.max(jnp.abs(result.waveform)), 1.0)
+    assert jnp.allclose(result.waveform[0, 0, 1], 1.0)
+    assert result.loudness is None

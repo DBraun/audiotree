@@ -33,6 +33,7 @@ from audiotree.transforms.helpers import (
     _volume_norm_np,
     _volume_change_np,
     _rescale_audio_np,
+    _peak_normalize_np,
     _invert_phase_np,
     _swap_stereo_np,
     _corrupt_phase_np,
@@ -226,6 +227,29 @@ def rescale_audio(audio_tree: AudioTree) -> AudioTree:
     return _rescale_audio_np(audio_tree).replace(loudness=None)
 
 
+@map_transform
+def peak_normalize(audio_tree: AudioTree) -> AudioTree:
+    """Peak-normalize audio so the largest absolute value is 1.0.
+
+    Unlike :func:`rescale_audio`, which only scales down audio that exceeds the
+    [-1.0, 1.0] range, this always divides by the peak so the result peaks at
+    1.0. The peak is computed per item in the batch (across channels and
+    samples) and clamped to a small epsilon to avoid division by zero on silent
+    audio.
+
+    Args:
+        audio_tree: Input audio
+
+    Returns:
+        AudioTree with peak-normalized audio
+
+    Example:
+        transform = peak_normalize()
+        ds = ds.map(transform)
+    """
+    return _peak_normalize_np(audio_tree).replace(loudness=None)
+
+
 @random_transform
 def swap_stereo(
     audio_tree: AudioTree,
@@ -258,6 +282,7 @@ def corrupt_phase(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
+    keep_loudness: bool = False,
 ) -> AudioTree:
     """Perform phase corruption on audio.
 
@@ -271,6 +296,10 @@ def corrupt_phase(
         hop_factor: Hop size as fraction of frame_length
         frame_length: STFT frame length in samples
         window: Window function name
+        keep_loudness: If True, preserve the cached ``loudness``. Phase
+            corruption leaves the magnitude spectrum (and thus energy) intact,
+            so loudness is approximately unchanged; the cached value is
+            invalidated by default to be safe.
 
     Returns:
         AudioTree with corrupted phase
@@ -279,7 +308,9 @@ def corrupt_phase(
         transform = corrupt_phase(amount=0.5, hop_factor=0.5)
         ds = ds.random_map(transform, seed=42)
     """
-    return _corrupt_phase_np(audio_tree, rng, amount, hop_factor, frame_length, window)
+    return _corrupt_phase_np(
+        audio_tree, rng, amount, hop_factor, frame_length, window, keep_loudness
+    )
 
 
 @random_transform
@@ -287,6 +318,7 @@ def shift_phase(
     audio_tree: AudioTree,
     rng: np.random.Generator,
     amount: float = 1.0,
+    keep_loudness: bool = False,
 ) -> AudioTree:
     """Perform a phase shift on audio.
 
@@ -296,6 +328,10 @@ def shift_phase(
         audio_tree: Input audio
         rng: numpy random Generator
         amount: Maximum phase shift in multiples of pi
+        keep_loudness: If True, preserve the cached ``loudness``. A phase shift
+            leaves the magnitude spectrum (and thus energy) intact, so loudness
+            is approximately unchanged; the cached value is invalidated by
+            default to be safe.
 
     Returns:
         AudioTree with shifted phase
@@ -304,7 +340,7 @@ def shift_phase(
         transform = shift_phase(amount=0.5)
         ds = ds.random_map(transform, seed=42)
     """
-    return _shift_phase_np(audio_tree, rng, amount)
+    return _shift_phase_np(audio_tree, rng, amount, keep_loudness=keep_loudness)
 
 
 @random_transform

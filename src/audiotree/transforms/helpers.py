@@ -123,6 +123,26 @@ def _rescale_audio_np(audio_tree: AudioTree) -> AudioTree:
 # =============================================================================
 
 
+def _peak_normalize_jax(audio_tree: AudioTree) -> AudioTree:
+    """JAX implementation of peak normalization."""
+    waveform = audio_tree.waveform
+    peaks = jnp.max(jnp.absolute(waveform), axis=[-2, -1])
+    peaks = jnp.expand_dims(peaks, [-2, -1])
+    peaks = jnp.maximum(peaks, 1e-8)
+    waveform = waveform / peaks
+    return audio_tree.replace(waveform=waveform)
+
+
+def _peak_normalize_np(audio_tree: AudioTree) -> AudioTree:
+    """NumPy implementation of peak normalization."""
+    waveform = audio_tree.waveform
+    peaks = np.max(np.absolute(waveform), axis=(-2, -1))
+    peaks = np.expand_dims(peaks, (-2, -1))
+    peaks = np.maximum(peaks, 1e-8)
+    waveform = waveform / peaks
+    return audio_tree.replace(waveform=waveform)
+
+
 def _invert_phase_jax(audio_tree: AudioTree) -> AudioTree:
     """JAX implementation of phase inversion."""
     waveform = -audio_tree.waveform
@@ -164,6 +184,7 @@ def _corrupt_phase_jax(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
+    keep_loudness: bool = False,
 ) -> AudioTree:
     """JAX implementation of phase corruption."""
     waveform = audio_tree.waveform
@@ -185,7 +206,8 @@ def _corrupt_phase_jax(
         stft_data, n_fft=frame_length, hop_length=hop_length, window=window, center=True, length=length
     )
 
-    return audio_tree.replace(waveform=waveform)
+    loudness = audio_tree.loudness if keep_loudness else None
+    return audio_tree.replace(waveform=waveform, loudness=loudness)
 
 
 def _corrupt_phase_np(
@@ -195,6 +217,7 @@ def _corrupt_phase_np(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
+    keep_loudness: bool = False,
 ) -> AudioTree:
     """NumPy implementation of phase corruption."""
     waveform = audio_tree.waveform
@@ -217,7 +240,8 @@ def _corrupt_phase_np(
                 stft_data, n_fft=frame_length, hop_length=hop_length, window=window, center=True, length=length
             )
 
-    return audio_tree.replace(waveform=result)
+    loudness = audio_tree.loudness if keep_loudness else None
+    return audio_tree.replace(waveform=result, loudness=loudness)
 
 
 # =============================================================================
@@ -232,6 +256,7 @@ def _shift_phase_jax(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
+    keep_loudness: bool = False,
 ) -> AudioTree:
     """JAX implementation of phase shift."""
     waveform = audio_tree.waveform
@@ -256,7 +281,8 @@ def _shift_phase_jax(
         stft_data, n_fft=frame_length, hop_length=hop_length, window=window, center=True, length=length
     )
 
-    return audio_tree.replace(waveform=waveform)
+    loudness = audio_tree.loudness if keep_loudness else None
+    return audio_tree.replace(waveform=waveform, loudness=loudness)
 
 
 def _shift_phase_np(
@@ -266,6 +292,7 @@ def _shift_phase_np(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
+    keep_loudness: bool = False,
 ) -> AudioTree:
     """NumPy implementation of phase shift."""
     waveform = audio_tree.waveform
@@ -289,7 +316,8 @@ def _shift_phase_np(
                 stft_data, n_fft=frame_length, hop_length=hop_length, window=window, center=True, length=length
             )
 
-    return audio_tree.replace(waveform=result)
+    loudness = audio_tree.loudness if keep_loudness else None
+    return audio_tree.replace(waveform=result, loudness=loudness)
 
 
 # =============================================================================
@@ -332,7 +360,10 @@ def _roll_jax(
             raise ValueError(f"Unknown mode: {mode}. Use 'wrap' or 'constant'.")
 
     rolled_audio = roll_single_item(audio_tree.waveform, roll_amounts)
-    return audio_tree.replace(waveform=rolled_audio)
+    # "wrap" reorders existing samples (loudness preserved); "constant" zeros
+    # out part of the signal, which changes its integrated loudness.
+    loudness = None if mode == "constant" else audio_tree.loudness
+    return audio_tree.replace(waveform=rolled_audio, loudness=loudness)
 
 
 def _roll_np(
@@ -366,7 +397,10 @@ def _roll_np(
         else:
             raise ValueError(f"Unknown mode: {mode}. Use 'wrap' or 'constant'.")
 
-    return audio_tree.replace(waveform=result)
+    # "wrap" reorders existing samples (loudness preserved); "constant" zeros
+    # out part of the signal, which changes its integrated loudness.
+    loudness = None if mode == "constant" else audio_tree.loudness
+    return audio_tree.replace(waveform=result, loudness=loudness)
 
 
 # =============================================================================
@@ -380,16 +414,19 @@ def _trim_jax(audio_tree: AudioTree, length: float, mode: str = "wrap") -> Audio
     T = waveform.shape[-1]
     target_T = int(length * audio_tree.sample_rate)
 
-    if T < target_T:
+    if T == target_T:
+        return audio_tree
+    elif T < target_T:
         waveform = jnp.pad(
             waveform,
             pad_width=((0, 0), (0, 0), (0, target_T - T)),
             mode=mode,
         )
-    elif T > target_T:
+    else:
         waveform = waveform[..., :target_T]
 
-    return audio_tree.replace(waveform=waveform)
+    # Changing the audio length changes its integrated loudness.
+    return audio_tree.replace(waveform=waveform, loudness=None)
 
 
 def _trim_np(audio_tree: AudioTree, length: float, mode: str = "wrap") -> AudioTree:
@@ -398,13 +435,16 @@ def _trim_np(audio_tree: AudioTree, length: float, mode: str = "wrap") -> AudioT
     T = waveform.shape[-1]
     target_T = int(length * audio_tree.sample_rate)
 
-    if T < target_T:
+    if T == target_T:
+        return audio_tree
+    elif T < target_T:
         waveform = np.pad(
             waveform,
             pad_width=((0, 0), (0, 0), (0, target_T - T)),
             mode=mode,
         )
-    elif T > target_T:
+    else:
         waveform = waveform[..., :target_T]
 
-    return audio_tree.replace(waveform=waveform)
+    # Changing the audio length changes its integrated loudness.
+    return audio_tree.replace(waveform=waveform, loudness=None)

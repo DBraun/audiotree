@@ -207,8 +207,9 @@ class TestDatasetChaining:
             # Load item
             item = ds[0]
 
-            # Verify transforms were applied
-            assert item.loudness is not None
+            # Verify transforms were applied. trim runs last and changes the
+            # audio length, so it invalidates the loudness set by volume_norm.
+            assert item.loudness is None
             assert item.waveform.shape[-1] == int(3.0 * 44100)
 
     def test_multiple_random_transforms(self):
@@ -324,8 +325,9 @@ class TestArgBindIntegration:
             # Load item
             item = ds[0]
 
-            # Verify transforms applied with correct parameters
-            assert item.loudness is not None
+            # Verify transforms applied with correct parameters. trim runs last
+            # and changes the audio length, invalidating volume_norm's loudness.
+            assert item.loudness is None
             assert item.waveform.shape[-1] == int(3.0 * 44100)
 
 

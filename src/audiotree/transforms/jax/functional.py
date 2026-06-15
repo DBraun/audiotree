@@ -34,6 +34,7 @@ from audiotree.transforms.helpers import (
     _volume_norm_jax,
     _volume_change_jax,
     _rescale_audio_jax,
+    _peak_normalize_jax,
     _invert_phase_jax,
     _swap_stereo_jax,
     _corrupt_phase_jax,
@@ -142,6 +143,18 @@ def rescale_audio(audio_tree: AudioTree) -> AudioTree:
     return _rescale_audio_jax(audio_tree).replace(loudness=None)
 
 
+@map_transform
+def peak_normalize(audio_tree: AudioTree) -> AudioTree:
+    """Peak-normalize audio so the largest absolute value is 1.0.
+
+    Unlike :func:`rescale_audio`, which only scales down audio that exceeds the
+    [-1.0, 1.0] range, this always divides by the peak (clamped to a small
+    epsilon) so the result peaks at 1.0. The peak is computed per item in the
+    batch, across channels and samples.
+    """
+    return _peak_normalize_jax(audio_tree).replace(loudness=None)
+
+
 @random_transform
 def swap_stereo(audio_tree: AudioTree, rng: jax.Array) -> AudioTree:
     """Swap the channels of stereo audio.
@@ -164,6 +177,7 @@ def corrupt_phase(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
+    keep_loudness: bool = False,
 ) -> AudioTree:
     """Perform phase corruption on audio.
 
@@ -174,11 +188,17 @@ def corrupt_phase(
         hop_factor: Hop size as fraction of frame_length
         frame_length: STFT frame length in samples
         window: Window function name
+        keep_loudness: If True, preserve the cached ``loudness``. Phase
+            corruption leaves the magnitude spectrum (and thus energy) intact,
+            so loudness is approximately unchanged; the cached value is
+            invalidated by default to be safe.
 
     Returns:
         AudioTree with corrupted phase
     """
-    return _corrupt_phase_jax(audio_tree, rng, amount, hop_factor, frame_length, window)
+    return _corrupt_phase_jax(
+        audio_tree, rng, amount, hop_factor, frame_length, window, keep_loudness
+    )
 
 
 @random_transform
@@ -186,6 +206,7 @@ def shift_phase(
     audio_tree: AudioTree,
     rng: jax.Array,
     amount: float = 1.0,
+    keep_loudness: bool = False,
 ) -> AudioTree:
     """Perform a phase shift on audio.
 
@@ -193,11 +214,15 @@ def shift_phase(
         audio_tree: Input audio
         rng: JAX random key
         amount: Maximum phase shift in multiples of pi
+        keep_loudness: If True, preserve the cached ``loudness``. A phase shift
+            leaves the magnitude spectrum (and thus energy) intact, so loudness
+            is approximately unchanged; the cached value is invalidated by
+            default to be safe.
 
     Returns:
         AudioTree with shifted phase
     """
-    return _shift_phase_jax(audio_tree, rng, amount)
+    return _shift_phase_jax(audio_tree, rng, amount, keep_loudness=keep_loudness)
 
 
 @random_transform

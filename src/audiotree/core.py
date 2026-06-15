@@ -763,7 +763,9 @@ class AudioTree:
         if C == 1:
             numpy = np if isinstance(waveform, np.ndarray) else jnp
             waveform = numpy.concatenate([waveform, waveform], axis=-2)
-            return self.replace(waveform=waveform)
+            # Duplicating the channel changes the integrated loudness (BS.1770
+            # sums per-channel energy), so the cached value is no longer valid.
+            return self.replace(waveform=waveform, loudness=None)
         elif C == 2:
             return self
         else:

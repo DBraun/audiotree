@@ -105,8 +105,9 @@ class TestBasicChaining:
             # Load item and verify all transforms were applied
             item = ds[0]
 
-            # Check volume_norm and volume_change were applied (loudness should be present)
-            assert item.loudness is not None
+            # trim runs last and changes the audio length, so it invalidates
+            # the loudness set by the earlier volume transforms.
+            assert item.loudness is None
 
             # Check Trim was applied
             expected_length = int(3.0 * 44100)
@@ -140,9 +141,10 @@ class TestBalancedDatasetChaining:
             )
             ds = ds.map(trim(length=3.0))
 
-            # Verify transforms applied and source tracking preserved
+            # Verify transforms applied and source tracking preserved. trim runs
+            # last and changes the length, invalidating volume_norm's loudness.
             item = ds[0]
-            assert item.loudness is not None
+            assert item.loudness is None
             assert item.waveform.shape[-1] == int(3.0 * 44100)
             assert item.source[0] in ["group1", "group2"]
 
@@ -180,8 +182,10 @@ class TestBalancedDatasetChaining:
 
             assert item1.waveform.shape[-1] == int(3.0 * 44100)
             assert item2.waveform.shape[-1] == int(3.0 * 44100)
+            # Order matters for loudness: option 1 normalizes last so loudness is
+            # set, while option 2 trims last, which invalidates it.
             assert item1.loudness is not None
-            assert item2.loudness is not None
+            assert item2.loudness is None
 
 
 class TestProbabilisticTransforms:
