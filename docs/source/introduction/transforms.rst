@@ -236,8 +236,8 @@ Available Transforms
 - ``volume_change(min_db, max_db)`` - Random gain adjustment
 - ``invert_phase()`` - Invert audio phase
 - ``swap_stereo()`` - Swap stereo channels
-- ``corrupt_phase(amount, ...)`` - Corrupt phase spectrum
-- ``shift_phase(amount)`` - Shift phase spectrum
+- ``corrupt_phase(amount, ..., keep_loudness=False)`` - Corrupt phase spectrum
+- ``shift_phase(amount, keep_loudness=False)`` - Shift phase spectrum
 - ``roll(min_seconds, max_seconds, mode)`` - Circular shift audio
 
 **Map Transforms** (use with ``.map()``):
@@ -245,14 +245,58 @@ Available Transforms
 - ``trim(length, mode)`` - Trim or pad to fixed length
 - ``mono()`` - Convert to mono
 - ``stereo()`` - Convert to stereo
-- ``rescale_audio()`` - Rescale to [-1, 1] range
+- ``rescale_audio()`` - Scale down to [-1, 1] only if the audio clips
+- ``peak_normalize()`` - Always scale each item so its peak is 1.0
 - ``identity()`` - No-op transform
+
+.. note::
+   ``rescale_audio()`` and ``peak_normalize()`` are easy to confuse.
+   ``rescale_audio()`` only scales audio *down* when its peak exceeds 1.0 (leaving
+   quieter audio untouched), which is handy after transforms that may have caused
+   clipping. ``peak_normalize()`` *always* divides each batch item by its peak (across
+   channels and samples, clamped to a small epsilon) so the result peaks at exactly
+   1.0. Both are available in the NumPy (``audiotree.transforms``) and JAX
+   (``audiotree.transforms.jax``) backends.
 
 **Special Transforms**:
 
 - ``choose(*transforms, c, weights, prob)`` - Randomly select from multiple transforms
 - ``encode_with_codec(encoder_fn, num_codebooks)`` - Encode with neural codec
 - ``encode_latents(encoder_fn)`` - Encode to latent space
+
+Loudness and Transforms
+-----------------------
+
+AudioTree caches a per-item ``loudness`` (in LUFS) once you call
+:meth:`~audiotree.core.AudioTree.replace_loudness`. Transforms that change the
+signal's energy keep that cache honest by clearing it (setting ``loudness`` to
+``None``), so a later read recomputes it instead of returning a stale value:
+
+- ``volume_norm`` sets ``loudness`` to its target; ``volume_change`` shifts the
+  cached value by the applied gain — both keep ``loudness`` populated and correct.
+- ``trim``, ``roll(mode="constant")``, ``rescale_audio``, and ``peak_normalize``
+  change the signal's energy, so they **invalidate** ``loudness``.
+- ``invert_phase``, ``swap_stereo``, and ``roll(mode="wrap")`` leave the energy
+  unchanged, so they **preserve** ``loudness``.
+
+The phase transforms ``corrupt_phase`` and ``shift_phase`` are a special case: they
+only rotate phase, leaving the magnitude spectrum (and thus the energy) essentially
+unchanged. By default they still invalidate ``loudness`` to be safe, but you can pass
+``keep_loudness=True`` to carry the cached value through:
+
+.. code-block:: python
+
+    audio_tree = audio_tree.replace_loudness()
+
+    # Default: loudness is recomputed on next access.
+    t1 = shift_phase(amount=0.5)
+    >>> t1.random_map(audio_tree, rng).loudness is None
+    True
+
+    # Opt in to preserving the cached loudness.
+    t2 = shift_phase(amount=0.5, keep_loudness=True)
+    >>> t2.random_map(audio_tree, rng).loudness is None
+    False
 
 Creating Custom Transforms
 ---------------------------
