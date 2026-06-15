@@ -3,6 +3,7 @@ from pathlib import Path
 
 import jax
 import numpy as np
+import pytest
 
 from audiotree.core import AudioTree
 
@@ -53,6 +54,61 @@ def test_audiotree_samples_property():
     """Test that the samples property returns the last dimension of the waveform."""
     tree = AudioTree(np.zeros((4, 2, 44100)), 44100)
     assert tree.samples == 44100
+
+
+def test_write_round_trip(tmp_path):
+    """write() saves a batch-of-1 tree and round-trips via from_file."""
+    import soundfile
+
+    sr = 16000
+    waveform = (np.random.default_rng(0).standard_normal((1, 2, sr)) * 0.1).astype(
+        np.float32
+    )
+    tree = AudioTree(waveform=waveform, sample_rate=sr)
+
+    out = tree.write(tmp_path / "out.wav")
+    assert isinstance(out, Path) and out.exists()
+
+    # soundfile stores (samples, channels); default WAV subtype is PCM_16.
+    data, sr_read = soundfile.read(str(out))
+    assert sr_read == sr
+    assert data.shape == (sr, 2)
+    assert soundfile.info(str(out)).subtype == "PCM_16"
+
+    # Round-trips through from_file (allowing PCM_16 quantization error).
+    reloaded = AudioTree.from_file(out, sample_rate=sr)
+    assert reloaded.sample_rate == sr
+    np.testing.assert_allclose(reloaded.waveform[0], waveform[0], atol=1e-3)
+
+
+def test_write_options_and_batch_assertion(tmp_path):
+    """write() forwards subtype/format and requires batch_size == 1."""
+    import soundfile
+
+    sr = 8000
+    single = AudioTree(waveform=np.ones((1, 1, sr), dtype=np.float32) * 0.5, sample_rate=sr)
+
+    # subtype is forwarded.
+    single.write(tmp_path / "a.wav", subtype="PCM_24")
+    assert soundfile.info(str(tmp_path / "a.wav")).subtype == "PCM_24"
+
+    # Format is inferred from the extension (FLAC here).
+    single.write(tmp_path / "a.flac")
+    assert soundfile.info(str(tmp_path / "a.flac")).format == "FLAC"
+
+    # A multi-item batch must be indexed/iterated first.
+    batch = AudioTree(waveform=np.zeros((3, 1, sr), dtype=np.float32), sample_rate=sr)
+    with pytest.raises(AssertionError, match="batch_size == 1"):
+        batch.write(tmp_path / "fail.wav")
+
+    # Iterating yields writable batch-of-1 trees.
+    for i, item in enumerate(batch):
+        item.write(tmp_path / f"item_{i}.wav")
+    assert sorted(p.name for p in tmp_path.glob("item_*.wav")) == [
+        "item_0.wav",
+        "item_1.wav",
+        "item_2.wav",
+    ]
 
 
 def test_methods_work_after_reshape_mini_batches():

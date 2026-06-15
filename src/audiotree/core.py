@@ -783,6 +783,53 @@ class AudioTree:
         else:
             raise ValueError(f"Cannot make AudioTree stereo if it has {C} channels.")
 
+    def write(
+        self,
+        filepath: Union[str, Path],
+        subtype: str | None = None,
+        format: str | None = None,
+        endian: str | None = None,
+    ) -> Path:
+        """Write the ``waveform`` to an audio file using ``soundfile``.
+
+        This is the inverse of :meth:`from_file`. The AudioTree must contain a
+        single item (``batch_size == 1``); index or iterate the batch first
+        (e.g. ``tree[0]`` or ``for item in tree``) to write each item. The
+        sample rate is taken from ``self.sample_rate`` — call :meth:`resample`
+        beforehand if you want a different one.
+
+        Args:
+            filepath: Output path. The file format is inferred from the
+                extension (e.g. ``.wav``, ``.flac``, ``.ogg``) unless overridden
+                by ``format``.
+            subtype: soundfile subtype, e.g. ``"PCM_16"``, ``"PCM_24"``,
+                ``"FLOAT"``. When ``None`` (default) soundfile picks the format
+                default (``PCM_16`` for WAV).
+            format: Major format override (e.g. ``"WAV"``, ``"FLAC"``). When
+                ``None`` it is inferred from the filepath extension.
+            endian: Endianness override (e.g. ``"FILE"``, ``"LITTLE"``,
+                ``"BIG"``).
+
+        Returns:
+            Path: The path that was written.
+        """
+        assert self.batch_size == 1, (
+            f"AudioTree.write requires batch_size == 1, got {self.batch_size}. "
+            f"Index or iterate the batch first (e.g. tree[0])."
+        )
+        filepath = Path(filepath)
+        # soundfile expects (samples, channels); waveform is (1, channels, samples).
+        audio = np.asarray(self.waveform[0].T)
+        soundfile.write(
+            str(filepath),
+            audio,
+            self.sample_rate,
+            subtype=subtype,
+            format=format,
+            endian=endian,
+        )
+        return filepath
+
     def resample(
         self,
         sample_rate: int,
