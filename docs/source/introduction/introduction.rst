@@ -304,12 +304,12 @@ Pairing ``__iter__`` with ``len()`` means progress bars work out of the box —
         ...
 
 To reassemble a batch from individual items, use
-:meth:`~audiotree.core.AudioTree.batch_fn`:
+:meth:`~audiotree.core.AudioTree.batch`:
 
 .. testcode::
 
     items = [audio_tree[i] for i in range(len(audio_tree))]
-    rebuilt = AudioTree.batch_fn(items)
+    rebuilt = AudioTree.batch(items)
     print(rebuilt.waveform.shape)
 
 .. testoutput::

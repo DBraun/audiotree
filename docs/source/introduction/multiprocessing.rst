@@ -222,7 +222,7 @@ For I/O-bound workloads:
 Batching
 --------
 
-Use ``AudioTree.batch_fn`` with ``IterDataset.batch()`` to batch AudioTree objects.
+Use ``AudioTree.batch`` with ``IterDataset.batch()`` to batch AudioTree objects.
 This concatenates along axis 0 (the batch dimension) rather than stacking, which would
 add an extra dimension.
 
@@ -234,18 +234,18 @@ add an extra dimension.
 
     ds = create_audio_dataset("/data/audio", duration=1.0)
 
-    # Batch with AudioTree.batch_fn
-    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+    # Batch with AudioTree.batch
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch)
 
     for batch in iter_ds:
         print(batch.waveform.shape)  # (32, channels, samples)
 
-``batch_fn`` also handles dict structures containing AudioTrees:
+``batch`` also handles dict structures containing AudioTrees:
 
 .. code-block:: python
 
     # If your dataset yields {"src": AudioTree, "tgt": AudioTree}
-    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch)
 
     for batch in iter_ds:
         # batch is a dict with batched AudioTrees
@@ -281,7 +281,7 @@ Common Patterns
     )
     iter_ds = (
         ds.to_iter_dataset()
-        .batch(32, batch_fn=AudioTree.batch_fn)
+        .batch(32, batch_fn=AudioTree.batch)
         .mp_prefetch(options=mp_options)
     )
 
@@ -312,7 +312,7 @@ Common Patterns
     mp_options = grain.MultiprocessingOptions(num_workers=4)
     val_iter_ds = (
         val_ds.to_iter_dataset()
-        .batch(32, batch_fn=AudioTree.batch_fn)
+        .batch(32, batch_fn=AudioTree.batch)
         .mp_prefetch(options=mp_options)
     )
 
@@ -452,8 +452,8 @@ Complete example with batching and all optimizations:
     )
     iter_ds = ds.to_iter_dataset(read_options=read_options)
 
-    # Batch with AudioTree.batch_fn
-    iter_ds = iter_ds.batch(32, batch_fn=AudioTree.batch_fn)
+    # Batch with AudioTree.batch
+    iter_ds = iter_ds.batch(32, batch_fn=AudioTree.batch)
 
     # Multiprocessing for CPU-bound work
     mp_options = grain.MultiprocessingOptions(

@@ -20,7 +20,7 @@ class Batch(BatchOperation):
     """Concatenates AudioTree objects along the batch axis instead of stacking.
 
     Use this with grain's DataLoader API. For the IterDataset API, use
-    ``AudioTree.batch_fn`` instead.
+    ``AudioTree.batch`` instead.
 
     Example:
         .. code-block:: python
@@ -40,7 +40,7 @@ class Batch(BatchOperation):
             )
 
     See Also:
-        ``AudioTree.batch_fn`` for use with ``IterDataset.batch()``.
+        ``AudioTree.batch`` for use with ``IterDataset.batch()``.
     """
 
     def __post_init__(self):

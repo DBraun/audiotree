@@ -751,10 +751,10 @@ Batching Dict Structures
 -------------------------
 
 When using Grain's ``IterDataset.batch()`` API with dict structures containing AudioTrees,
-use ``AudioTree.batch_fn`` as the batch function. It handles both direct AudioTree sequences
+use ``AudioTree.batch`` as the batch function. It handles both direct AudioTree sequences
 and nested structures like dicts.
 
-**Important**: ``batch_fn`` concatenates all arrays along axis 0. This means your data
+**Important**: ``batch`` concatenates all arrays along axis 0. This means your data
 should already have a batch dimension (even if it's size 1), which is how AudioTree works
 by default with shape ``(batch, channels, samples)``.
 
@@ -767,7 +767,7 @@ by default with shape ``(batch, channels, samples)``.
     from audiotree.sources import create_audio_dataset
 
     ds = create_audio_dataset("/data/audio", duration=1.0)
-    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch)
 
     for batch in iter_ds:
         print(batch.waveform.shape)  # (32, channels, samples)
@@ -788,8 +788,8 @@ by default with shape ``(batch, channels, samples)``.
 
     ds = ds.map(create_pair)
 
-    # batch_fn handles dict structures automatically
-    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+    # batch handles dict structures automatically
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch)
 
     for batch in iter_ds:
         # batch is {"src": AudioTree, "tgt": AudioTree} with batched arrays
@@ -798,7 +798,7 @@ by default with shape ``(batch, channels, samples)``.
 
 **Nested structures:**
 
-``batch_fn`` uses JAX's tree utilities, so it handles arbitrarily nested structures:
+``batch`` uses JAX's tree utilities, so it handles arbitrarily nested structures:
 
 .. code-block:: python
 
@@ -808,7 +808,7 @@ by default with shape ``(batch, channels, samples)``.
     # Works with mixed structures (AudioTrees and regular arrays)
     {"audio": AudioTree, "labels": np.array([...])}
 
-For regular arrays (non-AudioTree), ``batch_fn`` also concatenates along axis 0, so ensure
+For regular arrays (non-AudioTree), ``batch`` also concatenates along axis 0, so ensure
 they have a leading batch dimension.
 
 **Complete example with multiprocessing:**
@@ -842,7 +842,7 @@ they have a leading batch dimension.
     mp_options = grain.MultiprocessingOptions(num_workers=8)
     iter_ds = (
         ds.to_iter_dataset()
-        .batch(32, batch_fn=AudioTree.batch_fn)
+        .batch(32, batch_fn=AudioTree.batch)
         .mp_prefetch(options=mp_options)
     )
 

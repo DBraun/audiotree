@@ -1,4 +1,4 @@
-"""Tests for AudioTree batch indexing/iteration, batch_fn with optional
+"""Tests for AudioTree batch indexing/iteration, batch with optional
 fields, to_mono strategies, and lazy submodule loading."""
 
 import numpy as np
@@ -74,15 +74,15 @@ def test_getitem_negative_index():
     np.testing.assert_array_equal(tree[-1].waveform[0], tree.waveform[2])
 
 
-def test_batch_fn_round_trips_items():
+def test_batch_round_trips_items():
     tree = _tree(batch=3)
-    batched = AudioTree.batch_fn([tree[i] for i in range(len(tree))])
+    batched = AudioTree.batch([tree[i] for i in range(len(tree))])
     np.testing.assert_array_equal(batched.waveform, tree.waveform)
     np.testing.assert_array_equal(batched.codes, tree.codes)
     np.testing.assert_array_equal(batched.metadata["style"], tree.metadata["style"])
 
 
-def test_batch_fn_token_only_items():
+def test_batch_token_only_items():
     """Items without a waveform (codes-only training examples) batch fine."""
     items = [
         AudioTree(
@@ -91,7 +91,7 @@ def test_batch_fn_token_only_items():
         )
         for i in range(3)
     ]
-    batched = AudioTree.batch_fn(items)
+    batched = AudioTree.batch(items)
     assert batched.waveform is None
     assert batched.codes.shape == (3, 4, 3)
     np.testing.assert_array_equal(batched.codes[2], np.full((4, 3), 2))

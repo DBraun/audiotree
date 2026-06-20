@@ -1072,7 +1072,7 @@ class AudioTree:
         return audio_trees
 
     @staticmethod
-    def batch_fn(items: Sequence[Any]) -> Any:
+    def batch(items: Sequence[Any]) -> Any:
         """Batch function for use with grain's IterDataset.batch().
 
         Concatenates AudioTree objects along the batch axis (axis 0).
@@ -1092,13 +1092,13 @@ class AudioTree:
 
         Example:
             >>> a = AudioTree.create(jnp.zeros((1, 1, 16000)), 16000)
-            >>> batch = AudioTree.batch_fn([a, a, a])  # concatenate along the batch axis
-            >>> batch.waveform.shape
+            >>> batched = AudioTree.batch([a, a, a])  # concatenate along the batch axis
+            >>> batched.waveform.shape
             (3, 1, 16000)
 
             With Grain, pass it as the ``batch_fn`` (each item already has a leading batch axis)::
 
-                ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+                ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch)
         """
         items = list(items)
 
@@ -1125,7 +1125,7 @@ def _batch_audiotrees(audio_trees: Sequence[AudioTree]) -> AudioTree:
     Concatenates all array fields along the batch axis (axis 0) using NumPy.
     Requires all AudioTrees to have the same sample_rate and compatible shapes.
 
-    Prefer using ``AudioTree.batch_fn`` instead, which handles mixed-type
+    Prefer using ``AudioTree.batch`` instead, which handles mixed-type
     structures (dicts with AudioTrees, arrays, strings, etc.).
 
     Args:

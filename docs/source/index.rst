@@ -54,7 +54,7 @@ apply balanced sampling across groups, and chain augmentations:
     ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
 
     # Convert to iterable and batch
-    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch)
 
     # Access batched AudioTrees
     batch = next(iter(iter_ds))

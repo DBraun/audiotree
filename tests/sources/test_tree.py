@@ -463,8 +463,8 @@ def test_raw_mode_with_strings():
         assert isinstance(sample["x"], np.ndarray)
 
 
-def test_batch_fn_with_strings():
-    """AudioTree.batch_fn correctly batches string leaves into List[str]."""
+def test_batch_with_strings():
+    """AudioTree.batch correctly batches string leaves into List[str]."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         with TreeWriter(output_dir, expected_samples=4) as w:
@@ -480,7 +480,7 @@ def test_batch_fn_with_strings():
 
         source = TreeDataSource(output_dir)
         items = [source[i] for i in range(4)]
-        batched = AudioTree.batch_fn(items)
+        batched = AudioTree.batch(items)
 
         assert batched["strings"] == ["a", "b", "c", "d"]
         assert isinstance(batched["wet"], AudioTree)

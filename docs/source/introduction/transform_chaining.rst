@@ -295,7 +295,7 @@ Add batching as part of the transform chain:
     ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
 
     # Convert to IterDataset and batch
-    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
+    iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch)
 
     # Iterate over batches
     for batch in iter_ds:
@@ -464,7 +464,7 @@ Full pipeline with chained transforms, batching, and multiprocessing:
 
     # Convert to IterDataset, batch, and add multiprocessing
     iter_ds = ds.to_iter_dataset()
-    iter_ds = iter_ds.batch(32, batch_fn=AudioTree.batch_fn)
+    iter_ds = iter_ds.batch(32, batch_fn=AudioTree.batch)
 
     mp_options = grain.MultiprocessingOptions(
         num_workers=8,

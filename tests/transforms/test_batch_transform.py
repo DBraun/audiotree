@@ -64,8 +64,8 @@ def test_batch_transform_with_dataloader():
     assert batch_count == 3
 
 
-def test_batch_fn_with_iter_dataset():
-    """Test that AudioTree.batch_fn works with IterDataset.batch() API."""
+def test_batch_with_iter_dataset():
+    """Test that AudioTree.batch works with IterDataset.batch() API."""
 
     # Create a simple data source that yields AudioTree objects
     audio_trees = []
@@ -84,7 +84,7 @@ def test_batch_fn_with_iter_dataset():
 
     # Create MapDataset and convert to IterDataset with batch_fn
     ds = grain.MapDataset.source(audio_trees)
-    iter_ds = ds.to_iter_dataset().batch(4, batch_fn=AudioTree.batch_fn)
+    iter_ds = ds.to_iter_dataset().batch(4, batch_fn=AudioTree.batch)
 
     # Iterate and verify batching
     batch_count = 0
@@ -105,8 +105,8 @@ def test_batch_fn_with_iter_dataset():
     assert batch_count == 3
 
 
-def test_batch_fn_drop_remainder():
-    """Test that AudioTree.batch_fn works with drop_remainder=True."""
+def test_batch_drop_remainder():
+    """Test that AudioTree.batch works with drop_remainder=True."""
 
     audio_trees = []
     sample_rate = 44100
@@ -121,7 +121,7 @@ def test_batch_fn_drop_remainder():
         audio_trees.append(audio_tree)
 
     ds = grain.MapDataset.source(audio_trees)
-    iter_ds = ds.to_iter_dataset().batch(4, drop_remainder=True, batch_fn=AudioTree.batch_fn)
+    iter_ds = ds.to_iter_dataset().batch(4, drop_remainder=True, batch_fn=AudioTree.batch)
 
     batches = list(iter_ds)
 
@@ -131,8 +131,8 @@ def test_batch_fn_drop_remainder():
         assert batch.waveform.shape[0] == 4
 
 
-def test_batch_fn_with_dict_elements():
-    """Test that AudioTree.batch_fn works when iterator yields dicts containing AudioTrees."""
+def test_batch_with_dict_elements():
+    """Test that AudioTree.batch works when iterator yields dicts containing AudioTrees."""
 
     sample_rate = 44100
     num_samples = int(sample_rate * 0.1)
@@ -156,7 +156,7 @@ def test_batch_fn_with_dict_elements():
         dict_items.append({"src": src_tree, "tgt": tgt_tree})
 
     ds = grain.MapDataset.source(dict_items)
-    iter_ds = ds.to_iter_dataset().batch(4, batch_fn=AudioTree.batch_fn)
+    iter_ds = ds.to_iter_dataset().batch(4, batch_fn=AudioTree.batch)
 
     batch_count = 0
     for batch in iter_ds:
@@ -188,6 +188,6 @@ def test_batch_fn_with_dict_elements():
 
 if __name__ == "__main__":
     test_batch_transform_with_dataloader()
-    test_batch_fn_with_iter_dataset()
-    test_batch_fn_drop_remainder()
-    test_batch_fn_with_dict_elements()
+    test_batch_with_iter_dataset()
+    test_batch_drop_remainder()
+    test_batch_with_dict_elements()
