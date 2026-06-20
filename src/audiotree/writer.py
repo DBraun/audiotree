@@ -41,17 +41,32 @@ class AudioWriter:
         progress_desc: Description for internal progress bar (default "Writing audio")
 
     Example:
-        >>> # With external progress bar
-        >>> from tqdm import tqdm
-        >>> pbar = tqdm(total=100, desc="Processing")
-        >>> with AudioWriter("output", pbar=pbar) as writer:
-        ...     for audio_tree in audio_trees:
-        ...         writer.write(audio_tree)
+        Write a handful of (silent, one-second mono) ``AudioTree`` objects to a
+        temporary directory. A ``manifest.npz`` is written on context exit.
 
-        >>> # With internal progress bar
-        >>> with AudioWriter("output", show_progress=True) as writer:
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> from audiotree import AudioTree
+        >>> import jax.numpy as jnp
+        >>> out_dir = tempfile.mkdtemp()
+        >>> audio_trees = [AudioTree.create(jnp.zeros((1, 44100)), 44100) for _ in range(3)]
+        >>> with AudioWriter(out_dir) as writer:
         ...     for audio_tree in audio_trees:
-        ...         writer.write(audio_tree)
+        ...         _ = writer.write(audio_tree)
+        >>> sorted(p.name for p in Path(out_dir).glob("*"))
+        ['audio_0000.wav', 'audio_0001.wav', 'audio_0002.wav', 'manifest.npz']
+
+        Pass an external progress bar with ``pbar=...``, or have the writer
+        create its own with ``show_progress=True``:
+
+        >>> from tqdm import tqdm
+        >>> pbar = tqdm(total=len(audio_trees), desc="Processing")
+        >>> with AudioWriter(out_dir, pbar=pbar) as writer:
+        ...     for audio_tree in audio_trees:
+        ...         _ = writer.write(audio_tree)
+        >>> with AudioWriter(out_dir, show_progress=True) as writer:
+        ...     for audio_tree in audio_trees:
+        ...         _ = writer.write(audio_tree)
     """
 
     def __init__(

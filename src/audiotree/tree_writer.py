@@ -185,10 +185,24 @@ class TreeWriter:
             Default False.
 
     Example:
-        >>> tree = AudioTree(waveform=audio, sample_rate=44100, loudness=loud)
-        >>> with TreeWriter("output/", expected_samples=10000) as w:
-        ...     for batch in dataloader:
-        ...         w.write(batch)
+        Pre-render a few batches of one-second mono ``AudioTree`` objects into a
+        memory-mapped dataset, then read one back with
+        :class:`~audiotree.sources.TreeDataSource`:
+
+        >>> import tempfile
+        >>> import jax.numpy as jnp
+        >>> from audiotree import AudioTree
+        >>> from audiotree.sources import TreeDataSource
+        >>> out_dir = tempfile.mkdtemp()
+        >>> batches = [AudioTree.create(jnp.zeros((8, 1, 16000)), 16000) for _ in range(3)]
+        >>> with TreeWriter(out_dir, expected_samples=8 * len(batches)) as w:
+        ...     for batch in batches:
+        ...         _ = w.write(batch)
+        >>> ds = TreeDataSource(out_dir)
+        >>> len(ds)
+        24
+        >>> ds[0].waveform.shape  # one sample, batch dim added back
+        (1, 1, 16000)
     """
 
     def __init__(

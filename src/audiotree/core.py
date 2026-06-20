@@ -100,6 +100,13 @@ class AudioTree:
         metadata (dict): Any extra metadata can be placed here.
         filepaths (Union[str, Path, List[Union[str, Path]]] | None): List of filepaths for the batch of audio.
 
+    Example:
+        >>> audio = AudioTree.create(jnp.zeros((2, 44100)), 44100)  # stereo, 1 s
+        >>> audio.waveform.shape
+        (1, 2, 44100)
+        >>> audio.sample_rate
+        44100
+
     Note:
         If new fields are added to this class, update ``_AUDIOTREE_FIELDS`` in ``audiotree/writer.py``.
     """
@@ -128,7 +135,35 @@ class AudioTree:
         metadata: dict = None,
         filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
     ) -> Self:
-        """Create an AudioTree with automatic audio dimensionality handling and filepath processing."""
+        """Create an ``AudioTree``, normalizing the waveform to ``(Batch, Channels, Samples)``.
+
+        A bare ``(Samples,)`` or ``(Channels, Samples)`` waveform gains the missing leading axes, so
+        you don't have to reshape by hand. ``filepaths`` are encoded into ``metadata``.
+
+        Args:
+            waveform: Audio of shape ``(Samples)``, ``(Channels, Samples)``, or
+                ``(Batch, Channels, Samples)``.
+            sample_rate: Sample rate of ``waveform`` in Hz (e.g. 44100).
+            loudness: Optional precomputed LUFS loudness; usually left ``None`` and filled by
+                :meth:`replace_loudness`.
+            pitch: Optional MIDI pitch ``(Batch,)`` (60 = middle C).
+            velocity: Optional MIDI velocity ``(Batch,)`` in ``[0, 127]``.
+            note_duration: Optional per-note duration ``(Batch,)`` (not the audio duration).
+            codes: Optional neural-codec tokens.
+            latents: Optional latent representations.
+            metadata: Optional extra metadata dict (copied, not mutated).
+            filepaths: Optional path(s) for the batch; encoded into ``metadata["filepath"]``.
+
+        Returns:
+            AudioTree: A new ``AudioTree`` whose waveform is ``(Batch, Channels, Samples)``.
+
+        Example:
+            >>> audio = AudioTree.create(jnp.zeros((44100,)), 44100)  # 1 s mono
+            >>> audio.waveform.shape
+            (1, 1, 44100)
+            >>> audio.sample_rate
+            44100
+        """
         # Handle audio dimensionality - ensure it's (Batch, Channels, Samples)
         if waveform.ndim == 1:
             waveform = waveform[None, None, :]  # Add batch and channel dimension
@@ -210,9 +245,11 @@ class AudioTree:
             AudioTree with audio scaled to target LUFS and loudness updated.
 
         Example:
-            >>> tree = AudioTree.load("audio.wav")
+            >>> t = jnp.arange(44100) / 44100  # 1 s at 44.1 kHz
+            >>> tree = AudioTree.create(0.5 * jnp.sin(2 * jnp.pi * 1000 * t), 44100)
             >>> normalized = tree.normalize_loudness(-18.0)
-            >>> print(normalized.loudness)  # Should be close to -18.0
+            >>> float(normalized.loudness[0])  # now at the target LUFS
+            -18.0
         """
         # Ensure loudness is computed
         if self.loudness is None:
@@ -528,16 +565,33 @@ class AudioTree:
             AudioTree with all manifest entries concatenated along batch dimension
 
         Example:
-            >>> # Load all items from manifest
-            >>> tree = AudioTree.from_manifest("output/manifest.npz")
-            >>> tree.waveform.shape
-            (100, 2, 44100)  # 100 items, stereo, 1 second each
+            First, write a small manifest with :class:`~audiotree.AudioWriter`
+            (here, 100 one-second stereo items; the first 60 are loud, the rest
+            quiet, so the loudness field is recorded for filtering):
 
-            >>> # Load with filtering
+            >>> import tempfile
+            >>> out_dir = tempfile.mkdtemp()
+            >>> loudness = np.where(np.arange(100) < 60, -10.0, -30.0).astype(np.float32)
+            >>> batch = AudioTree.create(jnp.zeros((100, 2, 44100)), 44100, loudness=loudness)
+            >>> with AudioWriter(out_dir) as writer:
+            ...     _ = writer.write(batch)
+            >>> manifest_path = f"{out_dir}/manifest.npz"
+
+            Load every item into one batched ``AudioTree``:
+
+            >>> tree = AudioTree.from_manifest(manifest_path)
+            >>> tree.waveform.shape  # 100 items, stereo, 1 second each
+            (100, 2, 44100)
+
+            Load only entries that pass a filter on the manifest (the 60 loud
+            items):
+
             >>> tree = AudioTree.from_manifest(
-            ...     "output/manifest.npz",
+            ...     manifest_path,
             ...     filter_fn=lambda entry: entry.get('loudness', -float('inf')) > -20
             ... )
+            >>> tree.waveform.shape
+            (60, 2, 44100)
         """
         manifest_path = Path(manifest_path)
 
@@ -860,7 +914,15 @@ class AudioTree:
                 for the last one, while passing ``full=True`` to all the other ones.
 
         Returns:
-            AudioTree: An instance of ``AudioTree``.
+            AudioTree: A new ``AudioTree`` resampled to ``sample_rate`` (the original is unchanged).
+
+        Example:
+            >>> audio = AudioTree.create(jnp.zeros((44100,)), 44100)  # 1 s at 44.1 kHz
+            >>> resampled = audio.resample(22050)
+            >>> resampled.waveform.shape
+            (1, 1, 22050)
+            >>> resampled.sample_rate
+            22050
         """
         if sample_rate == self.sample_rate:
             return self
@@ -902,8 +964,8 @@ class AudioTree:
             >>> split_trees = big_tree.split(2)
             >>> len(split_trees)
             2
-            >>> split_trees[0].waveform.shape
-            (6, 1, 44100)  # Each tree has half the original batch size
+            >>> split_trees[0].waveform.shape  # each tree has half the original batch size
+            (6, 1, 44100)
         """
         total_batch_size = self.waveform.shape[0]
         assert total_batch_size % n_splits == 0, \
@@ -932,8 +994,8 @@ class AudioTree:
         Example:
             >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
             >>> x_batched = x.reshape_mini_batches(3)
-            >>> x_batched.waveform.shape
-            (4, 3, 1, 44100)  # 4 mini-batches of size 3
+            >>> x_batched.waveform.shape  # 4 mini-batches of size 3
+            (4, 3, 1, 44100)
         """
         B = self.waveform.shape[0]
 
@@ -963,11 +1025,11 @@ class AudioTree:
         Example:
             >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
             >>> x_batched = x.reshape_mini_batches(3)
-            >>> x_batched.waveform.shape
-            (4, 3, 1, 44100)  # 4 mini-batches of size 3
+            >>> x_batched.waveform.shape  # 4 mini-batches of size 3
+            (4, 3, 1, 44100)
             >>> x_unbatched = x_batched.flatten_mini_batches()
-            >>> x_unbatched.waveform.shape
-            (12, 1, 44100)  # Back to original shape
+            >>> x_unbatched.waveform.shape  # back to original shape
+            (12, 1, 44100)
         """
         # Assuming the waveform has shape (num_mini_batches, mini_batch_size, C, T)
         # We want to reshape to (num_mini_batches * mini_batch_size, C, T)
@@ -1029,11 +1091,14 @@ class AudioTree:
             Batched structure with the same shape as the input items.
 
         Example:
-            >>> from audiotree.sources import create_audio_dataset
-            >>> ds = create_audio_dataset("/path/to/audio", duration=1.0)
-            >>> iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
-            >>> for batch in iter_ds:
-            ...     print(batch.waveform.shape)  # (32, channels, samples)
+            >>> a = AudioTree.create(jnp.zeros((1, 1, 16000)), 16000)
+            >>> batch = AudioTree.batch_fn([a, a, a])  # concatenate along the batch axis
+            >>> batch.waveform.shape
+            (3, 1, 16000)
+
+            With Grain, pass it as the ``batch_fn`` (each item already has a leading batch axis)::
+
+                ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch_fn)
         """
         items = list(items)
 

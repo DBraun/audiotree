@@ -33,19 +33,35 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         filter_fn: Optional function to filter manifest entries
 
     Example:
-        >>> # Read from NPZ manifest
-        >>> source = ManifestDataSource("output/manifest.npz")
-        >>>
-        >>> # Filter by metadata
+        First write some audio with :class:`~audiotree.AudioWriter` so there is
+        a ``manifest.npz`` to read back:
+
+        >>> import tempfile
+        >>> import jax.numpy as jnp
+        >>> from audiotree import AudioTree, AudioWriter
+        >>> out_dir = tempfile.mkdtemp()
+        >>> with AudioWriter(out_dir) as writer:
+        ...     _ = writer.write(AudioTree.create(jnp.zeros((5, 1, 44100)), 44100))
+        >>> manifest_path = f"{out_dir}/manifest.npz"
+
+        Read straight from the NPZ manifest:
+
+        >>> source = ManifestDataSource(manifest_path)
+        >>> len(source)
+        5
+        >>> source[0].waveform.shape
+        (1, 1, 44100)
+
+        Filter entries by metadata while loading:
+
         >>> source = ManifestDataSource(
-        ...     "output/manifest.npz",
+        ...     manifest_path,
         ...     filter_fn=lambda entry: entry.get('loudness', -float('inf')) > -20
         ... )
-        >>>
-        >>> # Use convenience constructor for AudioWriter output
-        >>> source = ManifestDataSource.from_writer_output(
-        ...     "output_dir",
-        ... )
+
+        Or use the convenience constructor that points at the output directory:
+
+        >>> source = ManifestDataSource.from_writer_output(out_dir)
     """
 
     def __init__(
@@ -336,11 +352,33 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             New ManifestDataSource with filtered entries
 
         Example:
-            >>> # Keep only samples louder than -20 dB
+            Write four items with known per-item loudness so the manifest
+            records a ``loudness`` field to filter on:
+
+            >>> import tempfile
+            >>> import numpy as np
+            >>> import jax.numpy as jnp
+            >>> from audiotree import AudioTree, AudioWriter
+            >>> out_dir = tempfile.mkdtemp()
+            >>> tree = AudioTree.create(
+            ...     jnp.zeros((4, 1, 44100)), 44100,
+            ...     loudness=np.array([-30.0, -18.0, -10.0, -25.0], dtype=np.float32),
+            ... )
+            >>> with AudioWriter(out_dir) as writer:
+            ...     _ = writer.write(tree)
+            >>> source = ManifestDataSource.from_writer_output(out_dir)
+
+            Keep only samples louder than -20 LUFS:
+
             >>> loud_source = source.filter_by_loudness(min_lufs=-20.0)
-            >>>
-            >>> # Keep samples in specific loudness range
+            >>> len(loud_source)
+            2
+
+            Keep samples within a specific loudness range:
+
             >>> mid_source = source.filter_by_loudness(min_lufs=-30.0, max_lufs=-15.0)
+            >>> len(mid_source)
+            3
         """
         def filter_fn(entry):
             loudness = entry.get('loudness')
@@ -383,14 +421,23 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             ManifestDataSource configured for the output directory
 
         Example:
-            >>> # Read NPZ manifest
-            >>> source = ManifestDataSource.from_writer_output("output")
-            >>>
-            >>> # Read with resampling
-            >>> source = ManifestDataSource.from_writer_output(
-            ...     "output",
-            ...     sample_rate=16000
-            ... )
+            Write some audio, then read it back from the output directory:
+
+            >>> import tempfile
+            >>> import jax.numpy as jnp
+            >>> from audiotree import AudioTree, AudioWriter
+            >>> out_dir = tempfile.mkdtemp()
+            >>> with AudioWriter(out_dir) as writer:
+            ...     _ = writer.write(AudioTree.create(jnp.zeros((3, 1, 44100)), 44100))
+            >>> source = ManifestDataSource.from_writer_output(out_dir)
+            >>> len(source)
+            3
+
+            Read with on-the-fly resampling to 16 kHz:
+
+            >>> source = ManifestDataSource.from_writer_output(out_dir, sample_rate=16000)
+            >>> source[0].waveform.shape
+            (1, 1, 16000)
         """
         output_dir = Path(output_dir)
         manifest_path = output_dir / f"manifest.npz"

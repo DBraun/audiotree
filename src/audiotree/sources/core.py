@@ -159,42 +159,54 @@ def create_audio_dataset(
         A grain.MapDataset that loads audio files using random_map for proper RNG seeding.
 
     Example:
-        >>> # Load all files from a directory
-        >>> ds = create_audio_dataset(
-        ...     sources="/data/audio",
-        ...     sample_rate=44100,
-        ...     duration=3.0,
-        ... )
+        Create a couple of short ``.wav`` files in a temporary directory to
+        load from:
 
-        >>> # Training dataset: shuffle and repeat infinitely
-        >>> ds = create_audio_dataset(
-        ...     sources=["/data/train1", "/data/train2"],
+        >>> import os, tempfile
+        >>> import numpy as np
+        >>> import soundfile
+        >>> data_dir = tempfile.mkdtemp()
+        >>> for i in range(2):
+        ...     soundfile.write(
+        ...         os.path.join(data_dir, f"clip_{i}.wav"),
+        ...         np.zeros((44100, 1), dtype=np.float32),
+        ...         44100,
+        ...     )
+
+        Load all files from the directory. Each item is a single-example
+        ``AudioTree`` shaped ``(Batch, Channels, Samples)``:
+
+        >>> ds = create_audio_dataset(sources=data_dir, sample_rate=44100, duration=1.0)
+        >>> len(ds)
+        2
+        >>> ds[0].waveform.shape
+        (1, 1, 44100)
+
+        Training dataset (shuffle and repeat infinitely):
+
+        >>> train_ds = create_audio_dataset(
+        ...     sources=data_dir,
         ...     shuffle=True,
         ...     repeat=True,
         ...     sample_rate=44100,
-        ...     duration=3.0,
+        ...     duration=1.0,
         ... )
 
-        >>> # Validation dataset: deterministic, no repeat, limited records
-        >>> ds = create_audio_dataset(
-        ...     sources="/data/val",
+        Validation dataset (deterministic, no repeat):
+
+        >>> val_ds = create_audio_dataset(
+        ...     sources=data_dir,
         ...     shuffle=False,
         ...     repeat=False,
         ...     sample_rate=44100,
-        ...     duration=3.0,
+        ...     duration=1.0,
         ... )
 
-        >>> # Two datasets with same file order but different excerpts
-        >>> ds1 = create_audio_dataset(
-        ...     sources="/data/audio",
-        ...     shuffle_seed=42,
-        ...     excerpt_seed=100,
-        ... )
-        >>> ds2 = create_audio_dataset(
-        ...     sources="/data/audio",
-        ...     shuffle_seed=42,
-        ...     excerpt_seed=200,
-        ... )
+        Two datasets that visit files in the same order but load different
+        random excerpts (same ``shuffle_seed``, different ``excerpt_seed``):
+
+        >>> ds1 = create_audio_dataset(sources=data_dir, shuffle_seed=42, excerpt_seed=100)
+        >>> ds2 = create_audio_dataset(sources=data_dir, shuffle_seed=42, excerpt_seed=200)
     """
     if excerpt_seed is None:
         excerpt_seed = shuffle_seed
@@ -295,35 +307,56 @@ def create_balanced_audio_dataset(
         according to the specified weights.
 
     Example:
-        >>> # Equal weighting (default)
-        >>> ds = create_balanced_audio_dataset(
-        ...     sources={"speech": ["/data/speech"], "music": ["/data/music"]},
-        ...     sample_rate=44100,
-        ...     duration=3.0,
-        ... )
+        Set up two small groups of ``.wav`` files in temporary directories:
 
-        >>> # Custom weights: 70% speech, 30% music
+        >>> import os, tempfile
+        >>> import numpy as np
+        >>> import soundfile
+        >>> speech_dir, music_dir = tempfile.mkdtemp(), tempfile.mkdtemp()
+        >>> for d in (speech_dir, music_dir):
+        ...     for i in range(2):
+        ...         soundfile.write(
+        ...             os.path.join(d, f"{i}.wav"),
+        ...             np.zeros((44100, 1), dtype=np.float32),
+        ...             44100,
+        ...         )
+
+        Equal weighting (the default). The returned dataset is infinite, so
+        index it directly rather than calling ``len``:
+
         >>> ds = create_balanced_audio_dataset(
-        ...     sources={"speech": ["/data/speech"], "music": ["/data/music"]},
+        ...     sources={"speech": [speech_dir], "music": [music_dir]},
+        ...     sample_rate=44100,
+        ...     duration=1.0,
+        ... )
+        >>> ds[0].waveform.shape
+        (1, 1, 44100)
+
+        Custom weights (70% speech, 30% music):
+
+        >>> ds = create_balanced_audio_dataset(
+        ...     sources={"speech": [speech_dir], "music": [music_dir]},
         ...     weights={"speech": 0.7, "music": 0.3},
         ...     sample_rate=44100,
-        ...     duration=3.0,
+        ...     duration=1.0,
         ... )
 
-        >>> # For pre-rendering (deterministic, no shuffle)
+        For pre-rendering (deterministic, no shuffle):
+
         >>> ds = create_balanced_audio_dataset(
-        ...     sources={"speech": ["/data/speech"], "music": ["/data/music"]},
+        ...     sources={"speech": [speech_dir], "music": [music_dir]},
         ...     weights={"speech": 0.5, "music": 0.5},
         ...     shuffle=False,
         ...     shuffle_seed=42,
         ...     sample_rate=44100,
-        ...     duration=3.0,
+        ...     duration=1.0,
         ... )
 
-        >>> # Mix file sources with a pre-constructed dataset
-        >>> preprocessed_ds = create_audio_dataset(sources="/data/preprocessed", repeat=True)
+        Mix file sources with a pre-constructed (already repeated) dataset:
+
+        >>> preprocessed_ds = create_audio_dataset(sources=music_dir, repeat=True)
         >>> ds = create_balanced_audio_dataset(
-        ...     sources={"speech": ["/data/speech"]},
+        ...     sources={"speech": [speech_dir]},
         ...     datasets={"preprocessed": preprocessed_ds},
         ...     weights={"speech": 0.7, "preprocessed": 0.3},
         ... )

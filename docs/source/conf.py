@@ -32,8 +32,24 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
+    "sphinx.ext.doctest",
     "myst_parser",
 ]
+
+# Execute the ``>>>`` / ``.. testcode::`` examples at ``make doctest`` so the docs stay correct.
+# These names are pre-imported so each example can stay concise.
+doctest_global_setup = """
+import jax
+import jax.numpy as jnp
+import numpy as np
+from audiotree import AudioTree, AudioWriter, TreeWriter
+from audiotree.sources import (
+    ManifestDataSource,
+    TreeDataSource,
+    create_audio_dataset,
+    create_balanced_audio_dataset,
+)
+"""
 
 templates_path = ["_templates"]
 exclude_patterns = []

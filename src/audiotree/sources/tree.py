@@ -104,16 +104,43 @@ class TreeDataSource(RandomAccessDataSource):
             Ignored when ``load_into_memory=True``.
 
     Example:
-        >>> ds = TreeDataSource("dataset/")
-        >>> sample = ds[0]
-        >>> print(type(sample))  # <class 'AudioTree'>
+        First, pre-render a small dataset with
+        :class:`~audiotree.tree_writer.TreeWriter`. Here each sample is a dict
+        with ``dry`` and ``wet`` :class:`~audiotree.AudioTree` branches:
 
-        >>> ds = TreeDataSource("dataset/", exclude_prefixes=["wet.waveform"])
-        >>> sample = ds[0]
-        >>> assert sample["wet"].waveform is None  # excluded
+        >>> import tempfile
+        >>> import jax.numpy as jnp
+        >>> from audiotree import AudioTree
+        >>> from audiotree.tree_writer import TreeWriter
+        >>> dataset_dir = tempfile.mkdtemp()
+        >>> batch = {
+        ...     "dry": AudioTree.create(jnp.zeros((4, 1, 16000)), 16000),
+        ...     "wet": AudioTree.create(jnp.ones((4, 1, 16000)), 16000),
+        ... }
+        >>> with TreeWriter(dataset_dir, expected_samples=4) as w:
+        ...     _ = w.write(batch)
 
-        >>> ds = TreeDataSource("dataset/", load_into_memory=True)
-        >>> sample = ds[0]  # reads from RAM, no disk I/O
+        Read a sample back; the pytree structure is reconstructed:
+
+        >>> ds = TreeDataSource(dataset_dir)
+        >>> sample = ds[0]
+        >>> sorted(sample.keys())
+        ['dry', 'wet']
+        >>> type(sample["dry"]).__name__
+        'AudioTree'
+
+        Skip loading some leaves with ``exclude_prefixes`` (they come back as
+        ``None``):
+
+        >>> ds = TreeDataSource(dataset_dir, exclude_prefixes=["wet.waveform"])
+        >>> ds[0]["wet"].waveform is None
+        True
+
+        Load everything into RAM up front for I/O-free random access:
+
+        >>> ds = TreeDataSource(dataset_dir, load_into_memory=True)
+        >>> ds[0]["dry"].waveform.shape  # reads from RAM, no disk I/O
+        (1, 1, 16000)
     """
 
     def __init__(
