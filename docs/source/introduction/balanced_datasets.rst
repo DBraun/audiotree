@@ -11,6 +11,25 @@ Balanced Datasets
 
 The :func:`~audiotree.sources.create_balanced_audio_dataset` function creates datasets that sample from multiple groups with specified weights, making it ideal for training ML models on diverse audio data.
 
+.. testsetup::
+
+    # Hidden setup: stand in for the "/data/..." directories used below with
+    # temp dirs of small synthetic WAVs, so the executable examples run.
+    import os
+    import tempfile
+    import numpy as np
+    import soundfile
+
+    _g = np.random.default_rng(0)
+    _speech_dir, _music_dir = tempfile.mkdtemp(), tempfile.mkdtemp()
+    for _d in (_speech_dir, _music_dir):
+        for _i in range(3):
+            soundfile.write(
+                os.path.join(_d, f"{_i}.wav"),
+                (0.1 * _g.standard_normal((44_100, 1))).astype(np.float32),
+                44_100,
+            )
+
 Basic Usage
 -----------
 
@@ -136,11 +155,23 @@ Source Tracking
 
 Each loaded :class:`~audiotree.core.AudioTree` has a ``source`` property indicating which group it came from:
 
-.. code-block:: python
+.. testcode::
+
+    from audiotree.sources import create_balanced_audio_dataset
+
+    ds = create_balanced_audio_dataset(
+        sources={"speech": [_speech_dir], "music": [_music_dir]},
+        sample_rate=44100,
+        duration=1.0,
+    )
 
     item = ds[0]
-    print(item.source)  # e.g., ['speech']
-    print(item.filepath)  # e.g., ['/data/speech/speaker1/session1/audio_001.wav']
+    print(item.source)  # which group this item came from
+    # item.filepath holds the absolute path(s), e.g. ['/data/speech/.../audio_001.wav']
+
+.. testoutput::
+
+    ['speech']
 
 This is useful for:
 

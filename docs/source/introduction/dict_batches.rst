@@ -14,6 +14,19 @@ such as ``{"dry": AudioTree, "wet": AudioTree}`` or ``{"input": AudioTree, "targ
 
 AudioTree transforms support this pattern with **scope** for selective transformation.
 
+.. testsetup::
+
+    # Hidden shared setup for the executable examples on this page: two small
+    # AudioTrees and a NumPy RNG. The NumPy-backend transforms in
+    # ``audiotree.transforms`` take a ``np.random.Generator``.
+    import numpy as np
+    from audiotree import AudioTree
+
+    _g = np.random.default_rng(0)
+    audio1 = AudioTree(_g.standard_normal((2, 1, 44_100)), 44_100).replace_loudness()
+    audio2 = AudioTree(_g.standard_normal((2, 1, 44_100)), 44_100).replace_loudness()
+    rng = np.random.default_rng(42)
+
 Why Use Dict Batches?
 ----------------------
 
@@ -188,7 +201,9 @@ Scope with Output Key
 
 Combine scope with output_key to create new keys:
 
-.. code-block:: python
+.. testcode::
+
+    from audiotree.transforms import volume_norm
 
     batch = {'src': audio1, 'target': audio2}
 
@@ -205,6 +220,11 @@ Combine scope with output_key to create new keys:
     assert 'src' in batch
     assert 'target' in batch
     assert 'modified' in batch  # New key with transformed src
+    print(sorted(batch.keys()))
+
+.. testoutput::
+
+    ['modified', 'src', 'target']
 
 Complete Training Pipeline
 ---------------------------
@@ -661,16 +681,12 @@ Testing Dict Batches
 
 Always test that scope works correctly:
 
-.. code-block:: python
+.. testcode::
+
+    from audiotree.transforms import volume_norm
 
     def test_scope_selective_transform():
         """Test that scope only transforms specified keys."""
-        audio1 = AudioTree(...)
-        audio2 = AudioTree(...)
-
-        audio1 = audio1.replace_loudness()
-        audio2 = audio2.replace_loudness()
-
         batch = {'src': audio1, 'target': audio2}
 
         # Transform only 'src'
@@ -680,11 +696,14 @@ Always test that scope works correctly:
             scope={'src': {'scope': True}},
         )
 
-        result = transform.random_map(batch, jax.random.key(42))
+        # NumPy-backend transforms take a np.random.Generator.
+        result = transform.random_map(batch, np.random.default_rng(42))
 
         # Verify only src changed
         assert not np.array_equal(result['src'].loudness, audio1.loudness)
         assert np.array_equal(result['target'].loudness, audio2.loudness)
+
+    test_scope_selective_transform()
 
 Common Pitfalls
 ---------------

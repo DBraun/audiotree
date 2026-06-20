@@ -12,6 +12,24 @@ Introduction to AudioTree
 This guide covers the fundamentals of working with :class:`~audiotree.core.AudioTree` objects,
 including instantiation, manipulation, batching, and integration with JAX's pytree system.
 
+.. testsetup::
+
+    # Hidden shared setup for this page's executable examples. It writes a small
+    # synthetic stereo WAV that the file-loading examples below read back.
+    import os
+    import tempfile
+    import numpy as np
+    import soundfile
+
+    _doc_dir = tempfile.mkdtemp()
+    _audio_path = os.path.join(_doc_dir, "audio.wav")
+    _input_path = os.path.join(_doc_dir, "input.wav")
+    soundfile.write(_audio_path, np.zeros((44_100, 2), dtype=np.float32), 44_100)
+    soundfile.write(_input_path, np.zeros((44_100, 2), dtype=np.float32), 44_100)
+
+    # Run all examples from inside the temp dir so relative output paths land there.
+    os.chdir(_doc_dir)
+
 Basic Instantiation
 -------------------
 
@@ -23,7 +41,7 @@ Creating from NumPy Arrays
 
 You can create an AudioTree directly from NumPy or JAX NumPy arrays:
 
-.. code-block:: python
+.. testcode::
 
     import numpy as np
     from audiotree import AudioTree
@@ -33,9 +51,12 @@ You can create an AudioTree directly from NumPy or JAX NumPy arrays:
     waveform = np.zeros((4, 2, 44_100))  # 4 batches, 2 channels, 1 second
     audio_tree = AudioTree(waveform, sample_rate)
 
-    >>> audio_tree.waveform.shape
+    print(audio_tree.waveform.shape)
+    print(audio_tree.sample_rate)
+
+.. testoutput::
+
     (4, 2, 44100)
-    >>> audio_tree.sample_rate
     44100
 
 Automatic Dimensionality Handling
@@ -43,26 +64,29 @@ Automatic Dimensionality Handling
 
 The :meth:`~audiotree.core.AudioTree.create` method automatically handles arrays of different dimensions:
 
-.. code-block:: python
+.. testcode::
 
     # From 1D array (just samples)
     audio_1d = np.zeros(44_100)
     audio_tree = AudioTree.create(audio_1d, 44_100)
-    >>> audio_tree.waveform.shape
-    (1, 1, 44100)  # Automatically adds batch and channel dims
+    print(audio_tree.waveform.shape)  # Automatically adds batch and channel dims
 
     # From 2D array (channels × samples)
     audio_2d = np.zeros((2, 44_100))
     audio_tree = AudioTree.create(audio_2d, 44_100)
-    >>> audio_tree.waveform.shape
-    (1, 2, 44100)  # Automatically adds batch dimension
+    print(audio_tree.waveform.shape)  # Automatically adds batch dimension
+
+.. testoutput::
+
+    (1, 1, 44100)
+    (1, 2, 44100)
 
 Loading Audio from Files
 ------------------------
 
 AudioTree provides convenient methods for loading audio files:
 
-.. code-block:: python
+.. testcode::
 
     from pathlib import Path
 
@@ -88,10 +112,13 @@ AudioTree provides convenient methods for loading audio files:
     )
 
     # The filepath is automatically stored in metadata
-    >>> audio_tree.filepath
+    print(audio_tree.filepath)
+    print(audio_tree.metadata["params"])
+
+.. testoutput::
+
     ['audio.wav']
-    >>> audio_tree.metadata["params"]
-    array([[0., 0., 0., 0.]])
+    [[0. 0. 0. 0.]]
 
 Manipulating AudioTree Objects
 ------------------------------
@@ -101,20 +128,23 @@ Accessing Properties
 
 AudioTree objects have several key properties:
 
-.. code-block:: python
+.. testcode::
 
     audio_tree = AudioTree.create(np.ones((2, 2, 44_100)), 44_100)
 
     # Core properties
-    >>> audio_tree.waveform.shape
-    (2, 2, 44100)
-    >>> audio_tree.sample_rate
-    44100
+    print(audio_tree.waveform.shape)
+    print(audio_tree.sample_rate)
 
     # Optional properties (can be None)
-    >>> audio_tree.loudness  # Computed on demand
+    print(audio_tree.loudness)   # Computed on demand
+    print(audio_tree.metadata)   # Dictionary for custom data
+
+.. testoutput::
+
+    (2, 2, 44100)
+    44100
     None
-    >>> audio_tree.metadata  # Dictionary for custom data
     {}
 
 Creating Modified Copies
@@ -122,7 +152,7 @@ Creating Modified Copies
 
 AudioTree is immutable. Use :meth:`~audiotree.core.AudioTree.replace` to create modified copies:
 
-.. code-block:: python
+.. testcode::
 
     # Original audio_tree with batch size 2
     audio_tree = AudioTree(np.ones((2, 2, 44_100)), 44_100)
@@ -130,9 +160,12 @@ AudioTree is immutable. Use :meth:`~audiotree.core.AudioTree.replace` to create 
     # Create a new audio_tree with modified audio data
     quieter_tree = audio_tree.replace(waveform=audio_tree.waveform * 0.5)
 
-    >>> np.allclose(audio_tree.waveform[0, 0, 0], 1.0)  # Original unchanged
+    print(np.allclose(audio_tree.waveform[0, 0, 0], 1.0))   # Original unchanged
+    print(np.allclose(quieter_tree.waveform[0, 0, 0], 0.5))
+
+.. testoutput::
+
     True
-    >>> np.allclose(quieter_tree.waveform[0, 0, 0], 0.5)
     True
 
 Computing Loudness
@@ -140,16 +173,19 @@ Computing Loudness
 
 AudioTree can compute loudness in LUFS (Loudness Units Full Scale) for each item in the batch:
 
-.. code-block:: python
+.. testcode::
 
     # Create audio_tree with 4 batches and compute loudness for each
     audio_tree = AudioTree(np.ones((4, 2, 44_100)) * 0.1, 44_100)
     tree_with_loudness = audio_tree.replace_loudness()
 
-    >>> tree_with_loudness.loudness.shape
-    (4,)  # One loudness value per batch item
-    >>> tree_with_loudness.loudness
-    Array([-23.456, -23.456, -23.456, -23.456], dtype=float32)  # Example LUFS values
+    print(tree_with_loudness.loudness.shape)   # One loudness value per batch item
+    print(tree_with_loudness.loudness)         # LUFS values (constant 0.1 signal)
+
+.. testoutput::
+
+    (4,)
+    [-43.25 -43.25 -43.25 -43.25]
 
 .. note::
    **Channel Limitations for Loudness Computation**
@@ -167,7 +203,7 @@ Resampling Audio
 
 To change the sample rate of audio, use the :meth:`~audiotree.core.AudioTree.resample` method:
 
-.. code-block:: python
+.. testcode::
 
     # Original audio_tree at 44.1 kHz
     audio_tree = AudioTree(np.ones((1, 2, 44_100)), 44_100)
@@ -175,12 +211,15 @@ To change the sample rate of audio, use the :meth:`~audiotree.core.AudioTree.res
     # Resample to 48 kHz
     resampled_tree = audio_tree.resample(48_000)
 
-    >>> audio_tree.sample_rate  # Original unchanged
+    print(audio_tree.sample_rate)      # Original unchanged
+    print(resampled_tree.sample_rate)
+    print(resampled_tree.waveform.shape)   # Audio data is resampled
+
+.. testoutput::
+
     44100
-    >>> resampled_tree.sample_rate
     48000
-    >>> resampled_tree.waveform.shape
-    (1, 2, 48000)  # Audio data is resampled
+    (1, 2, 48000)
 
 Converting Channels
 ~~~~~~~~~~~~~~~~~~~
@@ -188,24 +227,27 @@ Converting Channels
 Use :meth:`~audiotree.core.AudioTree.to_mono` and :meth:`~audiotree.core.AudioTree.to_stereo`
 to change the channel layout. ``to_mono`` takes a ``strategy``:
 
-.. code-block:: python
+.. testcode::
 
     audio_tree = AudioTree(np.random.randn(4, 2, 44_100), 44_100)
 
     # "average" (default) mixes all channels down
     mono = audio_tree.to_mono()
-    >>> mono.waveform.shape
-    (4, 1, 44100)
+    print(mono.waveform.shape)
 
     # "left" / "right" select one channel of stereo audio
     left = audio_tree.to_mono("left")
     right = audio_tree.to_mono("right")
-    >>> np.allclose(left.waveform[:, 0], audio_tree.waveform[:, 0])
-    True
+    print(np.allclose(left.waveform[:, 0], audio_tree.waveform[:, 0]))
 
     # Duplicate a mono channel up to stereo
     stereo = mono.to_stereo()
-    >>> stereo.waveform.shape
+    print(stereo.waveform.shape)
+
+.. testoutput::
+
+    (4, 1, 44100)
+    True
     (4, 2, 44100)
 
 .. note::
@@ -220,29 +262,32 @@ An AudioTree behaves like a sequence over its leading (batch) axis. Indexing,
 slicing, ``len()``, and iteration keep every field — ``waveform``, ``codes``,
 ``latents``, and the ``metadata`` arrays — rank-aligned.
 
-.. code-block:: python
+.. testcode::
 
     audio_tree = AudioTree(np.random.randn(16, 2, 44_100), 44_100)
 
-    >>> len(audio_tree)               # number of batch items
-    16
+    print(len(audio_tree))                  # number of batch items
 
     # Integer indexing keeps the batch axis (a batch of 1)
-    >>> audio_tree[0].waveform.shape
-    (1, 2, 44100)
+    print(audio_tree[0].waveform.shape)
 
     # Slices select a sub-batch
-    >>> audio_tree[4:8].waveform.shape
-    (4, 2, 44100)
+    print(audio_tree[4:8].waveform.shape)
 
     # Negative indices work too
-    >>> audio_tree[-1].waveform.shape
+    print(audio_tree[-1].waveform.shape)
+
+.. testoutput::
+
+    16
+    (1, 2, 44100)
+    (4, 2, 44100)
     (1, 2, 44100)
 
 Because AudioTree implements ``__iter__`` it is a proper
 ``collections.abc.Iterable``. Iterating yields one batch-of-1 AudioTree per item:
 
-.. code-block:: python
+.. testcode::
 
     for item in audio_tree:
         assert item.waveform.shape[0] == 1
@@ -251,7 +296,7 @@ Because AudioTree implements ``__iter__`` it is a proper
 Pairing ``__iter__`` with ``len()`` means progress bars work out of the box —
 ``tqdm`` reads ``len()`` to size the bar automatically:
 
-.. code-block:: python
+.. testcode::
 
     import tqdm
 
@@ -261,11 +306,14 @@ Pairing ``__iter__`` with ``len()`` means progress bars work out of the box —
 To reassemble a batch from individual items, use
 :meth:`~audiotree.core.AudioTree.batch_fn`:
 
-.. code-block:: python
+.. testcode::
 
     items = [audio_tree[i] for i in range(len(audio_tree))]
     rebuilt = AudioTree.batch_fn(items)
-    >>> rebuilt.waveform.shape
+    print(rebuilt.waveform.shape)
+
+.. testoutput::
+
     (16, 2, 44100)
 
 Batching Operations
@@ -279,22 +327,25 @@ Creating Mini-Batches
 The :meth:`~audiotree.core.AudioTree.reshape_mini_batches` method adds a mini-batch axis,
 and :meth:`~audiotree.core.AudioTree.flatten_mini_batches` removes it again:
 
-.. code-block:: python
+.. testcode::
 
     # Start with 12 audio samples
     x = AudioTree(np.zeros((12, 1, 44_100)), 44_100)
-    >>> x.waveform.shape
-    (12, 1, 44100)
+    print(x.waveform.shape)
 
     # Reshape into mini-batches of size 3
     x_batched = x.reshape_mini_batches(3)
-    >>> x_batched.waveform.shape
-    (4, 3, 1, 44100)  # 4 mini-batches, each with 3 samples
+    print(x_batched.waveform.shape)   # 4 mini-batches, each with 3 samples
 
     # Flatten back to original shape
     x_unbatched = x_batched.flatten_mini_batches()
-    >>> x_unbatched.waveform.shape
-    (12, 1, 44100)  # Back to original
+    print(x_unbatched.waveform.shape)   # Back to original
+
+.. testoutput::
+
+    (12, 1, 44100)
+    (4, 3, 1, 44100)
+    (12, 1, 44100)
 
 .. note::
    AudioTree methods operate on mini-batched trees directly. Methods like
@@ -311,26 +362,29 @@ Splitting into Multiple Trees
 
 The :meth:`~audiotree.core.AudioTree.split` method splits a batch into separate AudioTree objects:
 
-.. code-block:: python
+.. testcode::
 
     # Start with 12 audio samples
     x = AudioTree(np.zeros((12, 1, 44_100)), 44_100)
 
     # Split into 2 separate AudioTree objects
     split_trees = x.split(2)
-    >>> len(split_trees)
+    print(len(split_trees))
+    print(split_trees[0].waveform.shape)   # First half
+    print(split_trees[1].waveform.shape)   # Second half
+
+.. testoutput::
+
     2
-    >>> split_trees[0].waveform.shape
-    (6, 1, 44100)  # First half
-    >>> split_trees[1].waveform.shape
-    (6, 1, 44100)  # Second half
+    (6, 1, 44100)
+    (6, 1, 44100)
 
 Filtering Batch Items
 ~~~~~~~~~~~~~~~~~~~~~
 
 The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively keep batch items based on a condition:
 
-.. code-block:: python
+.. testcode::
 
     # Generate uniform noise and scale it to different levels
     np.random.seed(42)  # For reproducible results
@@ -359,17 +413,22 @@ The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively ke
 
     filtered_tree = audio_tree.filter(keep_loud_audio)
 
-    >>> filtered_tree.waveform.shape
-    (9, 1, 44100)  # 9 batches remain (excluding silent and very quiet ones)
-    >>> filtered_tree.loudness  # LUFS values for remaining batches
-    Array([-15.69, -12.17, -9.67, -7.73, -6.15, -4.81, -3.65, -2.63, -1.71], dtype=float32)
+    # 9 batches remain (excluding silent and very quiet ones)
+    print(filtered_tree.waveform.shape)
+    # LUFS values for remaining batches (rounded for display)
+    print(np.round(filtered_tree.loudness, 2))
+
+.. testoutput::
+
+    (9, 1, 44100)
+    [-15.65 -12.15  -9.65  -7.69  -6.11  -4.75  -3.61  -2.56  -1.65]
 
 Processing Mini-Batches with nnx.scan
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can use Flax's :func:`nnx.scan` to efficiently process mini-batches with neural networks:
 
-.. code-block:: python
+.. testcode::
 
     from flax import nnx
 
@@ -386,32 +445,35 @@ You can use Flax's :func:`nnx.scan` to efficiently process mini-batches with neu
 
     # Create mini-batches of size 3
     x_batched = x.reshape_mini_batches(3)
-    >>> x_batched.waveform.shape
-    (4, 3, 1, 44100)  # 4 mini-batches of size 3
+    print(x_batched.waveform.shape)   # 4 mini-batches of size 3
 
     # Process all mini-batches sequentially
     processed_batched = process_mini_batches(x_batched)
-    >>> processed_batched.waveform.shape
-    (4, 3, 1, 44100)  # Still mini-batched
+    print(processed_batched.waveform.shape)   # Still mini-batched
 
     # Flatten back to original batch dimension
     full_batch = processed_batched.flatten_mini_batches()
-    >>> full_batch.waveform.shape
-    (12, 1, 44100)  # Back to original shape
-    >>> np.allclose(full_batch.waveform, 0.5)
-    True  # All values were processed
+    print(full_batch.waveform.shape)         # Back to original shape
+    print(np.allclose(full_batch.waveform, 0.5))   # All values were processed
+
+.. testoutput::
+
+    (4, 3, 1, 44100)
+    (4, 3, 1, 44100)
+    (12, 1, 44100)
+    True
 
 Working with JAX PyTrees
 ------------------------
 
-AudioTree is a JAX pytree, which means it works seamlessly with JAX's audio_tree operations.
+AudioTree is a JAX pytree, which means it works seamlessly with JAX's tree operations.
 
-Concatenating Trees with jax.audio_tree.map
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Concatenating Trees with jax.tree.map
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can use :func:`jax.audio_tree.map` to combine multiple AudioTree objects:
+You can use ``jax.tree.map`` to combine multiple AudioTree objects:
 
-.. code-block:: python
+.. testcode::
 
     import jax
 
@@ -422,20 +484,23 @@ You can use :func:`jax.audio_tree.map` to combine multiple AudioTree objects:
     trees = [x, x, x]
 
     # Concatenate along the batch dimension
-    big_tree = jax.audio_tree.map(
+    big_tree = jax.tree.map(
         lambda *xs: np.concatenate(xs, axis=0),
         *trees
     )
 
-    >>> big_tree.waveform.shape
-    (12, 1, 44100)  # 3 × 4 = 12 batches
+    print(big_tree.waveform.shape)   # 3 × 4 = 12 batches
+
+.. testoutput::
+
+    (12, 1, 44100)
 
 Nested Structures
 ~~~~~~~~~~~~~~~~~
 
 AudioTree objects can be organized in complex nested structures:
 
-.. code-block:: python
+.. testcode::
 
     # Create different audio trees
     input_audio = AudioTree(np.ones((2, 1, 1000)), 44_100)
@@ -452,34 +517,40 @@ AudioTree objects can be organized in complex nested structures:
     def scale_audio(audio_tree):
         return audio_tree.replace(waveform=audio_tree.waveform * 0.5)
 
-    scaled_batch = jax.audio_tree.map(
+    scaled_batch = jax.tree.map(
         scale_audio,
         batch,
         is_leaf=lambda x: isinstance(x, AudioTree)
     )
 
-    >>> scaled_batch["input"].waveform[0, 0, 0]
-    0.5  # Scaled from 1.0
-    >>> scaled_batch["augmented"][1].waveform[0, 0, 0]
-    0.0  # Scaled from 0.0 (remains 0)
+    print(scaled_batch["input"].waveform[0, 0, 0])         # Scaled from 1.0
+    print(scaled_batch["augmented"][1].waveform[0, 0, 0])  # Scaled from 0.0 (remains 0)
 
-audio_tree Flattening and Unflattening
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. testoutput::
+
+    0.5
+    0.0
+
+Tree Flattening and Unflattening
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 JAX can flatten AudioTree objects for operations requiring flat arrays:
 
-.. code-block:: python
+.. testcode::
 
     audio_tree = AudioTree(np.ones((1, 2, 1000)), 44_100)
 
     # Flatten the audio_tree into leaves and structure
-    leaves, treedef = jax.audio_tree.flatten(audio_tree)
+    leaves, treedef = jax.tree.flatten(audio_tree)
 
     # Modify leaves if needed...
     # Then reconstruct the audio_tree
-    reconstructed = jax.audio_tree.unflatten(treedef, leaves)
+    reconstructed = jax.tree.unflatten(treedef, leaves)
 
-    >>> np.array_equal(reconstructed.waveform, audio_tree.waveform)
+    print(np.array_equal(reconstructed.waveform, audio_tree.waveform))
+
+.. testoutput::
+
     True
 
 Metadata and Filepaths
@@ -492,7 +563,7 @@ Storing Filepaths
 
 When creating AudioTree objects, you can associate them with source files:
 
-.. code-block:: python
+.. testcode::
 
     # Single filepath
     audio_tree = AudioTree.create(
@@ -500,8 +571,7 @@ When creating AudioTree objects, you can associate them with source files:
         44_100,
         filepaths="audio.wav"
     )
-    >>> audio_tree.filepath
-    ['audio.wav']
+    print(audio_tree.filepath)
 
     # Multiple filepaths for batched data
     audio_tree = AudioTree.create(
@@ -509,7 +579,11 @@ When creating AudioTree objects, you can associate them with source files:
         44_100,
         filepaths=["a.wav", "b.wav", "c.wav"]
     )
-    >>> audio_tree.filepath
+    print(audio_tree.filepath)
+
+.. testoutput::
+
+    ['audio.wav']
     ['a.wav', 'b.wav', 'c.wav']
 
 Understanding Metadata
@@ -521,7 +595,7 @@ is marked as ``pytree_node=False`` and remains constant across operations.
 
 Metadata should contain array-like data with a batch dimension:
 
-.. code-block:: python
+.. testcode::
 
     # Create trees with array metadata that can be batched
     tree1 = AudioTree.create(
@@ -544,19 +618,22 @@ Metadata should contain array-like data with a batch dimension:
 
     # Concatenate trees - metadata gets concatenated too
     import jax
-    combined = jax.audio_tree.map(
+    combined = jax.tree.map(
         lambda *xs: np.concatenate(xs, axis=0),
         tree1, tree2
     )
 
-    >>> combined.waveform.shape
-    (4, 1, 44100)  # Batched from 2+2
-    >>> combined.metadata["energy"].shape
-    (4,)  # Metadata was concatenated
-    >>> combined.metadata["onset_times"].shape
-    (4, 2)  # 2D metadata also concatenated along batch dimension
-    >>> combined.sample_rate
-    44100  # Sample rate stays the same (not a pytree node)
+    print(combined.waveform.shape)                  # Batched from 2+2
+    print(combined.metadata["energy"].shape)        # Metadata was concatenated
+    print(combined.metadata["onset_times"].shape)   # 2D metadata concatenated along batch dim
+    print(combined.sample_rate)                     # Sample rate stays the same (not a pytree node)
+
+.. testoutput::
+
+    (4, 1, 44100)
+    (4,)
+    (4, 2)
+    44100
 
 Writing Audio to Disk
 ---------------------
@@ -571,7 +648,7 @@ Writing a Single File
 argument: it uses ``self.sample_rate``, so call
 :meth:`~audiotree.core.AudioTree.resample` beforehand to change it.
 
-.. code-block:: python
+.. testcode::
 
     audio_tree = AudioTree.from_file("input.wav", sample_rate=44_100)
 
@@ -583,13 +660,16 @@ argument: it uses ``self.sample_rate``, so call
     audio_tree.write("output.flac")  # FLAC inferred from the ".flac" extension
 
     # write() returns the Path it wrote.
-    >>> audio_tree.write("output.wav")
-    PosixPath('output.wav')
+    print(audio_tree.write("output.wav"))
+
+.. testoutput::
+
+    output.wav
 
 Indexing or iterating makes it easy to write every item of a batch (each item is a
 batch of 1, exactly what ``write`` requires):
 
-.. code-block:: python
+.. testcode::
 
     batch = AudioTree(np.random.randn(8, 2, 44_100), 44_100)
     for i, item in enumerate(batch):
@@ -608,7 +688,7 @@ The :class:`~audiotree.writer.AudioWriter` class provides a convenient way to wr
 Basic Example
 ~~~~~~~~~~~~~
 
-.. code-block:: python
+.. testcode::
 
     from audiotree import AudioTree, AudioWriter
     import numpy as np
@@ -624,14 +704,17 @@ Basic Example
     with AudioWriter("output") as writer:
         paths = writer.write(audio_tree, tags={"dataset": "train"})
 
-    >>> len(paths)
-    3  # One file per batch item
+    print(len(paths))   # One file per batch item
 
     # Read the data back
     from audiotree.sources import ManifestDataSource
     source = ManifestDataSource.from_writer_output("output")
-    >>> source[0].loudness  # Metadata is preserved
-    array([-20.])
+    print(source[0].loudness)   # Metadata is preserved
+
+.. testoutput::
+
+    3
+    [-20.]
 
 Next Steps
 ----------

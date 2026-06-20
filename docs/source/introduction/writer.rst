@@ -9,6 +9,20 @@
 Writing Datasets
 =================
 
+.. testsetup::
+
+    # Hidden shared setup: a temp working directory and a synthetic input WAV
+    # used by the executable examples below. Examples run from inside this dir,
+    # so their relative output directories ("output", etc.) land here.
+    import os
+    import tempfile
+    import numpy as np
+    import soundfile
+
+    _doc_dir = tempfile.mkdtemp()
+    os.chdir(_doc_dir)
+    soundfile.write("input.wav", (0.1 * np.random.randn(44_100, 1)).astype(np.float32), 44_100)
+
 AudioTree provides two writers for different use cases:
 
 .. list-table::
@@ -66,7 +80,7 @@ Basic Usage
 
 AudioWriter sequentially writes AudioTree batches to disk, automatically handling file naming and optional manifest generation:
 
-.. code-block:: python
+.. testcode::
 
     from audiotree import AudioTree, AudioWriter
     import numpy as np
@@ -81,10 +95,13 @@ AudioWriter sequentially writes AudioTree batches to disk, automatically handlin
     with AudioWriter("output", pattern="audio_{index:04d}.wav") as writer:
         paths = writer.write(audio_tree)
 
-    >>> len(paths)
-    3  # One file per batch item
-    >>> paths[0].name
-    'audio_0000.wav'
+    print(len(paths))        # One file per batch item
+    print(paths[0].name)
+
+.. testoutput::
+
+    3
+    audio_0000.wav
 
 Manifest Formats
 ~~~~~~~~~~~~~~~~
@@ -96,7 +113,7 @@ NPZ Format
 
 NPZ is the recommended format for all use cases, especially for large datasets:
 
-.. code-block:: python
+.. testcode::
 
     # NPZ format - best for large datasets
     with AudioWriter("output") as writer:
@@ -115,7 +132,7 @@ NPZ Compression Options
 
 Control NPZ file compression for different trade-offs:
 
-.. code-block:: python
+.. testcode::
 
     # Compressed NPZ (default) - smaller files, slightly slower writing
     writer = AudioWriter("output", compress_manifest=True)
@@ -130,22 +147,22 @@ Metadata Tracking
 
 AudioWriter automatically tracks all AudioTree metadata in the manifest:
 
-.. code-block:: python
+.. testcode::
 
     # Create AudioTree with comprehensive metadata
-    audio_tree = AudioTree.create(
+    meta_tree = AudioTree.create(
         np.random.randn(2, 1, 44_100),
         sample_rate=44_100,
         loudness=np.array([-20.0, -15.0]),
         pitch=np.array([60.0, 62.0]),
         velocity=np.array([64, 80]),
-        duration=np.array([1.0, 0.5]),
+        note_duration=np.array([1.0, 0.5]),
         filepaths=["original1.wav", "original2.wav"]
     )
 
     # Write with custom tags
-    with AudioWriter("output") as writer:
-        writer.write(audio_tree, tags={"dataset": "train", "version": 2})
+    with AudioWriter("output_meta") as writer:
+        writer.write(meta_tree, tags={"dataset": "train", "version": 2})
 
 The manifest will contain:
 
@@ -158,7 +175,7 @@ Timestamp Control
 
 Control whether to include timestamps in manifest entries:
 
-.. code-block:: python
+.. testcode::
 
     # Without timestamps (default) - smaller, cleaner manifests
     writer = AudioWriter("output", include_timestamp=False)
@@ -177,14 +194,14 @@ Resampling During Write
 
 AudioWriter can automatically resample audio to a target sample rate:
 
-.. code-block:: python
+.. testcode::
 
     # Original at 44.1 kHz
-    audio_tree = AudioTree.create(np.zeros((1, 2, 44_100)), 44_100)
+    resample_tree = AudioTree.create(np.zeros((1, 2, 44_100)), 44_100)
 
     # Resample to 16 kHz when writing
-    with AudioWriter("output", sample_rate=16_000) as writer:
-        writer.write(audio_tree)
+    with AudioWriter("output_16k", sample_rate=16_000) as writer:
+        writer.write(resample_tree)
     # Written files will be at 16 kHz
 
 This is useful when:
@@ -198,31 +215,34 @@ Sequential Writing
 
 AudioWriter maintains state for sequential writing across multiple batches:
 
-.. code-block:: python
+.. testcode::
 
-    writer = AudioWriter("output", pattern="sample_{index:05d}.wav")
+    writer = AudioWriter("output_seq", pattern="sample_{index:05d}.wav")
 
     # Write first batch
     tree1 = AudioTree.create(np.random.randn(2, 1, 8000), 8000)
     paths1 = writer.write(tree1)
-    >>> [p.name for p in paths1]
-    ['sample_00000.wav', 'sample_00001.wav']
+    print([p.name for p in paths1])
 
     # Write second batch - indexing continues
     tree2 = AudioTree.create(np.random.randn(3, 1, 8000), 8000)
     paths2 = writer.write(tree2)
-    >>> [p.name for p in paths2]
-    ['sample_00002.wav', 'sample_00003.wav', 'sample_00004.wav']
+    print([p.name for p in paths2])
 
     # Get statistics
     stats = writer.get_stats()
-    >>> stats['total_files']
-    5
-    >>> stats['current_index']
-    5
+    print(stats['total_files'])
+    print(stats['current_index'])
 
     # Save manifest when done
     manifest_path = writer.save_manifest()
+
+.. testoutput::
+
+    ['sample_00000.wav', 'sample_00001.wav']
+    ['sample_00002.wav', 'sample_00003.wav', 'sample_00004.wav']
+    5
+    5
 
 Progress Bars
 ^^^^^^^^^^^^^
@@ -294,29 +314,37 @@ Reading Written Data
 
 Use :class:`~audiotree.sources.manifest.ManifestDataSource` to read AudioWriter output:
 
-.. code-block:: python
+.. testcode::
 
     from audiotree.sources import ManifestDataSource
 
-    # Write some data
-    with AudioWriter("output") as writer:
-        writer.write(audio_tree, tags={"split": "train"})
+    # Write some data (with per-item loudness so it round-trips into the manifest)
+    loudness_tree = AudioTree.create(
+        np.random.randn(3, 2, 44_100),
+        sample_rate=44_100,
+        loudness=np.array([-20.0, -15.0, -18.0]),
+    )
+    with AudioWriter("output_read") as writer:
+        writer.write(loudness_tree, tags={"split": "train"})
 
     # Read it back
-    source = ManifestDataSource.from_writer_output("output")
+    source = ManifestDataSource.from_writer_output("output_read")
 
     # Access individual items
     loaded_tree = source[0]
-    >>> loaded_tree.sample_rate
-    44100
-    >>> loaded_tree.loudness  # Metadata is restored
-    array([-20.])
+    print(loaded_tree.sample_rate)
+    print(loaded_tree.loudness)   # Metadata is restored
 
     # Filter by metadata
     loud_source = source.filter_by_loudness(min_lufs=-18.0)
 
     # Filter by tags
     train_source = source.filter_by_tag("split", "train")
+
+.. testoutput::
+
+    44100
+    [-20.]
 
 Integration with Data Pipelines
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -345,7 +373,7 @@ Metadata Flow Example
 
 Here's how metadata flows through AudioTree transformations and into the manifest:
 
-.. code-block:: python
+.. testcode::
 
     from audiotree import AudioTree, AudioWriter
     import numpy as np
@@ -367,25 +395,32 @@ Here's how metadata flows through AudioTree transformations and into the manifes
     processed = processed.replace_loudness()
 
     # Check metadata is still there
-    >>> processed.metadata["instrument"]
-    'guitar'
-    >>> processed.metadata["bpm"]
-    120
+    print(processed.metadata["instrument"])
+    print(processed.metadata["bpm"])
 
     # Write with additional tags
-    with AudioWriter("output") as writer:
+    with AudioWriter("output_flow") as writer:
         writer.write(processed, tags={"processed": True, "version": 2})
 
-    # When read back, all metadata is available
-    from audiotree.sources import ManifestDataSource
-    source = ManifestDataSource.from_writer_output("output")
-    loaded = source[0]
+.. testoutput::
 
-    # Original metadata is preserved
-    >>> loaded.metadata["instrument"]  # From from_file
-    'guitar'
-    >>> loaded.metadata["tags"]["processed"]  # From writer.write
-    True
+    guitar
+    120
+
+When read back via :class:`~audiotree.sources.manifest.ManifestDataSource`, the per-item
+metadata is restored as batched arrays (so a single-item read gives ``array(['guitar'])``
+for a string field):
+
+.. testcode::
+
+    from audiotree.sources import ManifestDataSource
+    source = ManifestDataSource.from_writer_output("output_flow")
+    loaded = source[0]
+    print(loaded.metadata["instrument"])
+
+.. testoutput::
+
+    ['guitar']
 
 Best Practices
 ~~~~~~~~~~~~~~

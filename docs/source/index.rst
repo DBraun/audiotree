@@ -17,7 +17,26 @@ An AudioTree can also store arrays for codebooks or latent embeddings.
 AudioTree integrates with `Grain`_ to provide complete data pipelines. Load audio from directories,
 apply balanced sampling across groups, and chain augmentations:
 
-.. code-block:: python
+.. testsetup::
+
+    # Hidden setup: stand in for the "/data/speech" and "/data/music" directories
+    # below with two temp dirs of small synthetic WAVs, so this example runs.
+    import os
+    import tempfile
+    import numpy as np
+    import soundfile
+
+    _g = np.random.default_rng(0)
+    _speech_dir, _music_dir = tempfile.mkdtemp(), tempfile.mkdtemp()
+    for _d in (_speech_dir, _music_dir):
+        for _i in range(3):
+            soundfile.write(
+                os.path.join(_d, f"{_i}.wav"),
+                (0.1 * _g.standard_normal((44_100, 1))).astype(np.float32),
+                44_100,
+            )
+
+.. testcode::
 
     from audiotree import AudioTree
     from audiotree.sources import create_balanced_audio_dataset
@@ -25,7 +44,7 @@ apply balanced sampling across groups, and chain augmentations:
 
     # Create dataset with balanced sampling across groups
     ds = create_balanced_audio_dataset(
-        sources={"speech": ["/data/speech"], "music": ["/data/music"]},
+        sources={"speech": [_speech_dir], "music": [_music_dir]},
         weights={"speech": 0.7, "music": 0.3},
         sample_rate=44100,
         duration=3.0,
@@ -40,7 +59,12 @@ apply balanced sampling across groups, and chain augmentations:
     # Access batched AudioTrees
     batch = next(iter(iter_ds))
     print(batch.waveform.shape)    # (32, channels, 132300)
-    print(batch.source)            # ["speech", "music", ...]
+    print(batch.source[:3])        # ["speech", "music", ...]
+
+.. testoutput::
+
+    (32, 1, 132300)
+    ['speech', 'speech', 'speech']
 
 Transforms work on any `Pytree`_ of AudioTrees, including dictionaries and lists.
 This enables patterns like ``{"dry": audio_tree, "wet": audio_tree}`` where you selectively augment

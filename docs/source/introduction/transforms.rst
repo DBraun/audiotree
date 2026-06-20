@@ -13,6 +13,18 @@ Transforms
 
 .. ---------------------------
 
+.. testsetup::
+
+    # Hidden shared setup: a small non-silent AudioTree (with cached loudness)
+    # and a NumPy RNG. The NumPy-backend transforms in ``audiotree.transforms``
+    # take a ``np.random.Generator`` (use ``audiotree.transforms.jax`` for JAX keys).
+    import numpy as np
+    from audiotree import AudioTree
+
+    audio_tree = AudioTree(np.random.default_rng(0).standard_normal((2, 1, 44_100)), 44_100)
+    audio_tree = audio_tree.replace_loudness()
+    rng = np.random.default_rng(0)
+
 Transforms in ``audiotree.transforms`` are `Grain`_
 `transformations <https://github.com/google/grain/blob/main/docs/data_loader/transformations.md>`_ that operate on AudioTrees.
 Examples include:
@@ -284,18 +296,23 @@ only rotate phase, leaving the magnitude spectrum (and thus the energy) essentia
 unchanged. By default they still invalidate ``loudness`` to be safe, but you can pass
 ``keep_loudness=True`` to carry the cached value through:
 
-.. code-block:: python
+.. testcode::
+
+    from audiotree.transforms import shift_phase
 
     audio_tree = audio_tree.replace_loudness()
 
     # Default: loudness is recomputed on next access.
     t1 = shift_phase(amount=0.5)
-    >>> t1.random_map(audio_tree, rng).loudness is None
-    True
+    print(t1.random_map(audio_tree, rng).loudness is None)
 
     # Opt in to preserving the cached loudness.
     t2 = shift_phase(amount=0.5, keep_loudness=True)
-    >>> t2.random_map(audio_tree, rng).loudness is None
+    print(t2.random_map(audio_tree, rng).loudness is None)
+
+.. testoutput::
+
+    True
     False
 
 Creating Custom Transforms

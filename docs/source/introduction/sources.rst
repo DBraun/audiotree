@@ -19,21 +19,46 @@ that are specially designed for audio. Grain is a new library for dataset operat
 The main functions are :func:`~audiotree.sources.create_audio_dataset` for simple loading and
 :func:`~audiotree.sources.create_balanced_audio_dataset` for balanced multi-group sampling.
 
+.. testsetup::
+
+    # Hidden setup: stand in for the "/data/..." directories below with temp
+    # dirs of small synthetic WAVs, so the Quick Start example runs.
+    import os
+    import tempfile
+    import numpy as np
+    import soundfile
+
+    _g = np.random.default_rng(0)
+    _speech_dir, _music_dir = tempfile.mkdtemp(), tempfile.mkdtemp()
+    for _d in (_speech_dir, _music_dir):
+        for _i in range(3):
+            soundfile.write(
+                os.path.join(_d, f"{_i}.wav"),
+                (0.1 * _g.standard_normal((44_100, 1))).astype(np.float32),
+                44_100,
+            )
+
 **Quick Start**
 
-.. code-block:: python
+.. testcode::
 
     from audiotree.sources import create_balanced_audio_dataset
 
     # Simple balanced dataset
     ds = create_balanced_audio_dataset(
         sources={
-            "speech": ["/data/speech"],
-            "music": ["/data/music"],
+            "speech": [_speech_dir],
+            "music": [_music_dir],
         },
         sample_rate=44100,
         duration=3.0,
     )
+
+    print(ds[0].waveform.shape)
+
+.. testoutput::
+
+    (1, 1, 132300)
 
 For detailed information on balanced datasets, hierarchical directories, and weight-based sampling,
 see :ref:`balanced_datasets`.
