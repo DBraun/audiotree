@@ -426,7 +426,9 @@ The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively ke
 Processing Mini-Batches with nnx.scan
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can use Flax's :func:`nnx.scan` to efficiently process mini-batches with neural networks:
+You can use Flax's :func:`nnx.scan` to efficiently process mini-batches with neural networks.
+If a batch is too large to process in memory at once, using mini-batches can meet
+the memory requirement.
 
 .. testcode::
 
@@ -434,11 +436,11 @@ You can use Flax's :func:`nnx.scan` to efficiently process mini-batches with neu
 
     # Define a scan function to process mini-batches
     @nnx.scan(in_axes=0, out_axes=0)
-    def process_mini_batches(mini_audio_tree):
-        waveform = mini_audio_tree.waveform
+    def process_mini_batches(audio_tree: AudioTree):
+        waveform = audio_tree.waveform
         assert waveform.ndim == 3  # (batch, channels, samples)
         waveform = waveform * 0.5  # or use a neural network!
-        return mini_audio_tree.replace(waveform=waveform)
+        return audio_tree.replace(waveform=waveform)
 
     # Create AudioTree with 12 samples
     x = AudioTree(np.ones((12, 1, 44_100)), 44_100)
@@ -469,15 +471,15 @@ Working with JAX PyTrees
 AudioTree is a JAX pytree, which means it works seamlessly with JAX's tree operations.
 
 Concatenating Trees with jax.tree.map
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can use ``jax.tree.map`` to combine multiple AudioTree objects:
+You can use :func:`jax.tree.map` to combine multiple AudioTree objects:
 
 .. testcode::
 
     import jax
 
-    # Create a audio_tree with 4 batches
+    # Create a tree with 4 batches
     x = AudioTree(np.zeros((4, 1, 44_100)), 44_100)
 
     # Create a list of three identical trees
@@ -514,7 +516,7 @@ AudioTree objects can be organized in complex nested structures:
     }
 
     # Apply transformations to all trees in the structure
-    def scale_audio(audio_tree):
+    def scale_audio(audio_tree: AudioTree):
         return audio_tree.replace(waveform=audio_tree.waveform * 0.5)
 
     scaled_batch = jax.tree.map(
@@ -590,7 +592,7 @@ Understanding Metadata
 ~~~~~~~~~~~~~~~~~~~~~~
 
 The ``metadata`` field is special - it's a pytree node (``pytree_node=True``), meaning it participates
-in JAX audio_tree operations like batching and concatenation. This is different from ``sample_rate``, which
+in JAX tree operations like batching and concatenation. This is different from ``sample_rate``, which
 is marked as ``pytree_node=False`` and remains constant across operations.
 
 Metadata should contain array-like data with a batch dimension:

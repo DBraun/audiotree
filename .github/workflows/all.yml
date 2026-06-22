@@ -32,7 +32,7 @@ jobs:
         sudo apt-get install libsndfile-dev
         python -m pip install --upgrade pip
         pip install ".[dev]"
-        pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
+        pip install git+https://github.com/DBraun/argbind.git@dev
 
     - name: Run tests
       run: |
@@ -57,7 +57,7 @@ jobs:
         sudo apt-get install libsndfile-dev
         python -m pip install --upgrade pip
         pip install ".[dev]"
-        pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
+        pip install git+https://github.com/DBraun/argbind.git@dev
         pip install furo
 
     - name: Build Docs
