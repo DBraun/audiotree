@@ -199,9 +199,10 @@ class TestDatasetChaining:
                 sample_rate=44100,
                 duration=5.0,
             ).slice(slice(0, 5))
+            ds = ds.seed(42)
 
             # Chain transforms
-            ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+            ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
             ds = ds.map(trim(length=3.0))
 
             # Load item
@@ -225,10 +226,11 @@ class TestDatasetChaining:
                 sample_rate=44100,
                 duration=3.0,
             ).slice(slice(0, 5))
+            ds = ds.seed(42)
 
             # Chain multiple random transforms
-            ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
-            ds = ds.random_map(volume_change(min_db=-6, max_db=6), seed=43)
+            ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
+            ds = ds.random_map(volume_change(min_db=-6, max_db=6))
             ds = ds.random_map(invert_phase(prob=0.5), seed=44)
 
             # Load item

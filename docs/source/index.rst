@@ -51,15 +51,17 @@ apply balanced sampling across groups, and chain augmentations:
     )
 
     # Chain transforms using Grain's API
-    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+    ds = ds.seed(42)
+    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
 
     # Convert to iterable and batch
     iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch)
 
     # Access batched AudioTrees
-    batch = next(iter(iter_ds))
+    batch: AudioTree = next(iter(iter_ds))
     print(batch.waveform.shape)    # (32, channels, 132300)
     print(batch.source[:3])        # ["speech", "music", ...]
+    # print(batch.filepath)        # ["path/to/file_abc.wav", "path/to/file_xyz.wav", ...]
 
 .. testoutput::
 

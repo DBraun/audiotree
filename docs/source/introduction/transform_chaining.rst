@@ -29,13 +29,14 @@ Apply transforms to a dataset using ``.random_map()`` or ``.map()``:
         sample_rate=44100,
         duration=5.0,
     )
+    ds = ds.seed(42)  # apply seed for random_map later
 
     # Chain transforms
     transform1 = volume_norm(min_db=-20, max_db=-15)
     transform2 = trim(length=3.0)
 
-    ds = ds.random_map(transform1, seed=42)  # Apply volume_norm
-    ds = ds.map(transform2)                  # Apply trim
+    ds = ds.random_map(transform1)  # Apply volume_norm
+    ds = ds.map(transform2)         # Apply trim
 
     # Load items - transforms are applied lazily
     audio_tree = ds[0]
@@ -77,25 +78,16 @@ Build complex augmentation pipelines:
     )
 
     # Build augmentation pipeline
-    base_seed = 42
+    ds = ds.seed(42)
 
     # 1. Normalize volume
-    ds = ds.random_map(
-        volume_norm(min_db=-25, max_db=-15),
-        seed=base_seed,
-    )
+    ds = ds.random_map(volume_norm(min_db=-25, max_db=-15))
 
     # 2. Random volume change (90% probability)
-    ds = ds.random_map(
-        volume_change(min_db=-6, max_db=6, prob=0.9),
-        seed=base_seed + 1,
-    )
+    ds = ds.random_map(volume_change(min_db=-6, max_db=6, prob=0.9))
 
     # 3. Random phase inversion (50% probability)
-    ds = ds.random_map(
-        invert_phase(prob=0.5),
-        seed=base_seed + 2,
-    )
+    ds = ds.random_map(invert_phase(prob=0.5))
 
     # 4. Trim to final length
     ds = ds.map(trim(length=3.0))
@@ -290,9 +282,10 @@ Add batching as part of the transform chain:
         sample_rate=44100,
         duration=3.0,
     )
+    ds = ds.seed(42)
 
     # Apply augmentations
-    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
 
     # Convert to IterDataset and batch
     iter_ds = ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch)
@@ -356,7 +349,8 @@ Transforms are applied lazily when items are accessed:
 .. code-block:: python
 
     ds = create_audio_dataset(sources="/data/audio")
-    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+    ds = ds.seed(42)
+    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
 
     # Nothing computed yet
     print("Dataset created")
@@ -377,7 +371,8 @@ For expensive transforms, consider pre-computing and using manifest datasets:
 
     # Load and augment
     ds = create_audio_dataset(sources="/data/audio")
-    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+    ds = ds.seed(42)
+    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
 
     # Pre-compute and write to disk
     writer = AudioWriter(output_dir="/data/augmented", format="npz")
@@ -407,9 +402,10 @@ Chain transforms before adding multiprocessing:
         sample_rate=44100,
         duration=5.0,
     )
+    ds = ds.seed(42)
 
     # Chain transforms on MapDataset
-    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
     ds = ds.map(trim(length=3.0))
 
     # Add multiprocessing at the end
@@ -447,19 +443,10 @@ Full pipeline with chained transforms, batching, and multiprocessing:
     )
 
     # Chain augmentations
-    base_seed = 42
-    ds = ds.random_map(
-        volume_norm(min_db=-25, max_db=-15),
-        seed=base_seed,
-    )
-    ds = ds.random_map(
-        volume_change(min_db=-6, max_db=6, prob=0.9),
-        seed=base_seed + 1,
-    )
-    ds = ds.random_map(
-        invert_phase(prob=0.5),
-        seed=base_seed + 2,
-    )
+    ds = ds.seed(42)
+    ds = ds.random_map(volume_norm(min_db=-25, max_db=-15))
+    ds = ds.random_map(volume_change(min_db=-6, max_db=6, prob=0.9))
+    ds = ds.random_map(invert_phase(prob=0.5))
     ds = ds.map(trim(length=3.0))
 
     # Convert to IterDataset, batch, and add multiprocessing
@@ -491,16 +478,16 @@ Common Patterns
 
 .. code-block:: python
 
-    ds = create_audio_dataset(sources="/data/audio")
-    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+    ds = create_audio_dataset(sources="/data/audio").seed(42)
+    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
 
 **Pattern 2: Multi-Stage Augmentation**
 
 .. code-block:: python
 
-    ds = create_audio_dataset(sources="/data/audio")
-    ds = ds.random_map(volume_norm(min_db=-25, max_db=-15), seed=42)
-    ds = ds.random_map(volume_change(min_db=-6, max_db=6), seed=43)
+    ds = create_audio_dataset(sources="/data/audio").seed(42)
+    ds = ds.random_map(volume_norm(min_db=-25, max_db=-15))
+    ds = ds.random_map(volume_change(min_db=-6, max_db=6))
     ds = ds.map(trim(length=3.0))
 
 **Pattern 3: Probabilistic Transforms**

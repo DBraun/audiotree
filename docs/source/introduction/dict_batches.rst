@@ -257,12 +257,11 @@ Full example using dict batches with scope:
     ds = ds.map(create_variants)
 
     # Chain augmentations with scope
-    base_seed = 42
+    ds = ds.seed(42)
 
     # 1. Normalize both
     ds = ds.random_map(
         volume_norm(min_db=-25, max_db=-15),
-        seed=base_seed,
     )
 
     # 2. Add variation only to 'augmented'
@@ -273,7 +272,6 @@ Full example using dict batches with scope:
             prob=0.9,
             scope={'augmented': {'scope': True}},
         ),
-        seed=base_seed + 1,
     )
 
     # 3. Random phase inversion only on 'augmented'
@@ -282,7 +280,6 @@ Full example using dict batches with scope:
             prob=0.5,
             scope={'augmented': {'scope': True}},
         ),
-        seed=base_seed + 2,
     )
 
     # 4. Trim both
@@ -362,6 +359,7 @@ This is the simplest and most common pattern:
 
     # Load single dataset
     ds = create_audio_dataset(sources="/data/audio", repeat=True)
+    ds = ds.seed(42)
 
     # Create multiple versions of each item
     def create_variants(audio_tree):
@@ -373,7 +371,7 @@ This is the simplest and most common pattern:
     ds = ds.map(create_variants)
 
     # Normalize both
-    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
 
     # Apply strong augmentation only to 'augmented'
     ds = ds.random_map(
@@ -542,12 +540,11 @@ Full training pipeline with dict batches:
     ds = ...  # Your paired dataset
 
     # Build augmentation pipeline
-    base_seed = 42
+    ds = ds.seed(42)
 
     # 1. Normalize both signals to similar loudness range
     ds = ds.random_map(
         volume_norm(min_db=-25, max_db=-15),
-        seed=base_seed,
     )
 
     # 2. Add random volume change to dry only (for robustness)
@@ -558,7 +555,6 @@ Full training pipeline with dict batches:
             prob=0.8,
             scope={'dry': {'scope': True}},
         ),
-        seed=base_seed + 1,
     )
 
     # 3. Random phase inversion on wet only
@@ -567,7 +563,6 @@ Full training pipeline with dict batches:
             prob=0.5,
             scope={'wet': {'scope': True}},
         ),
-        seed=base_seed + 2,
     )
 
     # 4. Trim both to final length
