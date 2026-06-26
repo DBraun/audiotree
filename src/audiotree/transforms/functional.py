@@ -452,18 +452,19 @@ def encode_latents(encoder_fn: Callable[[AudioTree], jnp.ndarray]):
 
 
 class choose(grain.transforms.RandomMap):
-    """Choose c transform(s) among transforms with optional probability weights.
+    r"""Choose c transform(s) among transforms with optional probability weights.
 
     With probability prob, choose c transform(s) from the list of transforms
     and apply them sequentially.
 
     Args:
-        *transforms: Variable number of transforms to choose from
+        \*transforms: Variable number of transforms to choose from
         c: Number of transforms to choose
         weights: Optional probability weights for each transform
         prob: Probability of applying any transforms at all
 
-    Example:
+    Example::
+
         transform = choose(
             volume_change(min_db=-6, max_db=6),
             invert_phase(),

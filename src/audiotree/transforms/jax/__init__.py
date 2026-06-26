@@ -5,7 +5,8 @@ These transforms use JAX operations and accept ``jax.random.key`` for random tra
 
 For CPU-based grain data pipelines, use ``audiotree.transforms`` instead.
 
-Example - Direct usage:
+Example - Direct usage::
+
     from audiotree.transforms import jax as jax_transforms
     import jax
 
@@ -14,7 +15,8 @@ Example - Direct usage:
     rng = jax.random.key(42)
     result = transform.random_map(audio_tree, rng)
 
-Example - ArgBind-configured training pipeline:
+Example - ArgBind-configured training pipeline::
+
     from audiotree.transforms import jax as jax_transforms
     import argbind
 

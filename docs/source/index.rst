@@ -10,8 +10,9 @@ AudioTree can be installed with pip:
 
    pip install audiotree
 
-The namesake class :class:`~audiotree.core.AudioTree` is a `flax.struct.dataclass`_ with properties for audio data,
-sample rate, on-demand data such as loudness, and optional data such as filepaths, MIDI pitch, velocity, and duration.
+The namesake class :class:`~audiotree.core.AudioTree` is a container for audio-related information with a batch-axis convention.
+Specifically, it's a `flax.struct.dataclass`_ with properties for the time-domain waveform,
+sample rate, on-demand data such as loudness, and optional data such as filepaths, MIDI pitch, velocity.
 An AudioTree can also store arrays for codebooks or latent embeddings.
 
 AudioTree integrates with `Grain`_ to provide complete data pipelines. Load audio from directories,
@@ -32,7 +33,7 @@ apply balanced sampling across groups, and chain augmentations:
         for _i in range(3):
             soundfile.write(
                 os.path.join(_d, f"{_i}.wav"),
-                (0.1 * _g.standard_normal((44_100, 1))).astype(np.float32),
+                (0.1 * _g.standard_normal((44_100, 2))).astype(np.float32),
                 44_100,
             )
 
@@ -40,18 +41,19 @@ apply balanced sampling across groups, and chain augmentations:
 
     from audiotree import AudioTree
     from audiotree.sources import create_balanced_audio_dataset
-    from audiotree.transforms import volume_norm
+    from audiotree.transforms import volume_norm, stereo
 
     # Create dataset with balanced sampling across groups
     ds = create_balanced_audio_dataset(
         sources={"speech": [_speech_dir], "music": [_music_dir]},
         weights={"speech": 0.7, "music": 0.3},
         sample_rate=44100,
-        duration=3.0,
+        duration=10.0,
     )
 
     # Chain transforms using Grain's API
     ds = ds.seed(42)
+    ds = ds.map(stereo())
     ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
 
     # Convert to iterable and batch
@@ -59,17 +61,17 @@ apply balanced sampling across groups, and chain augmentations:
 
     # Access batched AudioTrees
     batch: AudioTree = next(iter(iter_ds))
-    print(batch.waveform.shape)    # (32, channels, 132300)
+    print(batch.waveform.shape)    # (32, channels, 441000)
     print(batch.source[:3])        # ["speech", "music", ...]
     # print(batch.filepath)        # ["path/to/file_abc.wav", "path/to/file_xyz.wav", ...]
 
 .. testoutput::
 
-    (32, 1, 132300)
+    (32, 2, 441000)
     ['speech', 'speech', 'speech']
 
 Transforms work on any `Pytree`_ of AudioTrees, including dictionaries and lists.
-This enables patterns like ``{"dry": audio_tree, "wet": audio_tree}`` where you selectively augment
+This means transforms can receive and send patterns like ``{"dry": audio_tree, "wet": audio_tree}`` where you selectively augment
 specific keys using the ``scope`` parameter (see :ref:`dict_batches`).
 
 When used with `ArgBind`_, transforms are configurable from the command-line and YAML (see :ref:`argbind_guide`):

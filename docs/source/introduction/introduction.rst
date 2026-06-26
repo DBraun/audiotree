@@ -35,6 +35,9 @@ Basic Instantiation
 
 The :class:`~audiotree.core.AudioTree` class is the central data structure in the library.
 It stores audio as JAX arrays with a consistent shape convention: ``(Batch, Channels, Samples)``.
+This format is familiar to PyTorch and librosa users.
+Note that JAX and NNX follow a different convention where data is commonly in
+``(Batch, Samples, Channels)`` format.
 
 Creating from NumPy Arrays
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~

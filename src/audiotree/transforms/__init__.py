@@ -8,14 +8,16 @@ This module provides two sets of transforms:
 2. **JAX transforms** (``audiotree.transforms.jax``):
    For GPU/JIT training pipelines. Uses JAX operations and jax.random.key.
 
-Example - CPU (grain pipeline):
+Example - CPU (grain pipeline)::
+
     from audiotree.transforms import volume_norm, trim
 
     # Create transform and apply with grain
     transform = volume_norm(min_db=-20, max_db=-15)
     ds = ds.random_map(transform, seed=42)
 
-Example - GPU (jitted training step):
+Example - GPU (jitted training step)::
+
     from audiotree.transforms import jax as jax_transforms
     import argbind
 
