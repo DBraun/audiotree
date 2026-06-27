@@ -497,6 +497,16 @@ class AudioTree:
                 mode=effective_pad_mode,
             )
 
+        # ``librosa.load`` with a target ``sample_rate`` resamples internally, and for a non-integer
+        # rate ratio (e.g. 44100->48000) the resampled length can overshoot ``round(duration*sr)`` by
+        # a sample: librosa sizes the output as ``ceil(n * new_sr / old_sr)`` with a float ratio, so
+        # an exact value like 192000.0 evaluates to 192000.0000000003 and ceils to 192001. The pad
+        # block above only extends *short* reads up to ``target_length``; this matching trim keeps
+        # every excerpt of the same requested duration identical in length (without it, an over-long
+        # resample leaks through and breaks batching on a 1-sample mismatch).
+        if target_length is not None and data.shape[-1] > target_length:
+            data = data[..., :target_length]
+
         # Start with user-provided metadata or empty dict
         if metadata is None:
             combined_metadata = {}
