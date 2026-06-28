@@ -115,3 +115,13 @@ def test_audiotree_resample_numpy_output_length():
     tree = AudioTree.create(np.zeros((1, 1, 44_100), dtype=np.float32), 44_100)
     out = tree.resample(22_050, output_length=20_000)
     assert out.waveform.shape == (1, 1, 20_000)
+
+
+def test_audiotree_resample_numpy_length_matches_jax():
+    """NumPy and JAX resample agree on output length (soxr can differ by a sample)."""
+    np_tree = AudioTree.create(np.zeros((1, 1, 44_100), dtype=np.float32), 44_100)
+    jax_tree = AudioTree.create(jnp.zeros((1, 1, 44_100)), 44_100)
+    # 44.1k -> 48k is the case where soxr would otherwise return 48001.
+    assert (
+        np_tree.resample(48_000).samples == jax_tree.resample(48_000).samples == 48_000
+    )

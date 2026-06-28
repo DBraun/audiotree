@@ -1003,10 +1003,14 @@ class AudioTree:
                 target_sr=sample_rate,
                 axis=-1,
             ).astype(self.waveform.dtype)
-            if output_length is not None:
-                waveform = librosa.util.fix_length(
-                    waveform, size=output_length, axis=-1
+            # Pin the output length to what the JAX/Julius backend produces
+            # (``floor(T * new / old)``) so the two backends agree on shape;
+            # soxr's length can differ by a sample. ``output_length`` overrides.
+            if output_length is None:
+                output_length = (
+                    self.waveform.shape[-1] * sample_rate // self.sample_rate
                 )
+            waveform = librosa.util.fix_length(waveform, size=output_length, axis=-1)
         else:
             # JAX backend: the Julius port. Its kernel is strictly 3-D, so
             # flatten any leading axes (e.g. after reshape_mini_batches) and
