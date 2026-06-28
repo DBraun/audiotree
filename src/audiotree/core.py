@@ -956,25 +956,29 @@ class AudioTree:
         full: bool = False,
     ) -> Self:
         """
-        Resample the AudioTree's ``waveform`` to a new sample rate. The algorithm is a JAX port of ``ResampleFrac``
-        from the PyTorch library `Julius`_.
+        Resample the AudioTree's ``waveform`` to a new sample rate. NumPy-backed
+        waveforms are resampled on CPU with `librosa`_ (soxr); JAX-backed waveforms
+        use a JAX port of ``ResampleFrac`` from the PyTorch library `Julius`_. The
+        two backends are not bit-identical.
 
+        .. _librosa: https://librosa.org/
         .. _Julius: https://github.com/adefossez/julius/blob/main/julius/resample.py
 
         Args:
             sample_rate (int): The new sample rate of audio data, such as 44100 Hz.
             zeros (int, optional): number of zero crossing to keep in the sinc filter.
+                JAX backend only.
             rolloff (float): use a lowpass filter that is ``rolloff * sample_rate / 2``,
                 to ensure sufficient margin due to the imperfection of the FIR filter used.
                 Lowering this value will reduce antialiasing, but will reduce some of the
-                highest frequencies.
+                highest frequencies. JAX backend only.
             output_length (None or int): This can be set to the desired output length (last dimension).
                 Allowed values are between 0 and ``ceil(length * sample_rate / old_sr)``. When ``None`` (default) is
                 specified, the floored output length will be used. In order to select the largest possible
                 size, use the `full` argument.
             full (bool): return the longest possible output from the input. This can be useful
                 if you chain resampling operations, and want to give the ``output_length`` only
-                for the last one, while passing ``full=True`` to all the other ones.
+                for the last one, while passing ``full=True`` to all the other ones. JAX backend only.
 
         Returns:
             AudioTree: A new ``AudioTree`` resampled to ``sample_rate`` (the original is unchanged).
@@ -989,20 +993,36 @@ class AudioTree:
         """
         if sample_rate == self.sample_rate:
             return self
-        # The resample kernel is strictly 3-D, so flatten any leading axes
-        # (e.g. after reshape_mini_batches) and restore them afterwards.
-        leading_shape = self.waveform.shape[:-2]
-        flat = self.waveform.reshape(-1, *self.waveform.shape[-2:])
-        waveform = resample(
-            flat,
-            self.sample_rate,
-            sample_rate,
-            zeros=zeros,
-            rolloff=rolloff,
-            output_length=output_length,
-            full=full,
-        )
-        waveform = waveform.reshape(*leading_shape, *waveform.shape[-2:])
+        if isinstance(self.waveform, np.ndarray):
+            # CPU backend: librosa (soxr). ``zeros``, ``rolloff``, and ``full``
+            # are JAX-only knobs and do not apply here. librosa resamples along
+            # the time axis directly, so no 3-D flattening is needed.
+            waveform = librosa.resample(
+                self.waveform,
+                orig_sr=self.sample_rate,
+                target_sr=sample_rate,
+                axis=-1,
+            ).astype(self.waveform.dtype)
+            if output_length is not None:
+                waveform = librosa.util.fix_length(
+                    waveform, size=output_length, axis=-1
+                )
+        else:
+            # JAX backend: the Julius port. Its kernel is strictly 3-D, so
+            # flatten any leading axes (e.g. after reshape_mini_batches) and
+            # restore them afterwards.
+            leading_shape = self.waveform.shape[:-2]
+            flat = self.waveform.reshape(-1, *self.waveform.shape[-2:])
+            waveform = resample(
+                flat,
+                self.sample_rate,
+                sample_rate,
+                zeros=zeros,
+                rolloff=rolloff,
+                output_length=output_length,
+                full=full,
+            )
+            waveform = waveform.reshape(*leading_shape, *waveform.shape[-2:])
         return self.replace(waveform=waveform, sample_rate=sample_rate, loudness=None)
 
     def split(self, n_splits: int) -> List[Self]:

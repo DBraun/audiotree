@@ -7,6 +7,7 @@ import librosa
 import pytest
 from scipy.io import wavfile
 
+from audiotree import AudioTree
 from audiotree.resample import resample
 
 
@@ -88,3 +89,29 @@ def test_resample_002(new_sr: int):
     y = np.zeros((B, C, old_sr * 10))
 
     _resample(y, old_sr=old_sr, new_sr=new_sr)
+
+
+def test_audiotree_resample_numpy_stays_numpy():
+    """The NumPy backend resamples with librosa and does not become a JAX array."""
+    tree = AudioTree.create(np.zeros((1, 1, 44_100), dtype=np.float32), 44_100)
+    out = tree.resample(22_050)
+    assert isinstance(out.waveform, np.ndarray)
+    assert out.sample_rate == 22_050
+    assert out.waveform.shape == (1, 1, 22_050)
+    assert out.waveform.dtype == np.float32
+
+
+def test_audiotree_resample_jax_stays_jax():
+    """The JAX backend resamples with the Julius port and stays a JAX array."""
+    tree = AudioTree.create(jnp.zeros((1, 1, 44_100)), 44_100)
+    out = tree.resample(22_050)
+    assert isinstance(out.waveform, jax.Array)
+    assert out.sample_rate == 22_050
+    assert out.waveform.shape == (1, 1, 22_050)
+
+
+def test_audiotree_resample_numpy_output_length():
+    """The NumPy backend honors output_length (trim/pad to a fixed size)."""
+    tree = AudioTree.create(np.zeros((1, 1, 44_100), dtype=np.float32), 44_100)
+    out = tree.resample(22_050, output_length=20_000)
+    assert out.waveform.shape == (1, 1, 20_000)
