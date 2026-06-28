@@ -8,12 +8,10 @@ All other transforms are in the function-based API in functional.py.
 
 from typing import Any, Sequence
 
-from jax import numpy as jnp
+from jax import numpy as jnp, tree_util
 import numpy as np
 
-from grain._src.core import tree_lib
-from grain._src.python.shared_memory_array import SharedMemoryArray
-from grain.python import BatchOperation
+from grain.python import BatchOperation, SharedMemoryArray
 
 
 class Batch(BatchOperation):
@@ -70,7 +68,7 @@ class Batch(BatchOperation):
                 args, axis=0, out=SharedMemoryArray(shape, dtype=dtype)
             ).metadata
 
-        return tree_lib.map_structure(
+        return tree_util.tree_map(
             stacking_function,
             input_records[0],
             *input_records[1:],
