@@ -355,6 +355,25 @@ def _shift_phase_np(
 # =============================================================================
 
 
+def _invalidate_offset(metadata: dict) -> dict:
+    """Drop a stale source-file ``offset`` after a time shift.
+
+    ``AudioTree.from_file`` records ``metadata["offset"]`` as the source-file
+    time (in seconds) of sample 0. Rolling shifts the waveform along the time
+    axis, so that recorded offset no longer points at sample 0 and is set to
+    ``None``. Metadata without an ``offset`` key is returned unchanged.
+
+    Args:
+        metadata: The AudioTree metadata dict to inspect.
+
+    Returns:
+        The metadata dict, with ``offset`` invalidated to ``None`` if present.
+    """
+    if "offset" not in metadata:
+        return metadata
+    return {**metadata, "offset": None}
+
+
 def _roll_jax(
     audio_tree: AudioTree,
     rng: jax.Array,
@@ -395,7 +414,10 @@ def _roll_jax(
     # "wrap" reorders existing samples (loudness preserved); "constant" zeros
     # out part of the signal, which changes its integrated loudness.
     loudness = None if mode == "constant" else audio_tree.loudness
-    return audio_tree.replace(waveform=rolled_audio, loudness=loudness)
+    metadata = _invalidate_offset(audio_tree.metadata)
+    return audio_tree.replace(
+        waveform=rolled_audio, loudness=loudness, metadata=metadata
+    )
 
 
 def _roll_np(
@@ -432,7 +454,8 @@ def _roll_np(
     # "wrap" reorders existing samples (loudness preserved); "constant" zeros
     # out part of the signal, which changes its integrated loudness.
     loudness = None if mode == "constant" else audio_tree.loudness
-    return audio_tree.replace(waveform=result, loudness=loudness)
+    metadata = _invalidate_offset(audio_tree.metadata)
+    return audio_tree.replace(waveform=result, loudness=loudness, metadata=metadata)
 
 
 # =============================================================================

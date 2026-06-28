@@ -4,6 +4,10 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## Unreleased
 
+### Bug Fixes
+
+* **`roll()` invalidates stale `metadata["offset"]`**: `AudioTree.from_file` records `metadata["offset"]` as the source-file time of sample 0. Since `roll` shifts the waveform along the time axis (in both `"wrap"` and `"constant"` modes), that offset no longer points at sample 0 and is now set to `None`, mirroring how `roll` already invalidates cached `loudness`. Trees without an `offset` key are unaffected. Applies to both the NumPy and JAX backends.
+
 ## audiotree 1.0.0 (Jun 27, 2026)
 
 ### Added

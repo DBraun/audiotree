@@ -533,6 +533,26 @@ def test_roll_loudness_invalidation():
     assert constant.loudness is None
 
 
+def test_roll_invalidates_offset():
+    """Rolling shifts the start, so the recorded source-file offset is stale."""
+    waveform = np.arange(10000, dtype=np.float32).reshape(1, 1, 10000)
+    audio_tree = AudioTree(
+        waveform=waveform, sample_rate=10000, metadata={"offset": np.array([5.0])}
+    )
+    rng = np.random.default_rng(0)
+
+    for mode in ("wrap", "constant"):
+        rolled = roll(min_seconds=0.1, max_seconds=0.1, mode=mode).random_map(
+            audio_tree, rng
+        )
+        assert rolled.metadata["offset"] is None
+
+    # A tree without an offset key is left untouched (no spurious None added).
+    no_offset = AudioTree(waveform=waveform, sample_rate=10000)
+    rolled = roll(min_seconds=0.1, max_seconds=0.1).random_map(no_offset, rng)
+    assert "offset" not in rolled.metadata
+
+
 def test_to_stereo_invalidates_loudness():
     """Duplicating a mono channel changes loudness, so it is invalidated."""
     mono_tree = AudioTree(
