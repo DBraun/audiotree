@@ -1,6 +1,6 @@
 # AudioTree
 
-Audio data loading and augmentations in JAX.
+Audio as an ML-agnostic Pytree container.
 
 ## Documentation
 
