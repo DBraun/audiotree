@@ -127,6 +127,48 @@ Customize which file types to load:
         duration=3.0,
     )
 
+Resumable Training
+------------------
+
+Because ``audiotree`` pipelines are Grain datasets, their iterators are
+checkpointable: you can snapshot the exact read position — shuffle order and
+per-excerpt RNG — and resume mid-epoch after an interruption instead of
+restarting the epoch. Grain seeds each excerpt deterministically from its
+element index, so restoring the position reproduces the exact same subsequent
+``AudioTree`` batches.
+
+The recommended approach is `Orbax`_, which checkpoints your model **and** the
+data pipeline together (and handles distributed-training edge cases). Pass the
+dataset iterator to ``grain.checkpoint.CheckpointSave`` / ``CheckpointRestore``:
+
+.. code-block:: python
+
+    import grain
+    import orbax.checkpoint as ocp
+    from audiotree import AudioTree
+    from audiotree.sources import create_audio_dataset
+
+    ds = create_audio_dataset("/data/audio", repeat=True, duration=3.0)
+    it = iter(ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch))
+
+    mngr = ocp.CheckpointManager("/checkpoints")
+
+    for step, batch in enumerate(it):
+        train_step(batch)                       # your training step
+        if step % 1000 == 0:
+            mngr.save(step, args=grain.checkpoint.CheckpointSave(it), force=True)
+            mngr.wait_until_finished()          # saving is async by default
+
+    # After a crash, rebuild the same pipeline and resume in place:
+    it = iter(ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch))
+    mngr.restore(mngr.latest_step(), args=grain.checkpoint.CheckpointRestore(it))
+
+``orbax-checkpoint`` ships transitively with the JAX stack, so no extra
+dependency is required. To checkpoint your model in the same step, combine the
+data iterator with your model state using Orbax's ``Composite`` args. For the
+full reference, see Grain's `checkpointing tutorial
+<https://github.com/google/grain/blob/main/docs/tutorials/dataset_advanced_tutorial.md>`_.
+
 External Examples
 -----------------
 
@@ -135,3 +177,4 @@ For production usage examples, see `DAC-JAX's input_pipeline.py <https://github.
 .. _ArgBind: https://github.com/pseeth/argbind/
 .. _DAC-JAX: https://github.com/DBraun/DAC-JAX
 .. _Grain: https://github.com/google/grain
+.. _Orbax: https://orbax.readthedocs.io/en/latest/
