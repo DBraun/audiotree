@@ -8,7 +8,7 @@ import soundfile as sf
 
 from audiotree import AudioTree
 from audiotree.core import SaliencyParams
-from audiotree.sources import create_audio_dataset
+from audiotree.sources import create_audio_dataset, find_audio_files
 
 
 def _create_test_audio_files(tmpdir, num_files, sample_rate=44100, duration=1.0):
@@ -211,6 +211,39 @@ def test_empty_directory():
             assert False, "Should have raised RuntimeError"
         except RuntimeError as e:
             assert "No audio files found" in str(e)
+
+
+def test_find_audio_files_sorted_recursive_and_filtered():
+    """find_audio_files returns sorted paths, recurses, and skips hidden/non-audio."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        sr = 16000
+        wav = np.zeros(sr, dtype=np.float32)
+
+        # Audio at the top level and in a subdirectory.
+        sf.write(str(root / "b.wav"), wav, sr)
+        sf.write(str(root / "a.flac"), wav, sr)
+        (root / "sub").mkdir()
+        sf.write(str(root / "sub" / "c.wav"), wav, sr)
+
+        # These should all be ignored:
+        (root / ".hidden").mkdir()
+        sf.write(str(root / ".hidden" / "d.wav"), wav, sr)  # hidden directory
+        sf.write(str(root / ".e.wav"), wav, sr)  # hidden file
+        (root / "notes.txt").write_text("not audio")  # wrong extension
+
+        found = find_audio_files(str(root))
+
+        # Sorted (deterministic), recursive, hidden + non-audio excluded.
+        assert found == sorted(found)
+        assert [Path(p).name for p in found] == ["a.flac", "b.wav", "c.wav"]
+
+        # A str and a single-element list are equivalent.
+        assert find_audio_files([str(root)]) == found
+
+        # The extension filter is honored.
+        only_flac = find_audio_files(str(root), extensions=[".flac"])
+        assert [Path(p).name for p in only_flac] == ["a.flac"]
 
 
 if __name__ == "__main__":

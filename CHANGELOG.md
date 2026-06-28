@@ -29,6 +29,7 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 * **`roll()` and `trim()` transforms**: For rolling audio in time and trimming/padding to fixed length with configurable padding modes.
 * **Transform decorators**: New `@random_transform` and `@map_transform` in `audiotree.transforms.decorators` for creating custom transforms from simple functions. Handles all boilerplate for `prob`, `scope`, `output_key`, and `split_seed` parameters.
 * **`create_audio_dataset()`**: For creating simple audio datasets without balancing. Loads all files from one or more directories and applies grain's `random_map` for proper RNG seeding.
+* **`find_audio_files()`**: New public helper in `audiotree.sources` for recursively listing audio files under one or more directories (skipping hidden files/dirs, filtering by extension). The result is now **sorted**, so the file order — and therefore seeded shuffling — is deterministic across machines and filesystems (previously raw `os.walk` order, which varied by filesystem).
 * **`load_audio_with_saliency()`**: For loading audio files with optional saliency-based excerpt selection. Designed to work with grain's `random_map`. Exported in `audiotree.sources`.
 * **`AudioWriter`**: New class for writing AudioTree batches to disk with manifest generation (JSON/CSV/NPZ formats).
 * **`ManifestDataSource`**: New class for reading AudioWriter outputs as a grain RandomAccessDataSource with metadata preservation and filtering capabilities.

@@ -12,25 +12,32 @@ from audiotree.core import SaliencyParams
 _default_extensions = [".wav", ".flac"]
 
 
-def _find_files_with_extensions(
-    directories: List[str],
-    extensions: List[str],
+def find_audio_files(
+    sources: str | List[str],
+    extensions: Optional[List[str]] = None,
 ) -> List[str]:
-    """Find audio files in directories, skipping hidden files and directories.
+    """Recursively find audio files under one or more directories.
 
-    Uses os.walk with early pruning to efficiently skip hidden directories
-    like .git without descending into them.
+    Hidden files and directories (names starting with ``.``, such as ``.git``)
+    are skipped without descending into them. The returned paths are **sorted**,
+    so the order is deterministic across machines and filesystems — important for
+    reproducible shuffling.
 
     Args:
-        directories: List of directory paths to search.
-        extensions: List of file extensions to match (e.g., [".wav", ".flac"]).
+        sources: A directory path, or a list of directory paths, to search.
+        extensions: File extensions to match (e.g. ``[".wav", ".flac"]``).
+            Defaults to ``[".wav", ".flac"]``.
 
     Returns:
-        List of file paths matching the extensions.
+        A sorted list of matching file paths.
     """
+    if isinstance(sources, str):
+        sources = [sources]
+    if extensions is None:
+        extensions = _default_extensions
     extensions_lower = {ext.lstrip(".").lower() for ext in extensions}
     filepaths = []
-    for folder in directories:
+    for folder in sources:
         folder_path = Path(folder).expanduser()
         folder_path = Path(os.path.expandvars(folder_path))
         for root, dirs, files in os.walk(folder_path):
@@ -42,7 +49,7 @@ def _find_files_with_extensions(
                 ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
                 if ext in extensions_lower:
                     filepaths.append(os.path.join(root, filename))
-    return filepaths
+    return sorted(filepaths)
 
 
 def _load_audio_with_saliency(
@@ -220,7 +227,7 @@ def create_audio_dataset(
     if isinstance(sources, str):
         sources = [sources]
 
-    filepaths = _find_files_with_extensions(sources, extensions)
+    filepaths = find_audio_files(sources, extensions)
 
     if not filepaths:
         raise RuntimeError(
