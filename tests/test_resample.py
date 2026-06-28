@@ -1,4 +1,3 @@
-from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -51,13 +50,21 @@ def _resample(
 def test_resample_001():
     # Use test assets - stereo file loaded 3 times for batch testing
     assets_dir = Path(__file__).parent / "assets"
-    filepath = str(assets_dir / "musdb18hq" / "train" / "A Classic Education - NightOwl" / "mixture.wav")
+    filepath = str(
+        assets_dir
+        / "musdb18hq"
+        / "train"
+        / "A Classic Education - NightOwl"
+        / "mixture.wav"
+    )
 
     all_audio = []
 
     # Load the same file 3 times with different offsets to create a batch
     for offset in [0.0, 4.0, 8.0]:
-        y, old_sr = librosa.load(filepath, sr=44_100, mono=False, duration=4, offset=offset)
+        y, old_sr = librosa.load(
+            filepath, sr=44_100, mono=False, duration=4, offset=offset
+        )
         all_audio.append(jnp.array(y))
     y = jnp.stack(all_audio, axis=0)
 

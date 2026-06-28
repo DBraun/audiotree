@@ -1,4 +1,5 @@
 """Tests for AudioTree core functionality."""
+
 from pathlib import Path
 
 import jax
@@ -13,29 +14,37 @@ def test_audiotree_create_with_filepaths():
     # Test with 1D audio data and single filepath string
     audio_1d = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
     tree1 = AudioTree.create(audio_1d, 44100, filepaths="test1.wav")
-    
-    assert tree1.waveform.shape == (1, 1, 5)  # Should be expanded to (batch, channels, samples)
+
+    assert tree1.waveform.shape == (
+        1,
+        1,
+        5,
+    )  # Should be expanded to (batch, channels, samples)
     assert tree1.filepath == ["test1.wav"]
     assert "filepath" in tree1.metadata
-    
+
     # Test with 2D audio data and single filepath Path
     audio_2d = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])  # 2 channels, 3 samples
     tree2 = AudioTree.create(audio_2d, 44100, filepaths=Path("test2.wav"))
-    
-    assert tree2.waveform.shape == (1, 2, 3)  # Should be expanded to (batch, channels, samples)
+
+    assert tree2.waveform.shape == (
+        1,
+        2,
+        3,
+    )  # Should be expanded to (batch, channels, samples)
     assert tree2.filepath == ["test2.wav"]
-    
+
     # Test with 3D audio data and list of filepaths
     audio_3d = np.array([[[1.0, 2.0, 3.0]]])  # Already correct shape: (1, 1, 3)
     filepaths = ["file1.wav", "file2.wav", Path("file3.wav")]
     tree3 = AudioTree.create(audio_3d, 44100, filepaths=filepaths)
-    
+
     assert tree3.waveform.shape == (1, 1, 3)  # Should remain unchanged
     assert tree3.filepath == ["file1.wav", "file2.wav", "file3.wav"]
-    
+
     # Test with no filepaths (should work as before)
     tree4 = AudioTree.create(audio_1d, 44100)
-    
+
     assert tree4.waveform.shape == (1, 1, 5)
     assert tree4.filepath == []  # Empty list when no filepaths provided
     assert "filepath" not in tree4.metadata
@@ -43,9 +52,11 @@ def test_audiotree_create_with_filepaths():
 
 def test_audiotree_constructor_compatibility():
     """Test that original AudioTree constructor still works for backward compatibility."""
-    audio_3d = np.array([[[1.0, 2.0, 3.0]]])  # Use 3D data since constructor won't reshape
+    audio_3d = np.array(
+        [[[1.0, 2.0, 3.0]]]
+    )  # Use 3D data since constructor won't reshape
     tree = AudioTree(audio_3d, 44100)
-    
+
     assert tree.waveform.shape == (1, 1, 3)
     assert tree.filepath == []
 
@@ -86,7 +97,9 @@ def test_write_options_and_batch_assertion(tmp_path):
     import soundfile
 
     sr = 8000
-    single = AudioTree(waveform=np.ones((1, 1, sr), dtype=np.float32) * 0.5, sample_rate=sr)
+    single = AudioTree(
+        waveform=np.ones((1, 1, sr), dtype=np.float32) * 0.5, sample_rate=sr
+    )
 
     # subtype is forwarded.
     single.write(tmp_path / "a.wav", subtype="PCM_24")
@@ -132,17 +145,13 @@ def test_methods_work_after_reshape_mini_batches():
     # normalize_loudness
     normalized = mini.normalize_loudness(-18.0)
     assert normalized.waveform.shape == mini.waveform.shape
-    np.testing.assert_allclose(
-        normalized.replace_loudness().loudness, -18.0, atol=0.5
-    )
+    np.testing.assert_allclose(normalized.replace_loudness().loudness, -18.0, atol=0.5)
 
     # to_mono / to_stereo
     mono = mini.to_mono()
     assert mono.waveform.shape == (2, 2, 1, 8000)
     left = mini.to_mono("left")
-    np.testing.assert_array_equal(
-        left.waveform[..., 0, :], mini.waveform[..., 0, :]
-    )
+    np.testing.assert_array_equal(left.waveform[..., 0, :], mini.waveform[..., 0, :])
     stereo = mono.to_stereo()
     assert stereo.waveform.shape == (2, 2, 2, 8000)
     np.testing.assert_array_equal(
@@ -162,17 +171,17 @@ def test_methods_work_after_reshape_mini_batches():
 def test_audiotree_create_audio_dimensionality():
     """Test that AudioTree.create handles different audio dimensionalities correctly."""
     sample_rate = 44100
-    
+
     # Test 1D audio
     audio_1d = np.array([1.0, 2.0, 3.0])
     tree1 = AudioTree.create(audio_1d, sample_rate)
     assert tree1.waveform.shape == (1, 1, 3)
-    
+
     # Test 2D audio
     audio_2d = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     tree2 = AudioTree.create(audio_2d, sample_rate)
     assert tree2.waveform.shape == (1, 2, 3)
-    
+
     # Test 3D audio (already correct)
     audio_3d = np.array([[[1.0, 2.0, 3.0]], [[4.0, 5.0, 6.0]]])
     tree3 = AudioTree.create(audio_3d, sample_rate)
@@ -183,24 +192,21 @@ def test_audiotree_create_metadata_handling():
     """Test that AudioTree.create handles metadata correctly with filepaths."""
     waveform = np.array([1.0, 2.0, 3.0])
     sample_rate = 44100
-    
+
     # Test with existing metadata and filepaths
     existing_metadata = {"custom_key": "custom_value"}
     tree1 = AudioTree.create(
-        waveform, 
-        sample_rate, 
-        metadata=existing_metadata, 
-        filepaths="test.wav"
+        waveform, sample_rate, metadata=existing_metadata, filepaths="test.wav"
     )
-    
+
     # Should preserve existing metadata and add filepath
     assert tree1.metadata["custom_key"] == "custom_value"
     assert "filepath" in tree1.metadata
     assert tree1.filepath == ["test.wav"]
-    
+
     # Test that original metadata dict is not modified
     assert "filepath" not in existing_metadata
-    
+
     # Test with filepaths but no existing metadata
     tree2 = AudioTree.create(waveform, sample_rate, filepaths="test2.wav")
     assert "filepath" in tree2.metadata
@@ -279,9 +285,9 @@ def test_unsplit_mini_batch():
     samples = 1000
 
     # Create distinctive audio data so we can verify correct reshaping
-    original_audio_data = np.arange(batch_size * channels * samples, dtype=np.float32).reshape(
-        batch_size, channels, samples
-    )
+    original_audio_data = np.arange(
+        batch_size * channels * samples, dtype=np.float32
+    ).reshape(batch_size, channels, samples)
     audio_tree = AudioTree(original_audio_data, sample_rate)
 
     # Test round-trip: split then unsplit with mini-batch size 3
@@ -313,11 +319,11 @@ def test_unsplit_mini_batch():
 
     # Test that unsplitting preserves metadata if present
     audio_tree_with_metadata = AudioTree(
-        original_audio_data,
-        sample_rate,
-        metadata={"test_key": "test_value"}
+        original_audio_data, sample_rate, metadata={"test_key": "test_value"}
     )
-    batched_with_metadata = audio_tree_with_metadata.reshape_mini_batches(mini_batch_size)
+    batched_with_metadata = audio_tree_with_metadata.reshape_mini_batches(
+        mini_batch_size
+    )
     unbatched_with_metadata = batched_with_metadata.flatten_mini_batches()
 
     assert unbatched_with_metadata.metadata == {"test_key": "test_value"}
@@ -325,7 +331,10 @@ def test_unsplit_mini_batch():
     # Test direct unsplit on already mini-batched data
     # Create data that's already in mini-batch format
     mini_batched_data = np.arange(4 * 3 * channels * samples, dtype=np.float32).reshape(
-        4, 3, channels, samples  # (num_mini_batches, mini_batch_size, channels, samples)
+        4,
+        3,
+        channels,
+        samples,  # (num_mini_batches, mini_batch_size, channels, samples)
     )
     mini_batched_tree = AudioTree(mini_batched_data, sample_rate)
     flattened_tree = mini_batched_tree.flatten_mini_batches()
@@ -389,9 +398,7 @@ def test_forward_batches_with_scan():
     out_batched = out_mini.flatten_mini_batches()
 
     # Both approaches produce the same result
-    np.testing.assert_allclose(
-        out_naive.waveform, out_batched.waveform, rtol=1e-5
-    )
+    np.testing.assert_allclose(out_naive.waveform, out_batched.waveform, rtol=1e-5)
     assert out_naive.waveform.shape == (batch_size, 2, 1000)
     assert out_batched.waveform.shape == (batch_size, 2, 1000)
     np.testing.assert_allclose(out_batched.waveform, 2.0)

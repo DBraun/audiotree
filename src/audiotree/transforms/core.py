@@ -60,10 +60,15 @@ class Batch(BatchOperation):
             if not isinstance(first_arg, (np.ndarray, jnp.ndarray)):
                 return list(args)
             first_arg = np.asanyarray(first_arg)
-            shape, dtype = (len(args) * first_arg.shape[0],) + first_arg.shape[1:], first_arg.dtype
+            shape, dtype = (
+                (len(args) * first_arg.shape[0],) + first_arg.shape[1:],
+                first_arg.dtype,
+            )
             if not self._use_shared_memory or dtype.hasobject:
                 return np.concatenate(args, axis=0)
-            return np.concatenate(args, axis=0, out=SharedMemoryArray(shape, dtype=dtype)).metadata
+            return np.concatenate(
+                args, axis=0, out=SharedMemoryArray(shape, dtype=dtype)
+            ).metadata
 
         return tree_lib.map_structure(
             stacking_function,

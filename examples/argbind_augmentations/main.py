@@ -34,7 +34,9 @@ def main():
     # Create a batch of random audio (4 samples, 1 channel, 4 seconds at 44.1kHz)
     B = 4
     T = 44100
-    audio_tree = AudioTree(np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100)
+    audio_tree = AudioTree(
+        np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100
+    )
 
     # Compute loudness (required for volume_norm transform)
     audio_tree = audio_tree.replace_loudness()
@@ -68,4 +70,3 @@ if __name__ == "__main__":
     # Apply arguments within scope and run main
     with argbind.scope(args):
         main()
-

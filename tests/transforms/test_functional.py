@@ -4,7 +4,6 @@ import tempfile
 from pathlib import Path
 
 import argbind
-import jax
 import numpy as np
 import soundfile as sf
 

@@ -10,7 +10,9 @@ from audiotree.sources import create_audio_dataset, create_balanced_audio_datase
 from audiotree.transforms import volume_norm, volume_change, trim, invert_phase, mono
 
 
-def _create_test_audio_files(tmpdir, group_name, num_files, sample_rate=44100, duration=5.0):
+def _create_test_audio_files(
+    tmpdir, group_name, num_files, sample_rate=44100, duration=5.0
+):
     """Helper to create test audio files."""
     group_dir = Path(tmpdir) / group_name
     group_dir.mkdir(parents=True, exist_ok=True)

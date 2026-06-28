@@ -20,9 +20,7 @@ def test_round_trip_audiotree():
         output_dir = Path(tmpdir)
         audio = np.random.randn(5, 2, 100).astype(np.float32)
         loudness = np.random.randn(5).astype(np.float32)
-        tree = AudioTree(
-            waveform=audio, sample_rate=44100, loudness=loudness
-        )
+        tree = AudioTree(waveform=audio, sample_rate=44100, loudness=loudness)
 
         with TreeWriter(output_dir, expected_samples=5) as w:
             w.write(tree)
@@ -49,9 +47,7 @@ def test_round_trip_audiotree_with_metadata():
         output_dir = Path(tmpdir)
         audio = np.random.randn(3, 1, 50).astype(np.float32)
         mel = np.random.randn(3, 32).astype(np.float32)
-        tree = AudioTree(
-            waveform=audio, sample_rate=44100, metadata={"mel": mel}
-        )
+        tree = AudioTree(waveform=audio, sample_rate=44100, metadata={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
@@ -143,9 +139,7 @@ def test_round_trip_plain_dict():
         for i in range(5):
             sample = source[i]
             assert isinstance(sample, dict)
-            np.testing.assert_array_almost_equal(
-                sample["x"][0], x[i], decimal=5
-            )
+            np.testing.assert_array_almost_equal(sample["x"][0], x[i], decimal=5)
             assert sample["y"][0] == y[i]
 
 
@@ -330,10 +324,12 @@ def test_round_trip_string_list_with_audiotree():
         audio = np.random.randn(3, 1, 100).astype(np.float32)
 
         with TreeWriter(output_dir, expected_samples=3) as w:
-            w.write({
-                "strings": strings,
-                "wet": AudioTree(waveform=audio, sample_rate=44100),
-            })
+            w.write(
+                {
+                    "strings": strings,
+                    "wet": AudioTree(waveform=audio, sample_rate=44100),
+                }
+            )
 
         source = TreeDataSource(output_dir)
         assert len(source) == 3
@@ -353,11 +349,13 @@ def test_round_trip_multiple_string_leaves():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         with TreeWriter(output_dir, expected_samples=2) as w:
-            w.write({
-                "labels": ["cat", "dog"],
-                "sources": ["train", "val"],
-                "x": np.zeros((2, 3), dtype=np.float32),
-            })
+            w.write(
+                {
+                    "labels": ["cat", "dog"],
+                    "sources": ["train", "val"],
+                    "x": np.zeros((2, 3), dtype=np.float32),
+                }
+            )
 
         source = TreeDataSource(output_dir)
         s0 = source[0]
@@ -374,10 +372,12 @@ def test_round_trip_single_string():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         with TreeWriter(output_dir, expected_samples=1) as w:
-            w.write({
-                "label": "cat",
-                "x": np.zeros((1, 3), dtype=np.float32),
-            })
+            w.write(
+                {
+                    "label": "cat",
+                    "x": np.zeros((1, 3), dtype=np.float32),
+                }
+            )
 
         source = TreeDataSource(output_dir)
         sample = source[0]
@@ -401,10 +401,12 @@ def test_round_trip_empty_string():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         with TreeWriter(output_dir, expected_samples=2) as w:
-            w.write({
-                "s": ["", "hello"],
-                "x": np.zeros((2,), dtype=np.float32),
-            })
+            w.write(
+                {
+                    "s": ["", "hello"],
+                    "x": np.zeros((2,), dtype=np.float32),
+                }
+            )
 
         source = TreeDataSource(output_dir)
         assert source[0]["s"] == ""
@@ -429,14 +431,18 @@ def test_round_trip_strings_multiple_writes():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         with TreeWriter(output_dir, expected_samples=5) as w:
-            w.write({
-                "s": ["a", "b", "c"],
-                "x": np.zeros((3,), dtype=np.float32),
-            })
-            w.write({
-                "s": ["d", "e"],
-                "x": np.ones((2,), dtype=np.float32),
-            })
+            w.write(
+                {
+                    "s": ["a", "b", "c"],
+                    "x": np.zeros((3,), dtype=np.float32),
+                }
+            )
+            w.write(
+                {
+                    "s": ["d", "e"],
+                    "x": np.ones((2,), dtype=np.float32),
+                }
+            )
 
         source = TreeDataSource(output_dir)
         assert len(source) == 5
@@ -451,10 +457,12 @@ def test_raw_mode_with_strings():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         with TreeWriter(output_dir, expected_samples=2) as w:
-            w.write({
-                "label": ["cat", "dog"],
-                "x": np.zeros((2, 3), dtype=np.float32),
-            })
+            w.write(
+                {
+                    "label": ["cat", "dog"],
+                    "x": np.zeros((2, 3), dtype=np.float32),
+                }
+            )
 
         source = TreeDataSource(output_dir, raw=True)
         sample = source[0]
@@ -468,15 +476,17 @@ def test_batch_with_strings():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         with TreeWriter(output_dir, expected_samples=4) as w:
-            w.write({
-                "strings": ["a", "b", "c", "d"],
-                "wet": AudioTree(
-                    waveform=np.arange(4 * 100, dtype=np.float32).reshape(
-                        4, 1, 100
+            w.write(
+                {
+                    "strings": ["a", "b", "c", "d"],
+                    "wet": AudioTree(
+                        waveform=np.arange(4 * 100, dtype=np.float32).reshape(
+                            4, 1, 100
+                        ),
+                        sample_rate=44100,
                     ),
-                    sample_rate=44100,
-                ),
-            })
+                }
+            )
 
         source = TreeDataSource(output_dir)
         items = [source[i] for i in range(4)]
@@ -552,9 +562,7 @@ def test_exclude_audio_data():
         wet_audio = np.random.randn(3, 2, 100).astype(np.float32)
         mel = np.random.randn(3, 16).astype(np.float32)
         dry = AudioTree(waveform=dry_audio, sample_rate=44100)
-        wet = AudioTree(
-            waveform=wet_audio, sample_rate=44100, metadata={"mel": mel}
-        )
+        wet = AudioTree(waveform=wet_audio, sample_rate=44100, metadata={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write({"dry": dry, "wet": wet})
@@ -604,10 +612,12 @@ def test_exclude_string_leaf():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         with TreeWriter(output_dir, expected_samples=2) as w:
-            w.write({
-                "label": ["cat", "dog"],
-                "x": np.zeros((2, 3), dtype=np.float32),
-            })
+            w.write(
+                {
+                    "label": ["cat", "dog"],
+                    "x": np.zeros((2, 3), dtype=np.float32),
+                }
+            )
 
         source = TreeDataSource(output_dir, exclude_prefixes=["label"])
         sample = source[0]
@@ -651,9 +661,7 @@ def test_exclude_pickle_roundtrip():
         output_dir = Path(tmpdir)
         audio = np.random.randn(3, 1, 20).astype(np.float32)
         mel = np.random.randn(3, 8).astype(np.float32)
-        tree = AudioTree(
-            waveform=audio, sample_rate=44100, metadata={"mel": mel}
-        )
+        tree = AudioTree(waveform=audio, sample_rate=44100, metadata={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
@@ -700,9 +708,7 @@ def test_load_into_memory_matches_lazy():
         output_dir = Path(tmpdir)
         audio = np.random.randn(5, 2, 100).astype(np.float32)
         mel = np.random.randn(5, 16).astype(np.float32)
-        tree = AudioTree(
-            waveform=audio, sample_rate=44100, metadata={"mel": mel}
-        )
+        tree = AudioTree(waveform=audio, sample_rate=44100, metadata={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=5) as w:
             w.write(tree)
@@ -725,9 +731,7 @@ def test_load_into_memory_with_exclude():
         output_dir = Path(tmpdir)
         audio = np.random.randn(3, 1, 50).astype(np.float32)
         mel = np.random.randn(3, 8).astype(np.float32)
-        tree = AudioTree(
-            waveform=audio, sample_rate=44100, metadata={"mel": mel}
-        )
+        tree = AudioTree(waveform=audio, sample_rate=44100, metadata={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
@@ -750,10 +754,12 @@ def test_load_into_memory_with_strings():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         with TreeWriter(output_dir, expected_samples=3) as w:
-            w.write({
-                "label": ["cat", "dog", "bird"],
-                "x": np.arange(3, dtype=np.float32),
-            })
+            w.write(
+                {
+                    "label": ["cat", "dog", "bird"],
+                    "x": np.arange(3, dtype=np.float32),
+                }
+            )
 
         source = TreeDataSource(output_dir, load_into_memory=True)
         assert source[0]["label"] == "cat"
@@ -777,9 +783,7 @@ def test_load_into_memory_pickle_roundtrip():
         restored = pickle.loads(pickle.dumps(source))
 
         sample = restored[0]
-        np.testing.assert_array_almost_equal(
-            sample.waveform[0], audio[0], decimal=5
-        )
+        np.testing.assert_array_almost_equal(sample.waveform[0], audio[0], decimal=5)
 
 
 # === cache_memmaps ===
@@ -791,9 +795,7 @@ def test_cache_memmaps_false_matches_default():
         output_dir = Path(tmpdir)
         audio = np.random.randn(5, 2, 100).astype(np.float32)
         mel = np.random.randn(5, 16).astype(np.float32)
-        tree = AudioTree(
-            waveform=audio, sample_rate=44100, metadata={"mel": mel}
-        )
+        tree = AudioTree(waveform=audio, sample_rate=44100, metadata={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=5) as w:
             w.write(tree)
@@ -805,9 +807,7 @@ def test_cache_memmaps_false_matches_default():
             s1 = cached[i]
             s2 = uncached[i]
             np.testing.assert_array_equal(s1.waveform, s2.waveform)
-            np.testing.assert_array_equal(
-                s1.metadata["mel"], s2.metadata["mel"]
-            )
+            np.testing.assert_array_equal(s1.metadata["mel"], s2.metadata["mel"])
 
         # Uncached source should not hold any memmaps
         assert uncached._memmaps == []

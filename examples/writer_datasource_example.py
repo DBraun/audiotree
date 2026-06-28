@@ -40,11 +40,13 @@ def main():
 
             # Create AudioTree with metadata
             audio_tree = AudioTree.create(
-                waveform=audio.reshape(1, 1, -1),  # Shape: (batch=1, channels=1, samples)
+                waveform=audio.reshape(
+                    1, 1, -1
+                ),  # Shape: (batch=1, channels=1, samples)
                 sample_rate=44100,
                 pitch=np.array([pitch]) if pitch else None,
                 velocity=np.array([64 + i * 20]),
-                filepaths=[f"original_{i}.wav"]
+                filepaths=[f"original_{i}.wav"],
             )
 
             # Calculate loudness
@@ -61,10 +63,10 @@ def main():
             pattern="audio_{index:03d}.wav",
         ) as writer:
             for i, audio_tree in enumerate(trees):
-                paths = writer.write(audio_tree, tags={
-                    "category": "sine" if i < 2 else "noise",
-                    "example_id": i
-                })
+                paths = writer.write(
+                    audio_tree,
+                    tags={"category": "sine" if i < 2 else "noise", "example_id": i},
+                )
                 print(f"  Wrote {paths[0].name}")
 
             stats = writer.get_stats()
@@ -95,14 +97,16 @@ def main():
 
         # Load and inspect first file
         first_audio = source[0]
-        print(f"  First file:")
+        print("  First file:")
         print(f"    - Shape: {first_audio.waveform.shape}")
         print(f"    - Sample rate: {first_audio.sample_rate}")
         print(f"    - Loudness: {first_audio.loudness[0]:.1f} LUFS")
         if first_audio.pitch is not None:
             print(f"    - Pitch: MIDI {first_audio.pitch[0]:.0f}")
         print(f"    - Velocity: {first_audio.velocity[0]}")
-        print(f"    - Original source: {first_audio.metadata.get('original_source', 'N/A')}")
+        print(
+            f"    - Original source: {first_audio.metadata.get('original_source', 'N/A')}"
+        )
         print(f"    - Tags: {first_audio.metadata.get('tags', {})}")
 
         # 6. Show manifest entry structure

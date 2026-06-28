@@ -13,8 +13,17 @@ from audiotree.sources.core import _load_audio_with_saliency
 from audiotree.transforms import Batch
 
 # Paths to test audio files
-TEST_AUDIO_MONO = Path(__file__).parent.parent / "assets" / "VCTK" / "p225_006_mic1.flac"  # 7.18s, mono, 48kHz
-TEST_AUDIO_STEREO = Path(__file__).parent.parent / "assets" / "musdb18hq" / "train" / "A Classic Education - NightOwl" / "mixture.wav"  # 20s, stereo, 44.1kHz
+TEST_AUDIO_MONO = (
+    Path(__file__).parent.parent / "assets" / "VCTK" / "p225_006_mic1.flac"
+)  # 7.18s, mono, 48kHz
+TEST_AUDIO_STEREO = (
+    Path(__file__).parent.parent
+    / "assets"
+    / "musdb18hq"
+    / "train"
+    / "A Classic Education - NightOwl"
+    / "mixture.wav"
+)  # 20s, stereo, 44.1kHz
 
 
 def test_load_audio_with_saliency_basic():
@@ -58,19 +67,16 @@ def test_saliency_variety_with_repetition():
 
     # Create dataset with same file repeated many times
     # TEST_AUDIO_MONO is 7.18 seconds long with natural speech variation
-    ds = (
-        grain.MapDataset.source([str(TEST_AUDIO_MONO)] * 100)
-        .random_map(
-            lambda path, rng: _load_audio_with_saliency(
-                path,
-                rng,
-                sample_rate=sample_rate,
-                duration=1.0,
-                mono=True,
-                saliency_params=SaliencyParams(enabled=True, loudness_cutoff=None),
-            ),
-            seed=42
-        )
+    ds = grain.MapDataset.source([str(TEST_AUDIO_MONO)] * 100).random_map(
+        lambda path, rng: _load_audio_with_saliency(
+            path,
+            rng,
+            sample_rate=sample_rate,
+            duration=1.0,
+            mono=True,
+            saliency_params=SaliencyParams(enabled=True, loudness_cutoff=None),
+        ),
+        seed=42,
     )
 
     # Load first 50 excerpts
@@ -86,7 +92,9 @@ def test_saliency_variety_with_repetition():
 
     # We should have significant variety (not just 1-2 unique excerpts)
     # With proper RNG seeding, we expect most excerpts to be unique
-    assert unique_hashes > 20, f"Expected diverse excerpts, got only {unique_hashes} unique out of 50"
+    assert unique_hashes > 20, (
+        f"Expected diverse excerpts, got only {unique_hashes} unique out of 50"
+    )
     print(f"Got {unique_hashes} unique excerpts out of 50 - good variety!")
 
 
@@ -96,19 +104,16 @@ def test_saliency_determinism():
 
     # Create two datasets with same seed
     def make_dataset(seed):
-        return (
-            grain.MapDataset.source([str(TEST_AUDIO_MONO)] * 10)
-            .random_map(
-                lambda path, rng: _load_audio_with_saliency(
-                    path,
-                    rng,
-                    sample_rate=sample_rate,
-                    duration=1.0,
-                    mono=True,
-                    saliency_params=SaliencyParams(enabled=True, loudness_cutoff=None),
-                ),
-                seed=seed
-            )
+        return grain.MapDataset.source([str(TEST_AUDIO_MONO)] * 10).random_map(
+            lambda path, rng: _load_audio_with_saliency(
+                path,
+                rng,
+                sample_rate=sample_rate,
+                duration=1.0,
+                mono=True,
+                saliency_params=SaliencyParams(enabled=True, loudness_cutoff=None),
+            ),
+            seed=seed,
         )
 
     ds1 = make_dataset(42)
@@ -187,7 +192,9 @@ def test_create_balanced_audio_dataset_with_saliency():
             assert batch.waveform.shape[2] == sample_rate
 
             total_items += current_batch_size
-            print(f"Batch {batch_count}: {current_batch_size} items, shape={batch.waveform.shape}")
+            print(
+                f"Batch {batch_count}: {current_batch_size} items, shape={batch.waveform.shape}"
+            )
 
         assert total_items == num_files
         assert batch_count == (num_files + batch_size - 1) // batch_size
@@ -225,15 +232,22 @@ def test_repeated_dataset_variety():
 
         # Simple hash for checking uniqueness
         def audio_hash(audio_tree):
-            return (float(np.mean(audio_tree.waveform)), float(np.std(audio_tree.waveform)))
+            return (
+                float(np.mean(audio_tree.waveform)),
+                float(np.std(audio_tree.waveform)),
+            )
 
         hashes = [audio_hash(e) for e in excerpts]
         unique_hashes = len(set(hashes))
 
         # With only 4 files repeated 25 times each, if the bug existed we'd see
         # only 4 unique excerpts. With the fix, we should see many more.
-        assert unique_hashes > 30, f"Expected diverse excerpts despite repetition, got only {unique_hashes} unique out of 100"
-        print(f"Got {unique_hashes} unique excerpts out of 100 with only 4 source files - excellent variety!")
+        assert unique_hashes > 30, (
+            f"Expected diverse excerpts despite repetition, got only {unique_hashes} unique out of 100"
+        )
+        print(
+            f"Got {unique_hashes} unique excerpts out of 100 with only 4 source files - excellent variety!"
+        )
 
 
 if __name__ == "__main__":

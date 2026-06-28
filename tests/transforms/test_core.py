@@ -2,8 +2,9 @@ from typing import Any, Dict, List
 
 import jax
 import platform
+
 if platform.system() == "Darwin":
-    jax.config.update('jax_platform_name', 'cpu')
+    jax.config.update("jax_platform_name", "cpu")
 from jax import numpy as jnp
 import numpy as np
 import pytest
@@ -24,6 +25,7 @@ from audiotree.transforms import (
     trim,
     roll,
 )
+from audiotree.transforms import jax as jax_transforms
 
 
 class ReturnConfigTransform(BaseRandomTransform):
@@ -152,7 +154,7 @@ def are_equal_pytree(pytree1, pytree2):
     # Apply the comparison element-wise across the PyTrees
     try:
         comparison_tree = jax.tree_util.tree_map(compare_elements, pytree1, pytree2)
-    except Exception as e:
+    except Exception:
         return False
 
     # Aggregate the results into a single boolean value
@@ -283,7 +285,9 @@ def test_output_key_004():
 
 
 def test_volume_change():
-    audio_tree = AudioTree(waveform=np.ones(shape=(1, 1, 44100), dtype=np.float32), sample_rate=44100)
+    audio_tree = AudioTree(
+        waveform=np.ones(shape=(1, 1, 44100), dtype=np.float32), sample_rate=44100
+    )
 
     config = {
         "min_db": 20,
@@ -302,7 +306,9 @@ def test_volume_change():
 def test_transforms():
     """Test that all numpy transforms can be instantiated and applied."""
     # Use numpy arrays for the numpy module transforms
-    audio_tree = AudioTree(waveform=np.ones(shape=(1, 1, 44100), dtype=np.float32), sample_rate=44100)
+    audio_tree = AudioTree(
+        waveform=np.ones(shape=(1, 1, 44100), dtype=np.float32), sample_rate=44100
+    )
     audio_tree = audio_tree.replace_loudness()  # Required for volume_norm
     rng = np.random.default_rng(0)
 
@@ -387,7 +393,7 @@ def test_trim_lengthen():
     assert jnp.array_equal(lengthened_audio.waveform[:, :, :original_samples], waveform)
     # Check that the wrapped part starts repeating from the beginning
     wrapped_part = lengthened_audio.waveform[:, :, original_samples:expected_samples]
-    expected_wrap = waveform[:, :, :expected_samples - original_samples]
+    expected_wrap = waveform[:, :, : expected_samples - original_samples]
     assert jnp.array_equal(wrapped_part, expected_wrap)
 
     # Test lengthening to 1.5 seconds with "constant" mode (zero padding)
@@ -474,7 +480,9 @@ def test_peak_normalize():
 
 def test_peak_normalize_silence():
     """peak_normalize leaves silence untouched without dividing by zero."""
-    audio_tree = AudioTree(waveform=np.zeros((1, 2, 8), dtype=np.float32), sample_rate=44100)
+    audio_tree = AudioTree(
+        waveform=np.zeros((1, 2, 8), dtype=np.float32), sample_rate=44100
+    )
     result = peak_normalize().map(audio_tree)
     assert np.all(np.isfinite(result.waveform))
     assert np.all(result.waveform == 0)
@@ -484,7 +492,9 @@ def test_trim_invalidates_loudness():
     """Resizing the waveform invalidates cached loudness; a no-op preserves it."""
     sample_rate = 44100
     waveform = np.random.randn(2, 1, sample_rate * 2).astype(np.float32) * 0.1
-    audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate).replace_loudness()
+    audio_tree = AudioTree(
+        waveform=waveform, sample_rate=sample_rate
+    ).replace_loudness()
     assert audio_tree.loudness is not None
 
     # Shorten -> loudness invalidated.
@@ -548,8 +558,6 @@ def test_phase_transforms_keep_loudness():
 # =============================================================================
 # JAX Module Tests
 # =============================================================================
-
-from audiotree.transforms import jax as jax_transforms
 
 
 def test_jax_transforms():
@@ -623,7 +631,9 @@ def test_jax_roll_constant_mode():
     audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate)
 
     # Roll right by 0.002 seconds (20 samples)
-    transform = jax_transforms.roll(min_seconds=0.002, max_seconds=0.002, mode="constant")
+    transform = jax_transforms.roll(
+        min_seconds=0.002, max_seconds=0.002, mode="constant"
+    )
     rng = jax.random.key(42)
     rolled = transform.random_map(audio_tree, rng)
 

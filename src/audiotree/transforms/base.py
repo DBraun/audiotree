@@ -82,7 +82,6 @@ def merge_pytree(tree1, tree2):
 
 
 class BaseTransformMixIn:
-
     @staticmethod
     def get_default_config() -> Dict[str, Any]:
         """
@@ -118,9 +117,9 @@ class BaseTransformMixIn:
         if self.output_key is None:
             return new_tree
 
-        assert isinstance(
-            old_tree, dict
-        ), "You specified `output_key`, but the transformed element is not a dict."
+        assert isinstance(old_tree, dict), (
+            "You specified `output_key`, but the transformed element is not a dict."
+        )
 
         def is_leaf(x):
             if not isinstance(x, dict):
@@ -149,7 +148,6 @@ class BaseTransformMixIn:
 
 
 class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
-
     def __init__(
         self,
         config: Dict[str, Any] = None,
@@ -284,7 +282,10 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         treedef = jax.tree.flatten(element, is_leaf=is_leaf)[1]
         length = treedef.num_leaves
         if self.split_seed:
-            sub_rngs = [np.random.Generator(np.random.PCG64(rng.integers(2**63))) for _ in range(length)]
+            sub_rngs = [
+                np.random.Generator(np.random.PCG64(rng.integers(2**63)))
+                for _ in range(length)
+            ]
         else:
             sub_rngs = [rng] * length
         sub_rngs = jax.tree.unflatten(treedef, sub_rngs)
@@ -303,7 +304,6 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
 
 
 class BaseMapTransform(BaseTransformMixIn, MapTransform):
-
     def __init__(
         self,
         config: Dict[str, Dict[str, Any]] = None,

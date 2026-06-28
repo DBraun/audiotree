@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import soundfile
@@ -11,7 +11,14 @@ from .core import AudioTree
 
 
 # AudioTree fields that should be tracked (excluding waveform, sample_rate, metadata)
-_AUDIOTREE_FIELDS = ['loudness', 'pitch', 'velocity', 'note_duration', 'codes', 'latents']
+_AUDIOTREE_FIELDS = [
+    "loudness",
+    "pitch",
+    "velocity",
+    "note_duration",
+    "codes",
+    "latents",
+]
 
 
 class AudioWriter:
@@ -81,7 +88,7 @@ class AudioWriter:
         pbar: Optional[Any] = None,
         close_pbar: bool = False,
         show_progress: bool = False,
-        progress_desc: Optional[str] = None
+        progress_desc: Optional[str] = None,
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -107,6 +114,7 @@ class AudioWriter:
         if self.show_progress and self.pbar is None:
             try:
                 from tqdm import tqdm
+
                 self._internal_pbar = tqdm(desc=self.progress_desc, unit="files")
                 self.pbar = self._internal_pbar
                 self.close_pbar = True  # Always close internal progress bars
@@ -204,7 +212,7 @@ class AudioWriter:
         tree: AudioTree,
         batch_index: int,
         filename: str,
-        tags: Optional[Dict] = None
+        tags: Optional[Dict] = None,
     ) -> Dict:
         """Create a manifest entry for a single audio file.
 
@@ -218,18 +226,18 @@ class AudioWriter:
             Dictionary containing manifest entry data
         """
         entry = {
-            'index': np.int32(self.index),
-            'filename': filename,
-            'sample_rate': np.int32(tree.sample_rate),
-            'channels': np.int32(tree.waveform.shape[1]),
-            'samples': np.int32(tree.waveform.shape[2]),
-            'duration_seconds': np.float32(tree.waveform.shape[2] / tree.sample_rate),
-            'files_written': self.write_audio
+            "index": np.int32(self.index),
+            "filename": filename,
+            "sample_rate": np.int32(tree.sample_rate),
+            "channels": np.int32(tree.waveform.shape[1]),
+            "samples": np.int32(tree.waveform.shape[2]),
+            "duration_seconds": np.float32(tree.waveform.shape[2] / tree.sample_rate),
+            "files_written": self.write_audio,
         }
 
         # Add timestamp only if requested
         if self.include_timestamp:
-            entry['timestamp'] = datetime.now().isoformat()
+            entry["timestamp"] = datetime.now().isoformat()
 
         # Add AudioTree fields dynamically, preserving dtypes
         for field_name in _AUDIOTREE_FIELDS:
@@ -240,7 +248,11 @@ class AudioWriter:
                     if field_value.ndim > 0 and batch_index < len(field_value):
                         val = field_value[batch_index]
                         # Keep as numpy scalar to preserve dtype
-                        entry[field_name] = val if isinstance(val, np.generic) else np.array(val, dtype=field_value.dtype)
+                        entry[field_name] = (
+                            val
+                            if isinstance(val, np.generic)
+                            else np.array(val, dtype=field_value.dtype)
+                        )
                     elif field_value.ndim == 0:
                         # Scalar array
                         entry[field_name] = field_value
@@ -251,32 +263,32 @@ class AudioWriter:
         # Add source filepath if available (consistent naming)
         filepaths = tree.filepath
         if filepaths and batch_index < len(filepaths):
-            entry['filepath'] = filepaths[batch_index]
+            entry["filepath"] = filepaths[batch_index]
 
         # Add custom tags
         if tags:
-            entry['tags'] = tags
+            entry["tags"] = tags
 
         # Add metadata arrays if present
         if tree.metadata:
             for key, value in tree.metadata.items():
                 # Skip certain internal metadata keys that shouldn't be saved
-                if key in ['filepath', 'offset', 'duration', 'manifest_index']:
+                if key in ["filepath", "offset", "duration", "manifest_index"]:
                     continue
 
                 # For arrays in metadata, extract the batch_index element
                 if isinstance(value, np.ndarray):
                     if value.ndim > 0 and len(value) > batch_index:
                         # Save the value for this batch item
-                        entry[f'metadata_{key}'] = value[batch_index]
+                        entry[f"metadata_{key}"] = value[batch_index]
                     elif value.ndim == 0:
                         # Scalar array
-                        entry[f'metadata_{key}'] = value
+                        entry[f"metadata_{key}"] = value
                 # For non-array metadata, only include if it's meant to be saved
-                elif not isinstance(value, (dict, list)) or key == 'tags':
+                elif not isinstance(value, (dict, list)) or key == "tags":
                     # Skip complex objects unless they're tags
-                    if key != 'tags':  # tags already handled above
-                        entry[f'metadata_{key}'] = value
+                    if key != "tags":  # tags already handled above
+                        entry[f"metadata_{key}"] = value
 
         return entry
 
@@ -289,7 +301,7 @@ class AudioWriter:
         if not self.manifest_data:
             return None
 
-        manifest_path = self.output_dir / f"manifest.npz"
+        manifest_path = self.output_dir / "manifest.npz"
 
         # Convert manifest data to arrays for efficient NPZ storage
         arrays_dict = self._manifest_to_arrays()
@@ -317,7 +329,7 @@ class AudioWriter:
             all_fields.update(entry.keys())
 
         # Separate scalar fields from tag fields
-        scalar_fields = {f for f in all_fields if f != 'tags'}
+        scalar_fields = {f for f in all_fields if f != "tags"}
 
         # Initialize result dictionary
         arrays = {}
@@ -356,24 +368,24 @@ class AudioWriter:
                 arrays[field] = np.concatenate(values, axis=0)
 
         # Process tags if present
-        if any('tags' in entry for entry in self.manifest_data):
+        if any("tags" in entry for entry in self.manifest_data):
             # Collect all unique tag keys
             all_tag_keys = set()
             for entry in self.manifest_data:
-                if 'tags' in entry and isinstance(entry['tags'], dict):
-                    all_tag_keys.update(entry['tags'].keys())
+                if "tags" in entry and isinstance(entry["tags"], dict):
+                    all_tag_keys.update(entry["tags"].keys())
 
             # Store each tag as a separate array
             for tag_key in all_tag_keys:
                 tag_values = []
                 for entry in self.manifest_data:
-                    if 'tags' in entry and tag_key in entry['tags']:
-                        tag_values.append(entry['tags'][tag_key])
+                    if "tags" in entry and tag_key in entry["tags"]:
+                        tag_values.append(entry["tags"][tag_key])
                     else:
                         tag_values.append(None)
 
                 # Store with 'tags_' prefix
-                arrays[f'tags_{tag_key}'] = np.array(tag_values, dtype=object)
+                arrays[f"tags_{tag_key}"] = np.array(tag_values, dtype=object)
 
         return arrays
 
@@ -384,15 +396,17 @@ class AudioWriter:
             Dictionary containing write statistics
         """
         stats = {
-            'total_files': len(self.written_paths),
-            'output_directory': str(self.output_dir),
-            'current_index': self.index,
-            'write_audio': self.write_audio
+            "total_files": len(self.written_paths),
+            "output_directory": str(self.output_dir),
+            "current_index": self.index,
+            "write_audio": self.write_audio,
         }
 
         # Only include batch count if timestamps are being tracked
         if self.include_timestamp:
-            stats['total_batches'] = len(set(entry.get('timestamp', '') for entry in self.manifest_data))
+            stats["total_batches"] = len(
+                set(entry.get("timestamp", "") for entry in self.manifest_data)
+            )
 
         return stats
 

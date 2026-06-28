@@ -102,7 +102,9 @@ def test_trim_binding():
 
     B = 4
     T = 44100
-    audio_tree = AudioTree(np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100)
+    audio_tree = AudioTree(
+        np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100
+    )
 
     args = {
         "trim.length": 1.0,

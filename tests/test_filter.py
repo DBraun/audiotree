@@ -1,4 +1,5 @@
 """Tests for AudioTree filter functionality."""
+
 import numpy as np
 
 from audiotree.core import AudioTree
@@ -7,12 +8,14 @@ from audiotree.core import AudioTree
 def test_filter_basic():
     """Test basic filtering functionality."""
     # Create AudioTree with batch size 4
-    waveform = np.array([
-        [[1.0, 2.0, 3.0]],  # batch 0
-        [[4.0, 5.0, 6.0]],  # batch 1
-        [[7.0, 8.0, 9.0]],  # batch 2
-        [[10.0, 11.0, 12.0]]  # batch 3
-    ])
+    waveform = np.array(
+        [
+            [[1.0, 2.0, 3.0]],  # batch 0
+            [[4.0, 5.0, 6.0]],  # batch 1
+            [[7.0, 8.0, 9.0]],  # batch 2
+            [[10.0, 11.0, 12.0]],  # batch 3
+        ]
+    )
     tree = AudioTree(waveform, 44100)
 
     # Filter to keep only even-indexed batches (0, 2)
@@ -33,11 +36,7 @@ def test_filter_basic():
 
 def test_filter_single_item():
     """Test filtering that keeps only one item."""
-    waveform = np.array([
-        [[1.0, 2.0, 3.0]],
-        [[4.0, 5.0, 6.0]],
-        [[7.0, 8.0, 9.0]]
-    ])
+    waveform = np.array([[[1.0, 2.0, 3.0]], [[4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0]]])
     tree = AudioTree(waveform, 44100)
 
     # Filter to keep only the second batch
@@ -54,11 +53,7 @@ def test_filter_single_item():
 
 def test_filter_keep_all():
     """Test filtering that keeps all items."""
-    waveform = np.array([
-        [[1.0, 2.0, 3.0]],
-        [[4.0, 5.0, 6.0]],
-        [[7.0, 8.0, 9.0]]
-    ])
+    waveform = np.array([[[1.0, 2.0, 3.0]], [[4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0]]])
     tree = AudioTree(waveform, 44100)
 
     # Filter that accepts everything

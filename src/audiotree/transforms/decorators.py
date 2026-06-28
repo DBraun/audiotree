@@ -41,7 +41,10 @@ def random_transform(fn: Callable) -> Callable:
     sig = inspect.signature(fn)
     param_defaults = {}
     for name, param in sig.parameters.items():
-        if name not in ['audio_tree', 'rng'] and param.default != inspect.Parameter.empty:
+        if (
+            name not in ["audio_tree", "rng"]
+            and param.default != inspect.Parameter.empty
+        ):
             param_defaults[name] = param.default
 
     @wraps(fn)
@@ -49,8 +52,8 @@ def random_transform(fn: Callable) -> Callable:
         prob: float = 1.0,
         split_seed: bool = True,
         scope: Dict[str, Any] = None,
-        output_key = None,
-        **transform_params
+        output_key=None,
+        **transform_params,
     ):
         """Create a transform instance with given parameters."""
 
@@ -79,14 +82,14 @@ def random_transform(fn: Callable) -> Callable:
     # Add the special parameters
     params = list(sig.parameters.values())
     # Remove audio_tree and rng from the exposed signature
-    params = [p for p in params if p.name not in ['audio_tree', 'rng']]
+    params = [p for p in params if p.name not in ["audio_tree", "rng"]]
 
     # Add special parameters
     special_params = [
-        inspect.Parameter('prob', inspect.Parameter.KEYWORD_ONLY, default=1.0),
-        inspect.Parameter('split_seed', inspect.Parameter.KEYWORD_ONLY, default=True),
-        inspect.Parameter('scope', inspect.Parameter.KEYWORD_ONLY, default=None),
-        inspect.Parameter('output_key', inspect.Parameter.KEYWORD_ONLY, default=None),
+        inspect.Parameter("prob", inspect.Parameter.KEYWORD_ONLY, default=1.0),
+        inspect.Parameter("split_seed", inspect.Parameter.KEYWORD_ONLY, default=True),
+        inspect.Parameter("scope", inspect.Parameter.KEYWORD_ONLY, default=None),
+        inspect.Parameter("output_key", inspect.Parameter.KEYWORD_ONLY, default=None),
     ]
 
     wrapper.__signature__ = inspect.Signature(params + special_params)
@@ -128,15 +131,11 @@ def map_transform(fn: Callable) -> Callable:
     sig = inspect.signature(fn)
     param_defaults = {}
     for name, param in sig.parameters.items():
-        if name != 'audio_tree' and param.default != inspect.Parameter.empty:
+        if name != "audio_tree" and param.default != inspect.Parameter.empty:
             param_defaults[name] = param.default
 
     @wraps(fn)
-    def wrapper(
-        scope: Dict[str, Any] = None,
-        output_key = None,
-        **transform_params
-    ):
+    def wrapper(scope: Dict[str, Any] = None, output_key=None, **transform_params):
         """Create a transform instance with given parameters."""
 
         config = {**param_defaults, **transform_params}
@@ -161,12 +160,12 @@ def map_transform(fn: Callable) -> Callable:
     # Preserve original function's signature for argbind
     params = list(sig.parameters.values())
     # Remove audio_tree from the exposed signature
-    params = [p for p in params if p.name != 'audio_tree']
+    params = [p for p in params if p.name != "audio_tree"]
 
     # Add special parameters
     special_params = [
-        inspect.Parameter('scope', inspect.Parameter.KEYWORD_ONLY, default=None),
-        inspect.Parameter('output_key', inspect.Parameter.KEYWORD_ONLY, default=None),
+        inspect.Parameter("scope", inspect.Parameter.KEYWORD_ONLY, default=None),
+        inspect.Parameter("output_key", inspect.Parameter.KEYWORD_ONLY, default=None),
     ]
 
     wrapper.__signature__ = inspect.Signature(params + special_params)

@@ -22,12 +22,12 @@ def test_round_trip_npz_manifest():
             loudness=np.array([-20.0, -18.0, -22.0]),
             pitch=np.array([60.0, 62.0, 64.0]),
             velocity=np.array([64, 80, 100]),
-            filepaths=["original1.wav", "original2.wav", "original3.wav"]
+            filepaths=["original1.wav", "original2.wav", "original3.wav"],
         )
 
         # Write with AudioWriter
         with AudioWriter(output_dir) as writer:
-            paths = writer.write(audio_tree, tags={"dataset": "test", "version": 1})
+            writer.write(audio_tree, tags={"dataset": "test", "version": 1})
 
         # Read back with ManifestDataSource
         source = ManifestDataSource(output_dir / "manifest.npz")
@@ -49,11 +49,9 @@ def test_round_trip_npz_manifest():
 
             # Check manifest metadata via get_entry (metadata removed from audio_tree for batch compatibility)
             entry = source.get_entry(i)
-            assert entry['filepath'] == f"original{i+1}.wav"
-            assert entry['tags']['dataset'] == "test"
-            assert entry['tags']['version'] == 1
-
-
+            assert entry["filepath"] == f"original{i + 1}.wav"
+            assert entry["tags"]["dataset"] == "test"
+            assert entry["tags"]["version"] == 1
 
 
 def test_filter_function():
@@ -63,12 +61,21 @@ def test_filter_function():
 
         # Create varied data
         trees = [
-            AudioTree.create(np.random.randn(1, 1, 8000), sample_rate=8000,
-                           loudness=np.array([-10.0])),
-            AudioTree.create(np.random.randn(1, 1, 8000), sample_rate=8000,
-                           loudness=np.array([-25.0])),
-            AudioTree.create(np.random.randn(1, 1, 8000), sample_rate=8000,
-                           loudness=np.array([-18.0])),
+            AudioTree.create(
+                np.random.randn(1, 1, 8000),
+                sample_rate=8000,
+                loudness=np.array([-10.0]),
+            ),
+            AudioTree.create(
+                np.random.randn(1, 1, 8000),
+                sample_rate=8000,
+                loudness=np.array([-25.0]),
+            ),
+            AudioTree.create(
+                np.random.randn(1, 1, 8000),
+                sample_rate=8000,
+                loudness=np.array([-18.0]),
+            ),
         ]
 
         with AudioWriter(output_dir) as writer:
@@ -78,7 +85,7 @@ def test_filter_function():
         # Filter for loud samples only
         source = ManifestDataSource(
             output_dir / "manifest.npz",
-            filter_fn=lambda entry: entry.get('loudness', -float('inf')) > -20
+            filter_fn=lambda entry: entry.get("loudness", -float("inf")) > -20,
         )
 
         # Should only have 2 entries (-10 and -18)
@@ -109,8 +116,8 @@ def test_filter_by_tag():
 
         # Check indices
         entries = source_a.get_all_entries()
-        assert entries[0]['tags']['index'] == 0
-        assert entries[1]['tags']['index'] == 2
+        assert entries[0]["tags"]["index"] == 0
+        assert entries[1]["tags"]["index"] == 2
 
 
 def test_filter_by_loudness():
@@ -124,9 +131,7 @@ def test_filter_by_loudness():
 
         for lufs in loudness_values:
             audio_tree = AudioTree.create(
-                np.random.randn(1, 1, 8000),
-                sample_rate=8000,
-                loudness=np.array([lufs])
+                np.random.randn(1, 1, 8000), sample_rate=8000, loudness=np.array([lufs])
             )
             writer.write(audio_tree)
 
@@ -168,10 +173,7 @@ def test_num_records_limit():
             writer.write(audio_tree)
 
         # Load only first 3
-        source = ManifestDataSource(
-            output_dir / "manifest.npz",
-            num_records=3
-        )
+        source = ManifestDataSource(output_dir / "manifest.npz", num_records=3)
         assert len(source) == 3
 
 
@@ -186,10 +188,7 @@ def test_resampling():
             writer.write(audio_tree)
 
         # Read and resample to 16000 Hz
-        source = ManifestDataSource(
-            output_dir / "manifest.npz",
-            sample_rate=16000
-        )
+        source = ManifestDataSource(output_dir / "manifest.npz", sample_rate=16000)
 
         loaded = source[0]
         assert loaded.sample_rate == 16000
@@ -207,10 +206,7 @@ def test_mono_conversion():
             writer.write(audio_tree)
 
         # Read as mono
-        source = ManifestDataSource(
-            output_dir / "manifest.npz",
-            mono=True
-        )
+        source = ManifestDataSource(output_dir / "manifest.npz", mono=True)
 
         loaded = source[0]
         assert loaded.waveform.shape[1] == 1  # Mono
@@ -224,7 +220,7 @@ def test_get_entry():
         audio_tree = AudioTree.create(
             np.random.randn(2, 1, 8000),
             sample_rate=8000,
-            loudness=np.array([-20.0, -18.0])
+            loudness=np.array([-20.0, -18.0]),
         )
         with AudioWriter(output_dir) as writer:
             writer.write(audio_tree, tags={"test": True})
@@ -233,9 +229,9 @@ def test_get_entry():
 
         # Get raw entry
         entry = source.get_entry(0)
-        assert entry['loudness'] == -20.0
-        assert entry['tags']['test'] is True
-        assert 'filename' in entry
+        assert entry["loudness"] == -20.0
+        assert entry["tags"]["test"] is True
+        assert "filename" in entry
 
 
 def test_grain_integration():
@@ -281,7 +277,7 @@ def test_grain_dataloader_with_batch_transform():
         audio_tree = audio_tree.replace(
             loudness=np.linspace(-30.0, -10.0, 8),
             pitch=np.linspace(60.0, 72.0, 8),
-            velocity=np.arange(32, 40, dtype=np.int16)
+            velocity=np.arange(32, 40, dtype=np.int16),
         )
 
         # Write with NPZ manifest
@@ -345,7 +341,7 @@ def test_manifest_metadata_with_batch_transform():
             metadata={
                 "params": np.random.randn(batch_size, param_dim).astype(np.float32),
                 "confidence": np.linspace(0.5, 1.0, batch_size).astype(np.float32),
-            }
+            },
         )
 
         # Write with NPZ manifest (metadata will be saved)
@@ -372,7 +368,7 @@ def test_manifest_metadata_with_batch_transform():
 
         # Create batches
         batch1 = batch_transform._default_batch_fn(items[0:4])
-        batch2 = batch_transform._default_batch_fn(items[4:8])
+        batch_transform._default_batch_fn(items[4:8])
 
         # Check batched metadata
         assert "params" in batch1.metadata
@@ -382,7 +378,9 @@ def test_manifest_metadata_with_batch_transform():
 
         # Verify values are correct
         expected_confidence_batch1 = np.linspace(0.5, 1.0, 8)[:4]
-        assert np.allclose(batch1.metadata["confidence"].squeeze(), expected_confidence_batch1)
+        assert np.allclose(
+            batch1.metadata["confidence"].squeeze(), expected_confidence_batch1
+        )
 
 
 def test_manifest_with_batch_transform():
@@ -401,7 +399,7 @@ def test_manifest_with_batch_transform():
         audio_tree = audio_tree.replace(
             loudness=np.linspace(-30.0, -10.0, 8),
             pitch=np.linspace(60.0, 72.0, 8),
-            velocity=np.arange(32, 40, dtype=np.int16)
+            velocity=np.arange(32, 40, dtype=np.int16),
         )
 
         # Write with NPZ manifest

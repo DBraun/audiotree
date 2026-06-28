@@ -23,17 +23,15 @@ def test_batch_transform_with_dataloader():
         audio_tree = audiotree.AudioTree.create(
             waveform=waveform,
             sample_rate=sample_rate,
-            filepaths=f"/fake/path/audio_{i:04d}.wav"
+            filepaths=f"/fake/path/audio_{i:04d}.wav",
         )
         audio_trees.append(audio_tree)
 
     # Create a DataLoader with Batch transform
-    dataloader = (
-        grain.DataLoader(
-            data_source=audio_trees,
-            sampler=grain.samplers.SequentialSampler(len(audio_trees)),
-            operations=[audiotree.transforms.Batch(4)],
-        )
+    dataloader = grain.DataLoader(
+        data_source=audio_trees,
+        sampler=grain.samplers.SequentialSampler(len(audio_trees)),
+        operations=[audiotree.transforms.Batch(4)],
     )
 
     # Iterate and check batched filepaths
@@ -78,7 +76,7 @@ def test_batch_with_iter_dataset():
         audio_tree = AudioTree.create(
             waveform=waveform,
             sample_rate=sample_rate,
-            filepaths=f"/fake/path/audio_{i:04d}.wav"
+            filepaths=f"/fake/path/audio_{i:04d}.wav",
         )
         audio_trees.append(audio_tree)
 
@@ -92,7 +90,9 @@ def test_batch_with_iter_dataset():
         batch_count += 1
 
         # Verify shape: should be (batch, channels, samples), not (batch, 1, channels, samples)
-        assert batch.waveform.ndim == 3, f"Expected 3D array, got {batch.waveform.ndim}D"
+        assert batch.waveform.ndim == 3, (
+            f"Expected 3D array, got {batch.waveform.ndim}D"
+        )
 
         # Verify batch size
         if batch_count < 3:
@@ -121,7 +121,9 @@ def test_batch_drop_remainder():
         audio_trees.append(audio_tree)
 
     ds = grain.MapDataset.source(audio_trees)
-    iter_ds = ds.to_iter_dataset().batch(4, drop_remainder=True, batch_fn=AudioTree.batch)
+    iter_ds = ds.to_iter_dataset().batch(
+        4, drop_remainder=True, batch_fn=AudioTree.batch
+    )
 
     batches = list(iter_ds)
 
@@ -168,8 +170,12 @@ def test_batch_with_dict_elements():
         assert "tgt" in batch
 
         # Each value should be a batched AudioTree
-        assert batch["src"].waveform.ndim == 3, f"Expected 3D array, got {batch['src'].waveform.ndim}D"
-        assert batch["tgt"].waveform.ndim == 3, f"Expected 3D array, got {batch['tgt'].waveform.ndim}D"
+        assert batch["src"].waveform.ndim == 3, (
+            f"Expected 3D array, got {batch['src'].waveform.ndim}D"
+        )
+        assert batch["tgt"].waveform.ndim == 3, (
+            f"Expected 3D array, got {batch['tgt'].waveform.ndim}D"
+        )
 
         # Verify batch sizes
         if batch_count < 3:

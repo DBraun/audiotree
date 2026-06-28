@@ -28,18 +28,18 @@ def _find_files_with_extensions(
     Returns:
         List of file paths matching the extensions.
     """
-    extensions_lower = {ext.lstrip('.').lower() for ext in extensions}
+    extensions_lower = {ext.lstrip(".").lower() for ext in extensions}
     filepaths = []
     for folder in directories:
         folder_path = Path(folder).expanduser()
         folder_path = Path(os.path.expandvars(folder_path))
         for root, dirs, files in os.walk(folder_path):
             # Prune hidden directories in-place (prevents descent into .git, etc.)
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
             for filename in files:
-                if filename.startswith('.'):
+                if filename.startswith("."):
                     continue
-                ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
                 if ext in extensions_lower:
                     filepaths.append(os.path.join(root, filename))
     return filepaths
@@ -51,7 +51,8 @@ def _load_audio_with_saliency(
     sample_rate: int,
     duration: float,
     mono: bool = True,
-    pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"] | None = "reflect",
+    pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"]
+    | None = "reflect",
     saliency_params: SaliencyParams | None = None,
     source: str | None = None,
 ) -> AudioTree:
@@ -124,7 +125,8 @@ def create_audio_dataset(
     sample_rate: int = 44_100,
     mono: bool = True,
     duration: float = 1.0,
-    pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"] | None = "constant",
+    pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"]
+    | None = "constant",
     extensions: Optional[List[str]] = None,
     saliency_params: Optional[SaliencyParams] = None,
     source: str | None = None,
@@ -260,7 +262,8 @@ def create_balanced_audio_dataset(
     sample_rate: int = 44_100,
     mono: bool = True,
     duration: float = 1.0,
-    pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"] | None = "constant",
+    pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"]
+    | None = "constant",
     extensions: Optional[List[str]] = None,
     saliency_params: Optional[SaliencyParams] = None,
 ) -> grain.MapDataset:

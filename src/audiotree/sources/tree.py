@@ -333,4 +333,3 @@ class TreeDataSource(RandomAccessDataSource):
             Dictionary containing user-provided metadata
         """
         return dict(self.manifest.get("metadata", {}))
-

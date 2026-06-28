@@ -203,7 +203,12 @@ def _corrupt_phase_jax(
     stft_data = stft_data * jnp.expand_dims(jnp.exp(1j * amt), axis=-1)
 
     waveform = librosax.istft(
-        stft_data, n_fft=frame_length, hop_length=hop_length, window=window, center=True, length=length
+        stft_data,
+        n_fft=frame_length,
+        hop_length=hop_length,
+        window=window,
+        center=True,
+        length=length,
     )
 
     loudness = audio_tree.loudness if keep_loudness else None
@@ -230,14 +235,25 @@ def _corrupt_phase_np(
     for b in range(B):
         for c in range(C):
             stft_data = librosa.stft(
-                waveform[b, c], n_fft=frame_length, hop_length=hop_length, window=window, center=True
+                waveform[b, c],
+                n_fft=frame_length,
+                hop_length=hop_length,
+                window=window,
+                center=True,
             )
 
-            amt = rng.uniform(-np.pi * amount, np.pi * amount, size=stft_data.shape[:-1])
+            amt = rng.uniform(
+                -np.pi * amount, np.pi * amount, size=stft_data.shape[:-1]
+            )
             stft_data = stft_data * np.expand_dims(np.exp(1j * amt), axis=-1)
 
             result[b, c] = librosa.istft(
-                stft_data, n_fft=frame_length, hop_length=hop_length, window=window, center=True, length=length
+                stft_data,
+                n_fft=frame_length,
+                hop_length=hop_length,
+                window=window,
+                center=True,
+                length=length,
             )
 
     loudness = audio_tree.loudness if keep_loudness else None
@@ -278,7 +294,12 @@ def _shift_phase_jax(
     stft_data = stft_data * jnp.expand_dims(jnp.exp(1j * amt), axis=(-2, -1))
 
     waveform = librosax.istft(
-        stft_data, n_fft=frame_length, hop_length=hop_length, window=window, center=True, length=length
+        stft_data,
+        n_fft=frame_length,
+        hop_length=hop_length,
+        window=window,
+        center=True,
+        length=length,
     )
 
     loudness = audio_tree.loudness if keep_loudness else None
@@ -307,13 +328,22 @@ def _shift_phase_np(
     for b in range(B):
         for c in range(C):
             stft_data = librosa.stft(
-                waveform[b, c], n_fft=frame_length, hop_length=hop_length, window=window, center=True
+                waveform[b, c],
+                n_fft=frame_length,
+                hop_length=hop_length,
+                window=window,
+                center=True,
             )
 
             stft_data = stft_data * np.exp(1j * amts[b])
 
             result[b, c] = librosa.istft(
-                stft_data, n_fft=frame_length, hop_length=hop_length, window=window, center=True, length=length
+                stft_data,
+                n_fft=frame_length,
+                hop_length=hop_length,
+                window=window,
+                center=True,
+                length=length,
             )
 
     loudness = audio_tree.loudness if keep_loudness else None
@@ -343,7 +373,9 @@ def _roll_jax(
     )
 
     @jax.vmap
-    def roll_single_item(item_audio: jnp.ndarray, roll_amount: jnp.ndarray) -> jnp.ndarray:
+    def roll_single_item(
+        item_audio: jnp.ndarray, roll_amount: jnp.ndarray
+    ) -> jnp.ndarray:
         if mode == "wrap":
             return jnp.roll(item_audio, shift=roll_amount, axis=-1)
         elif mode == "constant":
@@ -390,10 +422,10 @@ def _roll_np(
             roll_amt = roll_amounts[b]
             if roll_amt >= 0:
                 if roll_amt < T:
-                    result[b, :, roll_amt:] = waveform[b, :, :T - roll_amt]
+                    result[b, :, roll_amt:] = waveform[b, :, : T - roll_amt]
             else:
                 if -roll_amt < T:
-                    result[b, :, :T + roll_amt] = waveform[b, :, -roll_amt:]
+                    result[b, :, : T + roll_amt] = waveform[b, :, -roll_amt:]
         else:
             raise ValueError(f"Unknown mode: {mode}. Use 'wrap' or 'constant'.")
 

@@ -133,7 +133,9 @@ if __name__ == "__main__":
 
     # Test training augmentation
     print("Training...")
-    audio_tree = AudioTree(np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100)
+    audio_tree = AudioTree(
+        np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100
+    )
     audio_tree = audio_tree.replace_loudness()
     print("Before:", audio_tree.loudness)
     print("length:", audio_tree.waveform.shape[-1])
@@ -143,7 +145,9 @@ if __name__ == "__main__":
 
     # Test validation augmentation
     print("Validation...")
-    audio_tree = AudioTree(np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100)
+    audio_tree = AudioTree(
+        np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100
+    )
     audio_tree = audio_tree.replace_loudness()
     print("Before:", audio_tree.loudness)
     print("length:", audio_tree.waveform.shape[-1])

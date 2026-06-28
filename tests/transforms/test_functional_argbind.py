@@ -5,13 +5,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-import argbind
-import jax
-import numpy as np
 import yaml
-
-from audiotree import AudioTree
-from audiotree.transforms.functional import volume_norm, trim
 
 
 class TestArgBindCLI:
@@ -20,7 +14,7 @@ class TestArgBindCLI:
     def test_trim_from_cli(self):
         """Test that --trim.length=4.0 works from command line."""
         # Create a test script
-        script = '''
+        script = """
 import argbind
 import jax
 import numpy as np
@@ -41,15 +35,15 @@ with argbind.scope(args):
     expected = int(4.0 * 44100)
     assert result.waveform.shape[-1] == expected, f"Expected {expected}, got {result.waveform.shape[-1]}"
     print("SUCCESS")
-'''
+"""
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(script)
             script_path = f.name
 
         try:
             result = subprocess.run(
-                [sys.executable, script_path, '--trim.length=4.0'],
+                [sys.executable, script_path, "--trim.length=4.0"],
                 capture_output=True,
                 text=True,
             )
@@ -61,7 +55,7 @@ with argbind.scope(args):
 
     def test_volume_norm_from_cli(self):
         """Test that --volume_norm.min_db=-30 works from command line."""
-        script = '''
+        script = """
 import argbind
 import numpy as np
 from audiotree import AudioTree
@@ -85,15 +79,20 @@ with argbind.scope(args):
     print(f"Loudness: {float(result.loudness[0])}")
     assert abs(float(result.loudness[0]) - (-30.0)) < 1.0
     print("SUCCESS")
-'''
+"""
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(script)
             script_path = f.name
 
         try:
             result = subprocess.run(
-                [sys.executable, script_path, '--volume_norm.min_db=-30', '--volume_norm.max_db=-30'],
+                [
+                    sys.executable,
+                    script_path,
+                    "--volume_norm.min_db=-30",
+                    "--volume_norm.max_db=-30",
+                ],
                 capture_output=True,
                 text=True,
             )
@@ -105,7 +104,7 @@ with argbind.scope(args):
 
     def test_prob_from_cli(self):
         """Test that --volume_norm.prob=0.5 works from command line."""
-        script = '''
+        script = """
 import argbind
 import numpy as np
 from audiotree import AudioTree
@@ -136,9 +135,9 @@ with argbind.scope(args):
     print(f"Different: {different_count}/20")
     assert 5 <= different_count <= 15, f"Expected ~10/20 different, got {different_count}"
     print("SUCCESS")
-'''
+"""
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(script)
             script_path = f.name
 
@@ -147,9 +146,9 @@ with argbind.scope(args):
                 [
                     sys.executable,
                     script_path,
-                    '--volume_norm.min_db=-30',
-                    '--volume_norm.max_db=-30',
-                    '--volume_norm.prob=0.5',
+                    "--volume_norm.min_db=-30",
+                    "--volume_norm.max_db=-30",
+                    "--volume_norm.prob=0.5",
                 ],
                 capture_output=True,
                 text=True,
@@ -170,11 +169,11 @@ class TestArgBindYAML:
             "trim.length": 4.0,
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump(config, f)
             config_path = f.name
 
-        script = f'''
+        script = """
 import argbind
 import numpy as np
 from audiotree import AudioTree
@@ -191,17 +190,17 @@ with argbind.scope(args):
     )
     result = transform.map(audio_tree)
     expected = int(4.0 * 44100)
-    assert result.waveform.shape[-1] == expected, f"Expected {{expected}}, got {{result.waveform.shape[-1]}}"
+    assert result.waveform.shape[-1] == expected, f"Expected {expected}, got {result.waveform.shape[-1]}"
     print("SUCCESS")
-'''
+"""
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(script)
             script_path = f.name
 
         try:
             result = subprocess.run(
-                [sys.executable, script_path, f'--args.load={config_path}'],
+                [sys.executable, script_path, f"--args.load={config_path}"],
                 capture_output=True,
                 text=True,
             )
@@ -220,11 +219,11 @@ with argbind.scope(args):
             "volume_norm.prob": 0.9,
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump(config, f)
             config_path = f.name
 
-        script = f'''
+        script = """
 import argbind
 import numpy as np
 from audiotree import AudioTree
@@ -245,18 +244,18 @@ with argbind.scope(args):
     result = transform.random_map(audio_tree, rng)
 
     loudness = float(result.loudness[0])
-    print(f"Loudness: {{loudness}}")
-    assert -25 - 1 <= loudness <= -15 + 1, f"Loudness {{loudness}} not in range [-26, -14]"
+    print(f"Loudness: {loudness}")
+    assert -25 - 1 <= loudness <= -15 + 1, f"Loudness {loudness} not in range [-26, -14]"
     print("SUCCESS")
-'''
+"""
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(script)
             script_path = f.name
 
         try:
             result = subprocess.run(
-                [sys.executable, script_path, f'--args.load={config_path}'],
+                [sys.executable, script_path, f"--args.load={config_path}"],
                 capture_output=True,
                 text=True,
             )
@@ -276,11 +275,11 @@ with argbind.scope(args):
             "val/volume_norm.max_db": -20,
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             yaml.dump(config, f)
             config_path = f.name
 
-        script = f'''
+        script = """
 import argbind
 import numpy as np
 from audiotree import AudioTree
@@ -302,7 +301,7 @@ with argbind.scope(args, "train"):
     transform = volume_norm()
     train_result = transform.random_map(audio_tree, rng)
     train_loudness = float(train_result.loudness[0])
-    print(f"Train loudness: {{train_loudness}}")
+    print(f"Train loudness: {train_loudness}")
 
 # Val scope - need a new rng to get different results
 rng2 = np.random.default_rng(42)
@@ -310,21 +309,21 @@ with argbind.scope(args, "val"):
     transform = volume_norm()
     val_result = transform.random_map(audio_tree, rng2)
     val_loudness = float(val_result.loudness[0])
-    print(f"Val loudness: {{val_loudness}}")
+    print(f"Val loudness: {val_loudness}")
 
 # They should be different because val has min_db=max_db=-20 (exact)
 # while train has min_db=-10, max_db=-5 (non-overlapping range)
 assert abs(train_loudness - val_loudness) > 1.0, "Train and val should use different configs"
 print("SUCCESS")
-'''
+"""
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
             f.write(script)
             script_path = f.name
 
         try:
             result = subprocess.run(
-                [sys.executable, script_path, f'--args.load={config_path}'],
+                [sys.executable, script_path, f"--args.load={config_path}"],
                 capture_output=True,
                 text=True,
             )

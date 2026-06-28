@@ -114,7 +114,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         # Detect format from extension
         suffix = self.manifest_path.suffix.lower()
 
-        if suffix == '.npz':
+        if suffix == ".npz":
             entries = self._load_npz_manifest()
         else:
             raise ValueError(f"Unsupported manifest format: {suffix}. Use .npz")
@@ -139,9 +139,9 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         tag_keys = []
 
         for key in data.keys():
-            if key.startswith('tags_'):
+            if key.startswith("tags_"):
                 tag_keys.append(key)
-            elif key.startswith('metadata_'):
+            elif key.startswith("metadata_"):
                 metadata_keys.append(key)
             else:
                 regular_keys.append(key)
@@ -170,7 +170,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                     continue
                 elif isinstance(value, (np.floating, float)) and np.isnan(value):
                     continue
-                elif isinstance(value, (str, np.str_)) and value == '':
+                elif isinstance(value, (str, np.str_)) and value == "":
                     continue
 
                 # Convert scalar arrays and numpy types
@@ -194,11 +194,11 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             for key in tag_keys:
                 tag_key = key[5:]  # Remove 'tags_' prefix
                 value = tag_arrays[key][i]
-                if value is not None and value != '':
+                if value is not None and value != "":
                     tags[tag_key] = value
 
             if tags:
-                entry['tags'] = tags
+                entry["tags"] = tags
 
             entries.append(entry)
 
@@ -224,7 +224,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
 
         # Add metadata arrays from manifest (these can be batched properly)
         for key, value in entry.items():
-            if key.startswith('metadata_'):
+            if key.startswith("metadata_"):
                 # Remove 'metadata_' prefix and add to metadata
                 metadata_key = key[9:]  # len('metadata_') = 9
                 # Wrap in array with batch dimension for batching
@@ -239,11 +239,11 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                     metadata[metadata_key] = np.array([value])
 
         # Check if audio files were actually written
-        files_written = entry.get('files_written', True)
+        files_written = entry.get("files_written", True)
 
         if files_written:
             # Audio files exist - load from disk
-            filename = entry['filename']
+            filename = entry["filename"]
             audio_path = self.audio_dir / filename
 
             if not audio_path.exists():
@@ -251,11 +251,11 @@ class ManifestDataSource(grain.RandomAccessDataSource):
 
             # Build kwargs for AudioTree.from_file with all available fields
             tree_kwargs = {
-                'sample_rate': self.sample_rate or entry.get('sample_rate'),
-                'duration': self.duration,
-                'mono': self.mono,
-                'pad_mode': self.pad_mode if self.duration else None,
-                'metadata': metadata,
+                "sample_rate": self.sample_rate or entry.get("sample_rate"),
+                "duration": self.duration,
+                "mono": self.mono,
+                "pad_mode": self.pad_mode if self.duration else None,
+                "metadata": metadata,
             }
 
             # Add AudioTree fields dynamically from manifest
@@ -267,17 +267,17 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             audio_tree = AudioTree.from_file(audio_path, **tree_kwargs)
         else:
             # No audio files - create AudioTree from manifest metadata only
-            sample_rate = self.sample_rate or entry.get('sample_rate')
-            channels = entry.get('channels', 1)
-            samples = entry.get('samples', 0)
+            sample_rate = self.sample_rate or entry.get("sample_rate")
+            channels = entry.get("channels", 1)
+            samples = entry.get("samples", 0)
 
             # Create zero audio data with correct shape
             waveform = np.zeros((1, channels, samples), dtype=np.float32)
 
             # Build kwargs for AudioTree.create
             tree_kwargs = {
-                'sample_rate': sample_rate,
-                'metadata': metadata,
+                "sample_rate": sample_rate,
+                "metadata": metadata,
             }
 
             # Add AudioTree fields dynamically from manifest
@@ -314,7 +314,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         """
         return self.entries.copy()
 
-    def filter_by_tag(self, tag_name: str, tag_value) -> 'ManifestDataSource':
+    def filter_by_tag(self, tag_name: str, tag_value) -> "ManifestDataSource":
         """Create a new ManifestDataSource filtered by a specific tag value.
 
         Args:
@@ -324,8 +324,9 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         Returns:
             New ManifestDataSource with filtered entries
         """
+
         def filter_fn(entry):
-            tags = entry.get('tags', {})
+            tags = entry.get("tags", {})
             return tags.get(tag_name) == tag_value
 
         return ManifestDataSource(
@@ -335,10 +336,12 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             mono=self.mono,
             duration=self.duration,
             pad_mode=self.pad_mode,
-            filter_fn=filter_fn
+            filter_fn=filter_fn,
         )
 
-    def filter_by_loudness(self, min_lufs: float = None, max_lufs: float = None) -> 'ManifestDataSource':
+    def filter_by_loudness(
+        self, min_lufs: float = None, max_lufs: float = None
+    ) -> "ManifestDataSource":
         """Create a new ManifestDataSource filtered by loudness range.
 
         Filters entries based on the 'loudness' field in the manifest.
@@ -380,8 +383,9 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             >>> len(mid_source)
             3
         """
+
         def filter_fn(entry):
-            loudness = entry.get('loudness')
+            loudness = entry.get("loudness")
             if loudness is None:
                 return False
             if min_lufs is not None and loudness < min_lufs:
@@ -397,15 +401,13 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             mono=self.mono,
             duration=self.duration,
             pad_mode=self.pad_mode,
-            filter_fn=filter_fn
+            filter_fn=filter_fn,
         )
 
     @classmethod
     def from_writer_output(
-        cls,
-        output_dir: Union[str, Path],
-        **kwargs
-    ) -> 'ManifestDataSource':
+        cls, output_dir: Union[str, Path], **kwargs
+    ) -> "ManifestDataSource":
         """Convenience constructor for reading AudioWriter output.
 
         This method automatically locates the manifest file in the output directory
@@ -440,5 +442,5 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             (1, 1, 16000)
         """
         output_dir = Path(output_dir)
-        manifest_path = output_dir / f"manifest.npz"
+        manifest_path = output_dir / "manifest.npz"
         return cls(manifest_path=manifest_path, audio_dir=output_dir, **kwargs)

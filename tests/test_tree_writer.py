@@ -459,10 +459,12 @@ def test_get_stats_with_strings():
         output_dir = Path(tmpdir)
 
         with TreeWriter(output_dir, expected_samples=3) as w:
-            w.write({
-                "labels": ["a", "b", "c"],
-                "x": np.zeros((3,), dtype=np.float32),
-            })
+            w.write(
+                {
+                    "labels": ["a", "b", "c"],
+                    "x": np.zeros((3,), dtype=np.float32),
+                }
+            )
             stats = w.get_stats()
             assert "labels" in stats["string_leaves"]
             assert "x" in stats["leaves"]

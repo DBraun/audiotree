@@ -206,7 +206,7 @@ class AudioTree:
             metadata = {}
         else:
             metadata = metadata.copy()  # Don't modify the original dict
-        
+
         if filepaths is not None:
             metadata["filepath"] = cls._encode_filepaths(filepaths)
 
@@ -250,7 +250,7 @@ class AudioTree:
             if waveform.shape[-1] < min_samples:
                 pad_right = min_samples - waveform.shape[-1]
                 waveform = np.pad(waveform, ((0, 0), (0, 0), (0, pad_right)))
-            audio_transposed = np.transpose(waveform, (0, 2, 1)) # [B, T, C]
+            audio_transposed = np.transpose(waveform, (0, 2, 1))  # [B, T, C]
             loudness_values = []
             for audio_item in audio_transposed:
                 lufs = loudness.integrated_loudness(audio_item, self.sample_rate)
@@ -298,7 +298,9 @@ class AudioTree:
         scaled_waveform = tree.waveform * linear_gain
 
         # Update loudness to target (shape [B])
-        target_loudness = numpy.full(tree.loudness.shape, target_lufs, dtype=numpy.float32)
+        target_loudness = numpy.full(
+            tree.loudness.shape, target_lufs, dtype=numpy.float32
+        )
         return tree.replace(waveform=scaled_waveform, loudness=target_loudness)
 
     @staticmethod
@@ -414,17 +416,14 @@ class AudioTree:
                 # Required for the sequence-iteration protocol: `for item in
                 # tree` calls __getitem__(0), (1), ... and stops only on
                 # IndexError (it does NOT consult __len__).
-                raise IndexError(
-                    f"batch index {key} out of range for batch_size {n}"
-                )
+                raise IndexError(f"batch index {key} out of range for batch_size {n}")
             # Use a length-1 slice rather than a scalar index so the batch
             # axis survives on every field.
             key = slice(key, key + 1 or None)
 
         def _is_string_list(x) -> bool:
             return (
-                isinstance(x, list) and bool(x)
-                and all(isinstance(s, str) for s in x)
+                isinstance(x, list) and bool(x) and all(isinstance(s, str) for s in x)
             )
 
         def _index(x):
@@ -454,7 +453,8 @@ class AudioTree:
         offset: float = 0.0,
         duration: float | None = None,
         mono: bool = False,
-        pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"] | None = "constant",
+        pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"]
+        | None = "constant",
         filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
         source: str | None = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -519,9 +519,7 @@ class AudioTree:
             pad_right = target_length - data.shape[-1]
             # Modes like "wrap", "reflect", "edge" require non-empty data.
             # Fall back to "constant" (zero-pad) when the time axis is empty.
-            effective_pad_mode = (
-                "constant" if data.shape[-1] == 0 else pad_mode
-            )
+            effective_pad_mode = "constant" if data.shape[-1] == 0 else pad_mode
             data = np.pad(
                 data,
                 pad_width=((0, 0), (0, 0), (0, pad_right)),
@@ -646,7 +644,7 @@ class AudioTree:
             audio_dir = Path(audio_dir)
 
         # Convert to list of entry dictionaries for filtering
-        num_entries = len(manifest_data['index'])
+        num_entries = len(manifest_data["index"])
 
         if filter_fn is not None:
             # Create a lazy dict-like object for filtering
@@ -664,26 +662,32 @@ class AudioTree:
                     return self.data[key][self.idx]
 
             # Build mask using filter function
-            mask = np.array([filter_fn(LazyEntry(manifest_data, i)) for i in range(num_entries)])
+            mask = np.array(
+                [filter_fn(LazyEntry(manifest_data, i)) for i in range(num_entries)]
+            )
             indices = np.where(mask)[0]
 
             if len(indices) == 0:
-                raise ValueError(f"No entries match filter in manifest: {manifest_path}")
+                raise ValueError(
+                    f"No entries match filter in manifest: {manifest_path}"
+                )
         else:
             indices = np.arange(num_entries)
 
         # Get metadata for reconstruction
-        sample_rate = int(manifest_data['sample_rate'][indices[0]])
-        channels = int(manifest_data['channels'][indices[0]])
-        samples = int(manifest_data['samples'][indices[0]])
-        files_written = manifest_data.get('files_written', np.ones(num_entries, dtype=bool))[indices[0]]
+        sample_rate = int(manifest_data["sample_rate"][indices[0]])
+        channels = int(manifest_data["channels"][indices[0]])
+        samples = int(manifest_data["samples"][indices[0]])
+        files_written = manifest_data.get(
+            "files_written", np.ones(num_entries, dtype=bool)
+        )[indices[0]]
 
         # Check if audio files exist
         if files_written:
             # Load audio from files
             waveform = []
             for idx in indices:
-                filename = manifest_data['filename'][idx]
+                filename = manifest_data["filename"][idx]
                 audio_path = audio_dir / filename
 
                 if not audio_path.exists():
@@ -706,19 +710,20 @@ class AudioTree:
         # Build metadata dictionary
         metadata = {}
         for key in manifest_data.keys():
-            if key.startswith('metadata_'):
+            if key.startswith("metadata_"):
                 # Extract metadata field
                 metadata_key = key[9:]  # Remove 'metadata_' prefix
                 metadata[metadata_key] = manifest_data[key][indices]
 
         # Build AudioTree kwargs
         tree_kwargs = {
-            'sample_rate': sample_rate,
-            'metadata': metadata,
+            "sample_rate": sample_rate,
+            "metadata": metadata,
         }
 
         # Add AudioTree fields from manifest
         from audiotree.writer import _AUDIOTREE_FIELDS
+
         for field_name in _AUDIOTREE_FIELDS:
             if field_name in manifest_data:
                 tree_kwargs[field_name] = manifest_data[field_name][indices]
@@ -786,13 +791,14 @@ class AudioTree:
             AudioTree: An instance of ``AudioTree``.
         """
         if "offset" in kwargs:
-            raise ValueError("``salient_excerpt`` cannot be used with kwarg ``offset``.")
+            raise ValueError(
+                "``salient_excerpt`` cannot be used with kwarg ``offset``."
+            )
         if "duration" not in kwargs:
-            raise ValueError("``salient_excerpt`` must be used with kwarg ``duration``.")
-        if (
-            not saliency_params.enabled
-            or saliency_params.loudness_cutoff is None
-        ):
+            raise ValueError(
+                "``salient_excerpt`` must be used with kwarg ``duration``."
+            )
+        if not saliency_params.enabled or saliency_params.loudness_cutoff is None:
             excerpt = cls.excerpt(audio_path, rng=rng, **kwargs)
         else:
             # Get file info once before the loop to avoid repeated soundfile.info calls
@@ -833,7 +839,9 @@ class AudioTree:
 
         return excerpt
 
-    def to_mono(self, strategy: Literal["average", "left", "right"] = "average") -> Self:
+    def to_mono(
+        self, strategy: Literal["average", "left", "right"] = "average"
+    ) -> Self:
         """Reduce the ``waveform`` to mono.
 
         Args:
@@ -852,7 +860,7 @@ class AudioTree:
             waveform = waveform.mean(axis=-2, keepdims=True)
         elif strategy in ("left", "right") and C == 2:
             idx = 0 if strategy == "left" else 1
-            waveform = waveform[..., idx:idx + 1, :]
+            waveform = waveform[..., idx : idx + 1, :]
         else:
             raise ValueError(
                 f"Unsupported to_mono strategy {strategy!r} for {C} channels."
@@ -981,9 +989,7 @@ class AudioTree:
             full=full,
         )
         waveform = waveform.reshape(*leading_shape, *waveform.shape[-2:])
-        return self.replace(
-            waveform=waveform, sample_rate=sample_rate, loudness=None
-        )
+        return self.replace(waveform=waveform, sample_rate=sample_rate, loudness=None)
 
     def split(self, n_splits: int) -> List[Self]:
         """Split batch dimension into a list of smaller AudioTree objects.
@@ -1009,13 +1015,16 @@ class AudioTree:
             (6, 1, 44100)
         """
         total_batch_size = self.waveform.shape[0]
-        assert total_batch_size % n_splits == 0, \
+        assert total_batch_size % n_splits == 0, (
             f"Total batch size {total_batch_size} must be divisible by number of splits {n_splits}"
+        )
 
         split_batch_size = total_batch_size // n_splits
 
         return [
-            tree_util.tree_map(lambda x: x[i * split_batch_size:(i + 1) * split_batch_size], self)
+            tree_util.tree_map(
+                lambda x: x[i * split_batch_size : (i + 1) * split_batch_size], self
+            )
             for i in range(n_splits)
         ]
 
@@ -1048,7 +1057,11 @@ class AudioTree:
         # From (B, C, T) to (num_mini_batches, mini_batch_size, C, T)
         # Only reshape array-like objects since metadata can contain non-arrays
         reshaped_audio_tree = tree_util.tree_map(
-            lambda x: x.reshape(num_mini_batches, mini_batch_size, *x.shape[1:]) if hasattr(x, "shape") else x,
+            lambda x: (
+                x.reshape(num_mini_batches, mini_batch_size, *x.shape[1:])
+                if hasattr(x, "shape")
+                else x
+            ),
             self,
         )
         return reshaped_audio_tree
@@ -1102,13 +1115,11 @@ class AudioTree:
 
         if len(audio_trees) == 0:
             return tree_util.tree_map(
-                lambda x: x[:0] if hasattr(x, 'shape') else x,
-                self
+                lambda x: x[:0] if hasattr(x, "shape") else x, self
             )
 
         audio_trees = tree_util.tree_map(
-            lambda *xs: numpy.concatenate(xs, axis=0),
-            *audio_trees
+            lambda *xs: numpy.concatenate(xs, axis=0), *audio_trees
         )
         return audio_trees
 
@@ -1178,7 +1189,4 @@ def _batch_audiotrees(audio_trees: Sequence[AudioTree]) -> AudioTree:
     if not audio_trees:
         raise ValueError("Cannot batch empty list of AudioTrees")
 
-    return tree_util.tree_map(
-        lambda *xs: np.concatenate(xs, axis=0),
-        *audio_trees
-    )
+    return tree_util.tree_map(lambda *xs: np.concatenate(xs, axis=0), *audio_trees)

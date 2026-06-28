@@ -278,9 +278,7 @@ class TreeWriter:
             for name in self._string_leaf_names:
                 filename = f"{name}.bagz"
                 self._string_leaf_info[name] = {"file": filename}
-                self._bagz_writers[name] = bagz.Writer(
-                    str(self.output_dir / filename)
-                )
+                self._bagz_writers[name] = bagz.Writer(str(self.output_dir / filename))
 
     def write(self, pytree) -> int:
         """Write a batch of samples to the memmap and bagz files.
@@ -358,7 +356,7 @@ class TreeWriter:
                     f"expected {expected_shape}, got {leaf.shape[1:]}"
                 )
 
-            mm[self._current_index:end_idx] = leaf
+            mm[self._current_index : end_idx] = leaf
 
         # Write string leaves to bagz files
         for name, strings in string_data.items():

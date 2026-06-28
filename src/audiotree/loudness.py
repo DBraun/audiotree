@@ -1,7 +1,6 @@
 from functools import partial
 import math
 
-from einops import rearrange
 import jax
 import jaxloudnorm as jln
 from jax import numpy as jnp

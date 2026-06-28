@@ -2,14 +2,9 @@
 
 import subprocess
 import sys
-from typing import Dict
 
 import argbind
-from audiotree import AudioTree
 from audiotree.transforms import jax as jax_transforms
-import jax
-from jax import random
-import numpy as np
 
 
 def test_main2_with_config():

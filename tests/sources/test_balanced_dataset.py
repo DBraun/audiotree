@@ -11,7 +11,9 @@ from audiotree import AudioTree
 from audiotree.sources import create_balanced_audio_dataset
 
 
-def _create_test_audio_files(tmpdir, group_name, num_files, sample_rate=44100, duration=1.0):
+def _create_test_audio_files(
+    tmpdir, group_name, num_files, sample_rate=44100, duration=1.0
+):
     """Helper to create test audio files."""
     group_dir = Path(tmpdir) / group_name
     group_dir.mkdir(parents=True, exist_ok=True)
@@ -222,11 +224,15 @@ class TestCreateBalancedAudioDataset:
                 item = ds[i]
                 source = item.source
                 assert len(source) == 1, "Each item should have exactly one source"
-                assert source[0] in ["music", "speech"], f"Source should be 'music' or 'speech', got {source[0]}"
+                assert source[0] in ["music", "speech"], (
+                    f"Source should be 'music' or 'speech', got {source[0]}"
+                )
                 sources_found.add(source[0])
 
             # Both sources should be represented
-            assert sources_found == {"music", "speech"}, "Both source groups should be present"
+            assert sources_found == {"music", "speech"}, (
+                "Both source groups should be present"
+            )
 
     def test_source_property_batched(self):
         """Test that source property works correctly after batching with Batch transform."""
@@ -252,7 +258,9 @@ class TestCreateBalancedAudioDataset:
             sources = batch.source
             assert len(sources) == 4, f"Batch should have 4 sources, got {len(sources)}"
             for src in sources:
-                assert src in ["music", "speech"], f"Source should be 'music' or 'speech', got {src}"
+                assert src in ["music", "speech"], (
+                    f"Source should be 'music' or 'speech', got {src}"
+                )
 
     def test_mix_with_preconstructed_datasets(self):
         """Test mixing file sources with pre-constructed datasets."""
@@ -297,8 +305,12 @@ class TestCreateBalancedAudioDataset:
             group1_dir = _create_test_audio_files(tmpdir, "group1", 5)
             group2_dir = _create_test_audio_files(tmpdir, "group2", 5)
 
-            ds1 = create_audio_dataset(sources=group1_dir, repeat=True, sample_rate=44100, duration=0.5)
-            ds2 = create_audio_dataset(sources=group2_dir, repeat=True, sample_rate=44100, duration=0.5)
+            ds1 = create_audio_dataset(
+                sources=group1_dir, repeat=True, sample_rate=44100, duration=0.5
+            )
+            ds2 = create_audio_dataset(
+                sources=group2_dir, repeat=True, sample_rate=44100, duration=0.5
+            )
 
             # Mix only datasets, no file sources
             mixed = create_balanced_audio_dataset(
@@ -311,7 +323,7 @@ class TestCreateBalancedAudioDataset:
     def test_no_sources_or_datasets_error(self):
         """Test that providing neither sources nor datasets raises an error."""
         try:
-            ds = create_balanced_audio_dataset()
+            create_balanced_audio_dataset()
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "At least one of 'sources' or 'datasets' must be provided" in str(e)
@@ -372,7 +384,10 @@ def _generate_sine_tone(
 
 
 def _create_hierarchical_test_data(
-    tmpdir: str, structure: Dict[str, Dict[str, int]], sample_rate: int = 44100, duration: float = 1.0
+    tmpdir: str,
+    structure: Dict[str, Dict[str, int]],
+    sample_rate: int = 44100,
+    duration: float = 1.0,
 ) -> Dict[str, str]:
     """Create hierarchical audio test data.
 
@@ -419,7 +434,12 @@ class TestBalancedDatasetHierarchical:
         """Test 1: Verify rglob correctly discovers all files in nested subdirectories."""
         with tempfile.TemporaryDirectory() as tmpdir:
             structure = {
-                "group1": {"subgroup1": 10, "subgroup2": 15, "subgroup3": 8, "subgroup4": 12},
+                "group1": {
+                    "subgroup1": 10,
+                    "subgroup2": 15,
+                    "subgroup3": 8,
+                    "subgroup4": 12,
+                },
                 "group2": {"subgroup1": 7, "subgroup2": 5, "subgroup3": 8},
                 "group3": {"subgroup1": 3, "subgroup2": 2},
             }
@@ -456,7 +476,7 @@ class TestBalancedDatasetHierarchical:
             structure = {
                 "group1": {"sub1": 20, "sub2": 25},  # 45 total files
                 "group2": {"sub1": 10, "sub2": 10},  # 20 total files
-                "group3": {"sub1": 3, "sub2": 2},    # 5 total files
+                "group3": {"sub1": 3, "sub2": 2},  # 5 total files
             }
             group_paths = _create_hierarchical_test_data(tmpdir, structure)
 
@@ -495,7 +515,7 @@ class TestBalancedDatasetHierarchical:
             structure = {
                 "group1": {"sub1": 20, "sub2": 25},  # 45 total files
                 "group2": {"sub1": 10, "sub2": 10},  # 20 total files
-                "group3": {"sub1": 3, "sub2": 2},    # 5 total files
+                "group3": {"sub1": 3, "sub2": 2},  # 5 total files
             }
             group_paths = _create_hierarchical_test_data(tmpdir, structure)
 
@@ -532,7 +552,12 @@ class TestBalancedDatasetHierarchical:
         """Test 4: Verify multiple subdirectories within a group are correctly aggregated."""
         with tempfile.TemporaryDirectory() as tmpdir:
             structure = {
-                "group1": {"subA": 5, "subB": 5, "subC": 5, "subD": 5},  # 4 subdirs, 20 total
+                "group1": {
+                    "subA": 5,
+                    "subB": 5,
+                    "subC": 5,
+                    "subD": 5,
+                },  # 4 subdirs, 20 total
                 "group2": {"subA": 20},  # 1 subdir, 20 total
             }
             group_paths = _create_hierarchical_test_data(tmpdir, structure)
@@ -585,7 +610,7 @@ class TestBalancedDatasetHierarchical:
         with tempfile.TemporaryDirectory() as tmpdir:
             structure = {
                 "large_group": {"sub1": 50, "sub2": 50},  # 100 files
-                "small_group": {"sub1": 2},               # 2 files
+                "small_group": {"sub1": 2},  # 2 files
             }
             group_paths = _create_hierarchical_test_data(tmpdir, structure)
 
@@ -658,7 +683,13 @@ class TestBalancedDatasetHierarchical:
         """Test 7: Verify balancing is based on total files per group, not subdirectory count."""
         with tempfile.TemporaryDirectory() as tmpdir:
             structure = {
-                "group1": {"sub1": 2, "sub2": 2, "sub3": 2, "sub4": 2, "sub5": 2},  # 5 subdirs × 2 = 10
+                "group1": {
+                    "sub1": 2,
+                    "sub2": 2,
+                    "sub3": 2,
+                    "sub4": 2,
+                    "sub5": 2,
+                },  # 5 subdirs × 2 = 10
                 "group2": {"sub1": 10},  # 1 subdir × 10 = 10
             }
             group_paths = _create_hierarchical_test_data(tmpdir, structure)

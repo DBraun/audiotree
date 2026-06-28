@@ -60,8 +60,8 @@ def test_multiple_writes():
 
         # Check stats
         stats = writer.get_stats()
-        assert stats['total_files'] == 5
-        assert stats['current_index'] == 5
+        assert stats["total_files"] == 5
+        assert stats["current_index"] == 5
 
 
 def test_resampling():
@@ -175,7 +175,7 @@ def test_npz_manifest():
             pitch=np.array([60.0, 62.0, 64.0]),
             velocity=np.array([64, 80, 100]),
             note_duration=np.array([1.0, 0.5, 0.75]),
-            filepaths=["source1.wav", "source2.wav", "source3.wav"]
+            filepaths=["source1.wav", "source2.wav", "source3.wav"],
         )
 
         # Write with NPZ manifest
@@ -190,24 +190,24 @@ def test_npz_manifest():
         data = np.load(manifest_path, allow_pickle=True)
 
         # Check arrays
-        assert len(data['index']) == 3
-        assert len(data['filename']) == 3
-        assert all(data['sample_rate'] == 44100)
-        assert all(data['channels'] == 1)
-        assert all(data['samples'] == 44100)
+        assert len(data["index"]) == 3
+        assert len(data["filename"]) == 3
+        assert all(data["sample_rate"] == 44100)
+        assert all(data["channels"] == 1)
+        assert all(data["samples"] == 44100)
 
         # Check AudioTree metadata
-        assert np.allclose(data['loudness'], [-20.0, -15.0, -18.0])
-        assert np.allclose(data['pitch'], [60.0, 62.0, 64.0])
-        assert np.allclose(data['velocity'], [64, 80, 100])
-        assert np.allclose(data['note_duration'], [1.0, 0.5, 0.75])
+        assert np.allclose(data["loudness"], [-20.0, -15.0, -18.0])
+        assert np.allclose(data["pitch"], [60.0, 62.0, 64.0])
+        assert np.allclose(data["velocity"], [64, 80, 100])
+        assert np.allclose(data["note_duration"], [1.0, 0.5, 0.75])
 
         # Check filepaths
-        assert list(data['filepath']) == ["source1.wav", "source2.wav", "source3.wav"]
+        assert list(data["filepath"]) == ["source1.wav", "source2.wav", "source3.wav"]
 
         # Check tags
-        assert all(data['tags_dataset'] == 'test')
-        assert all(data['tags_version'] == 1)
+        assert all(data["tags_dataset"] == "test")
+        assert all(data["tags_version"] == 1)
 
 
 def test_npz_manifest_compressed():
@@ -219,7 +219,7 @@ def test_npz_manifest_compressed():
         audio_tree = AudioTree.create(
             np.random.randn(2, 1, 22050),
             sample_rate=22050,
-            loudness=np.array([-18.0, -22.0])
+            loudness=np.array([-18.0, -22.0]),
         )
 
         # Write with compressed NPZ manifest
@@ -232,8 +232,8 @@ def test_npz_manifest_compressed():
 
         # Load and verify
         data = np.load(manifest_path, allow_pickle=True)
-        assert len(data['index']) == 2
-        assert np.allclose(data['loudness'], [-18.0, -22.0])
+        assert len(data["index"]) == 2
+        assert np.allclose(data["loudness"], [-18.0, -22.0])
 
 
 def test_npz_manifest_uncompressed():
@@ -245,7 +245,7 @@ def test_npz_manifest_uncompressed():
         audio_tree = AudioTree.create(
             np.random.randn(2, 1, 22050),
             sample_rate=22050,
-            loudness=np.array([-18.0, -22.0])
+            loudness=np.array([-18.0, -22.0]),
         )
 
         # Write with uncompressed NPZ manifest
@@ -258,8 +258,8 @@ def test_npz_manifest_uncompressed():
 
         # Load and verify
         data = np.load(manifest_path, allow_pickle=True)
-        assert len(data['index']) == 2
-        assert np.allclose(data['loudness'], [-18.0, -22.0])
+        assert len(data["index"]) == 2
+        assert np.allclose(data["loudness"], [-18.0, -22.0])
 
 
 def test_npz_manifest_no_timestamp():
@@ -267,10 +267,7 @@ def test_npz_manifest_no_timestamp():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        audio_tree = AudioTree.create(
-            np.random.randn(2, 1, 22050),
-            sample_rate=22050
-        )
+        audio_tree = AudioTree.create(np.random.randn(2, 1, 22050), sample_rate=22050)
 
         # Write without timestamps
         with AudioWriter(output_dir, include_timestamp=False) as writer:
@@ -280,7 +277,7 @@ def test_npz_manifest_no_timestamp():
         data = np.load(output_dir / "manifest.npz", allow_pickle=True)
 
         # Verify timestamp field is not present
-        assert 'timestamp' not in data
+        assert "timestamp" not in data
 
 
 def test_npz_manifest_with_timestamp():
@@ -288,10 +285,7 @@ def test_npz_manifest_with_timestamp():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        audio_tree = AudioTree.create(
-            np.random.randn(2, 1, 22050),
-            sample_rate=22050
-        )
+        audio_tree = AudioTree.create(np.random.randn(2, 1, 22050), sample_rate=22050)
 
         # Write with timestamps
         with AudioWriter(output_dir, include_timestamp=True) as writer:
@@ -301,9 +295,9 @@ def test_npz_manifest_with_timestamp():
         data = np.load(output_dir / "manifest.npz", allow_pickle=True)
 
         # Verify timestamp field is present
-        assert 'timestamp' in data
-        assert len(data['timestamp']) == 2
-        assert all(isinstance(ts, (str, np.str_)) for ts in data['timestamp'])
+        assert "timestamp" in data
+        assert len(data["timestamp"]) == 2
+        assert all(isinstance(ts, (str, np.str_)) for ts in data["timestamp"])
 
 
 def test_external_progress_bar():
@@ -402,12 +396,12 @@ def test_manifest_datasource_npz():
             loudness=np.array([-20.0, -15.0, -25.0]),
             pitch=np.array([60.0, 62.0, 58.0]),
             velocity=np.array([64, 80, 45]),
-            filepaths=["orig1.wav", "orig2.wav", "orig3.wav"]
+            filepaths=["orig1.wav", "orig2.wav", "orig3.wav"],
         )
 
         # Write with NPZ manifest
         with AudioWriter(output_dir) as writer:
-            paths = writer.write(audio_tree, tags={"experiment": "test_npz"})
+            writer.write(audio_tree, tags={"experiment": "test_npz"})
 
         # Read back with ManifestDataSource
         source = ManifestDataSource.from_writer_output(output_dir)
@@ -423,8 +417,8 @@ def test_manifest_datasource_npz():
         assert np.allclose(loaded_tree.velocity, [64])
         # Check metadata via get_entry since metadata was simplified for batching
         entry = source.get_entry(0)
-        assert entry['filepath'] == "orig1.wav"
-        assert entry['tags']['experiment'] == "test_npz"
+        assert entry["filepath"] == "orig1.wav"
+        assert entry["tags"]["experiment"] == "test_npz"
 
 
 def test_dtype_preservation():
@@ -439,7 +433,7 @@ def test_dtype_preservation():
             loudness=np.array([-20.0, -18.0, -22.0, -15.0], dtype=np.float32),
             pitch=np.array([60.0, 62.0, 64.0, 66.0], dtype=np.float32),
             velocity=np.array([64, 80, 100, 127], dtype=np.int16),
-            note_duration=np.array([1.0, 1.5, 2.0, 2.5], dtype=np.float32)
+            note_duration=np.array([1.0, 1.5, 2.0, 2.5], dtype=np.float32),
         )
 
         # Write with NPZ manifest
@@ -450,21 +444,39 @@ def test_dtype_preservation():
         manifest_data = np.load(output_dir / "manifest.npz")
 
         # Check dtypes are preserved correctly
-        assert manifest_data['index'].dtype == np.int32, f"index dtype is {manifest_data['index'].dtype}"
-        assert manifest_data['sample_rate'].dtype == np.int32, f"sample_rate dtype is {manifest_data['sample_rate'].dtype}"
-        assert manifest_data['channels'].dtype == np.int32, f"channels dtype is {manifest_data['channels'].dtype}"
-        assert manifest_data['samples'].dtype == np.int32, f"samples dtype is {manifest_data['samples'].dtype}"
+        assert manifest_data["index"].dtype == np.int32, (
+            f"index dtype is {manifest_data['index'].dtype}"
+        )
+        assert manifest_data["sample_rate"].dtype == np.int32, (
+            f"sample_rate dtype is {manifest_data['sample_rate'].dtype}"
+        )
+        assert manifest_data["channels"].dtype == np.int32, (
+            f"channels dtype is {manifest_data['channels'].dtype}"
+        )
+        assert manifest_data["samples"].dtype == np.int32, (
+            f"samples dtype is {manifest_data['samples'].dtype}"
+        )
 
-        assert manifest_data['loudness'].dtype == np.float32, f"loudness dtype is {manifest_data['loudness'].dtype}"
-        assert manifest_data['pitch'].dtype == np.float32, f"pitch dtype is {manifest_data['pitch'].dtype}"
-        assert manifest_data['note_duration'].dtype == np.float32, f"note_duration dtype is {manifest_data['note_duration'].dtype}"
+        assert manifest_data["loudness"].dtype == np.float32, (
+            f"loudness dtype is {manifest_data['loudness'].dtype}"
+        )
+        assert manifest_data["pitch"].dtype == np.float32, (
+            f"pitch dtype is {manifest_data['pitch'].dtype}"
+        )
+        assert manifest_data["note_duration"].dtype == np.float32, (
+            f"note_duration dtype is {manifest_data['note_duration'].dtype}"
+        )
 
         # Most importantly, velocity should be int16
-        assert manifest_data['velocity'].dtype == np.int16, f"velocity dtype is {manifest_data['velocity'].dtype}"
+        assert manifest_data["velocity"].dtype == np.int16, (
+            f"velocity dtype is {manifest_data['velocity'].dtype}"
+        )
 
         # Verify values are correct
-        np.testing.assert_array_equal(manifest_data['velocity'], [64, 80, 100, 127])
-        np.testing.assert_array_almost_equal(manifest_data['loudness'], [-20.0, -18.0, -22.0, -15.0])
+        np.testing.assert_array_equal(manifest_data["velocity"], [64, 80, 100, 127])
+        np.testing.assert_array_almost_equal(
+            manifest_data["loudness"], [-20.0, -18.0, -22.0, -15.0]
+        )
 
 
 def test_metadata_array_preservation():
@@ -483,11 +495,13 @@ def test_metadata_array_preservation():
         )
 
         # Add metadata with arrays
-        audio_tree = audio_tree.replace(metadata={
-            "params": np.random.randn(batch_size, param_dim).astype(np.float32),
-            "frame_indices": np.array([10, 20, 30], dtype=np.int32),
-            "confidence": np.array([0.9, 0.85, 0.95], dtype=np.float32),
-        })
+        audio_tree = audio_tree.replace(
+            metadata={
+                "params": np.random.randn(batch_size, param_dim).astype(np.float32),
+                "frame_indices": np.array([10, 20, 30], dtype=np.int32),
+                "confidence": np.array([0.9, 0.85, 0.95], dtype=np.float32),
+            }
+        )
 
         # Write with NPZ manifest
         with AudioWriter(output_dir) as writer:
@@ -497,22 +511,26 @@ def test_metadata_array_preservation():
         manifest_data = np.load(output_dir / "manifest.npz")
 
         # Check metadata fields were saved
-        assert 'metadata_params' in manifest_data
-        assert 'metadata_frame_indices' in manifest_data
-        assert 'metadata_confidence' in manifest_data
+        assert "metadata_params" in manifest_data
+        assert "metadata_frame_indices" in manifest_data
+        assert "metadata_confidence" in manifest_data
 
         # Check shapes - params should be [batch_size, param_dim]
-        assert manifest_data['metadata_params'].shape == (batch_size, param_dim)
-        assert manifest_data['metadata_params'].dtype == np.float32
+        assert manifest_data["metadata_params"].shape == (batch_size, param_dim)
+        assert manifest_data["metadata_params"].dtype == np.float32
 
         # Check other metadata arrays
-        assert manifest_data['metadata_frame_indices'].shape == (batch_size,)
-        assert manifest_data['metadata_frame_indices'].dtype == np.int32
-        np.testing.assert_array_equal(manifest_data['metadata_frame_indices'], [10, 20, 30])
+        assert manifest_data["metadata_frame_indices"].shape == (batch_size,)
+        assert manifest_data["metadata_frame_indices"].dtype == np.int32
+        np.testing.assert_array_equal(
+            manifest_data["metadata_frame_indices"], [10, 20, 30]
+        )
 
-        assert manifest_data['metadata_confidence'].shape == (batch_size,)
-        assert manifest_data['metadata_confidence'].dtype == np.float32
-        np.testing.assert_array_almost_equal(manifest_data['metadata_confidence'], [0.9, 0.85, 0.95])
+        assert manifest_data["metadata_confidence"].shape == (batch_size,)
+        assert manifest_data["metadata_confidence"].dtype == np.float32
+        np.testing.assert_array_almost_equal(
+            manifest_data["metadata_confidence"], [0.9, 0.85, 0.95]
+        )
 
 
 def test_manifest_only_generation():
@@ -528,7 +546,7 @@ def test_manifest_only_generation():
             loudness=np.array([-20.0, -18.0, -22.0]),
             pitch=np.array([60.0, 62.0, 64.0]),
             velocity=np.array([64, 80, 100]),
-            filepaths=["original1.wav", "original2.wav", "original3.wav"]
+            filepaths=["original1.wav", "original2.wav", "original3.wav"],
         )
 
         # Write manifest only (no audio files)
@@ -537,7 +555,9 @@ def test_manifest_only_generation():
 
         # Check that audio files were NOT created
         for path in paths:
-            assert not path.exists(), f"Audio file {path} should not exist when write_audio=False"
+            assert not path.exists(), (
+                f"Audio file {path} should not exist when write_audio=False"
+            )
 
         # Check that manifest was created
         manifest_path = output_dir / "manifest.npz"
@@ -547,25 +567,25 @@ def test_manifest_only_generation():
         data = np.load(manifest_path, allow_pickle=True)
 
         # Check basic metadata
-        assert len(data['index']) == 3
-        assert len(data['filename']) == 3
-        assert all(data['sample_rate'] == 22050)
-        assert all(data['channels'] == 2)
-        assert all(data['samples'] == 22050)
+        assert len(data["index"]) == 3
+        assert len(data["filename"]) == 3
+        assert all(data["sample_rate"] == 22050)
+        assert all(data["channels"] == 2)
+        assert all(data["samples"] == 22050)
 
         # Check AudioTree metadata
-        assert np.allclose(data['loudness'], [-20.0, -18.0, -22.0])
-        assert np.allclose(data['pitch'], [60.0, 62.0, 64.0])
-        assert np.allclose(data['velocity'], [64, 80, 100])
+        assert np.allclose(data["loudness"], [-20.0, -18.0, -22.0])
+        assert np.allclose(data["pitch"], [60.0, 62.0, 64.0])
+        assert np.allclose(data["velocity"], [64, 80, 100])
 
         # Check files_written flag
-        assert 'files_written' in data
-        assert all(data['files_written'] == False)
+        assert "files_written" in data
+        assert not data["files_written"].any()
 
         # Check stats
         stats = writer.get_stats()
-        assert stats['write_audio'] == False
-        assert stats['total_files'] == 0  # No files written to disk
+        assert not stats["write_audio"]
+        assert stats["total_files"] == 0  # No files written to disk
 
 
 def test_manifest_only_with_write_audio_true():
@@ -581,17 +601,19 @@ def test_manifest_only_with_write_audio_true():
 
         # Check that audio files WERE created
         for path in paths:
-            assert path.exists(), f"Audio file {path} should exist when write_audio=True"
+            assert path.exists(), (
+                f"Audio file {path} should exist when write_audio=True"
+            )
 
         # Check files_written flag in manifest
         data = np.load(output_dir / "manifest.npz", allow_pickle=True)
-        assert 'files_written' in data
-        assert all(data['files_written'] == True)
+        assert "files_written" in data
+        assert data["files_written"].all()
 
         # Check stats
         stats = writer.get_stats()
-        assert stats['write_audio'] == True
-        assert stats['total_files'] == 2  # Files written to disk
+        assert stats["write_audio"]
+        assert stats["total_files"] == 2  # Files written to disk
 
 
 def test_manifest_only_multiple_writes():
@@ -605,7 +627,7 @@ def test_manifest_only_multiple_writes():
         tree1 = AudioTree.create(
             np.random.randn(2, 1, 22050),
             sample_rate=22050,
-            loudness=np.array([-18.0, -20.0])
+            loudness=np.array([-18.0, -20.0]),
         )
         paths1 = writer.write(tree1)
 
@@ -613,7 +635,7 @@ def test_manifest_only_multiple_writes():
         tree2 = AudioTree.create(
             np.random.randn(3, 1, 22050),
             sample_rate=22050,
-            loudness=np.array([-15.0, -25.0, -19.0])
+            loudness=np.array([-15.0, -25.0, -19.0]),
         )
         paths2 = writer.write(tree2)
 
@@ -626,14 +648,14 @@ def test_manifest_only_multiple_writes():
         assert manifest_path.exists()
 
         data = np.load(manifest_path, allow_pickle=True)
-        assert len(data['index']) == 5
-        assert all(data['files_written'] == False)
-        assert np.allclose(data['loudness'], [-18.0, -20.0, -15.0, -25.0, -19.0])
+        assert len(data["index"]) == 5
+        assert not data["files_written"].any()
+        assert np.allclose(data["loudness"], [-18.0, -20.0, -15.0, -25.0, -19.0])
 
         # Check stats
         stats = writer.get_stats()
-        assert stats['total_files'] == 0
-        assert stats['current_index'] == 5
+        assert stats["total_files"] == 0
+        assert stats["current_index"] == 5
 
 
 def test_field_validation():
@@ -648,14 +670,14 @@ def test_field_validation():
             np.random.randn(2, 1, 8000),
             sample_rate=8000,
             loudness=np.array([-20.0, -18.0]),
-            pitch=np.array([60.0, 62.0])
+            pitch=np.array([60.0, 62.0]),
         )
 
         # Second audio_tree only has loudness (missing pitch)
         tree2 = AudioTree.create(
             np.random.randn(2, 1, 8000),
             sample_rate=8000,
-            loudness=np.array([-15.0, -22.0])
+            loudness=np.array([-15.0, -22.0]),
         )
 
         # Third audio_tree has loudness, pitch, and velocity (extra field)
@@ -664,7 +686,7 @@ def test_field_validation():
             sample_rate=8000,
             loudness=np.array([-19.0, -21.0]),
             pitch=np.array([64.0, 66.0]),
-            velocity=np.array([80, 90])
+            velocity=np.array([80, 90]),
         )
 
         writer = AudioWriter(output_dir)
@@ -690,34 +712,38 @@ def test_metadata_different_batch_sizes():
         tree1 = AudioTree.create(
             np.random.randn(2, 1, 8000),
             sample_rate=8000,
-            loudness=np.array([-20.0, -18.0])
+            loudness=np.array([-20.0, -18.0]),
         )
-        tree1 = tree1.replace(metadata={
-            "params": np.random.randn(2, 10).astype(np.float32),
-            "frame_id": np.array([100, 200], dtype=np.int32)
-        })
+        tree1 = tree1.replace(
+            metadata={
+                "params": np.random.randn(2, 10).astype(np.float32),
+                "frame_id": np.array([100, 200], dtype=np.int32),
+            }
+        )
 
         # Second write: batch size 3 with metadata params [3, 10]
         tree2 = AudioTree.create(
             np.random.randn(3, 1, 8000),
             sample_rate=8000,
-            loudness=np.array([-15.0, -22.0, -19.0])
+            loudness=np.array([-15.0, -22.0, -19.0]),
         )
-        tree2 = tree2.replace(metadata={
-            "params": np.random.randn(3, 10).astype(np.float32),
-            "frame_id": np.array([300, 400, 500], dtype=np.int32)
-        })
+        tree2 = tree2.replace(
+            metadata={
+                "params": np.random.randn(3, 10).astype(np.float32),
+                "frame_id": np.array([300, 400, 500], dtype=np.int32),
+            }
+        )
 
         # Third write: batch size 1 with metadata params [1, 10]
         tree3 = AudioTree.create(
-            np.random.randn(1, 1, 8000),
-            sample_rate=8000,
-            loudness=np.array([-17.0])
+            np.random.randn(1, 1, 8000), sample_rate=8000, loudness=np.array([-17.0])
         )
-        tree3 = tree3.replace(metadata={
-            "params": np.random.randn(1, 10).astype(np.float32),
-            "frame_id": np.array([600], dtype=np.int32)
-        })
+        tree3 = tree3.replace(
+            metadata={
+                "params": np.random.randn(1, 10).astype(np.float32),
+                "frame_id": np.array([600], dtype=np.int32),
+            }
+        )
 
         # Write all trees
         with AudioWriter(output_dir) as writer:
@@ -729,21 +755,20 @@ def test_metadata_different_batch_sizes():
         manifest_data = np.load(output_dir / "manifest.npz", allow_pickle=True)
 
         # Check that metadata was stacked correctly
-        assert 'metadata_params' in manifest_data
-        assert 'metadata_frame_id' in manifest_data
+        assert "metadata_params" in manifest_data
+        assert "metadata_frame_id" in manifest_data
 
         # Should have 2 + 3 + 1 = 6 entries total
-        assert manifest_data['metadata_params'].shape == (6, 10)
-        assert manifest_data['metadata_frame_id'].shape == (6,)
+        assert manifest_data["metadata_params"].shape == (6, 10)
+        assert manifest_data["metadata_frame_id"].shape == (6,)
 
         # Verify dtypes preserved
-        assert manifest_data['metadata_params'].dtype == np.float32
-        assert manifest_data['metadata_frame_id'].dtype == np.int32
+        assert manifest_data["metadata_params"].dtype == np.float32
+        assert manifest_data["metadata_frame_id"].dtype == np.int32
 
         # Verify frame_ids are correct
         np.testing.assert_array_equal(
-            manifest_data['metadata_frame_id'],
-            [100, 200, 300, 400, 500, 600]
+            manifest_data["metadata_frame_id"], [100, 200, 300, 400, 500, 600]
         )
 
         # Test reading back with ManifestDataSource
@@ -757,21 +782,37 @@ def test_metadata_different_batch_sizes():
             loaded_tree = source[idx]
 
             # Verify metadata exists and has correct shape
-            assert 'params' in loaded_tree.metadata
-            assert loaded_tree.metadata['params'].shape == (1, 10), f"Item {idx}: params shape mismatch"
-            assert loaded_tree.metadata['params'].dtype == np.float32, f"Item {idx}: params dtype mismatch"
+            assert "params" in loaded_tree.metadata
+            assert loaded_tree.metadata["params"].shape == (1, 10), (
+                f"Item {idx}: params shape mismatch"
+            )
+            assert loaded_tree.metadata["params"].dtype == np.float32, (
+                f"Item {idx}: params dtype mismatch"
+            )
 
-            assert 'frame_id' in loaded_tree.metadata
-            assert loaded_tree.metadata['frame_id'].shape == (1,), f"Item {idx}: frame_id shape mismatch"
-            assert loaded_tree.metadata['frame_id'].dtype == np.int32, f"Item {idx}: frame_id dtype mismatch"
+            assert "frame_id" in loaded_tree.metadata
+            assert loaded_tree.metadata["frame_id"].shape == (1,), (
+                f"Item {idx}: frame_id shape mismatch"
+            )
+            assert loaded_tree.metadata["frame_id"].dtype == np.int32, (
+                f"Item {idx}: frame_id dtype mismatch"
+            )
 
             # Verify frame_id value matches
-            assert loaded_tree.metadata['frame_id'][0] == expected_frame_id, f"Item {idx}: frame_id value mismatch"
+            assert loaded_tree.metadata["frame_id"][0] == expected_frame_id, (
+                f"Item {idx}: frame_id value mismatch"
+            )
 
             # Verify AudioTree field shapes
-            assert loaded_tree.waveform.shape == (1, 1, 8000), f"Item {idx}: waveform shape mismatch"
-            assert loaded_tree.loudness is not None, f"Item {idx}: loudness should not be None"
-            assert loaded_tree.loudness.shape == (1,), f"Item {idx}: loudness shape mismatch"
+            assert loaded_tree.waveform.shape == (1, 1, 8000), (
+                f"Item {idx}: waveform shape mismatch"
+            )
+            assert loaded_tree.loudness is not None, (
+                f"Item {idx}: loudness should not be None"
+            )
+            assert loaded_tree.loudness.shape == (1,), (
+                f"Item {idx}: loudness shape mismatch"
+            )
 
 
 def test_audiotree_from_manifest():
@@ -786,10 +827,12 @@ def test_audiotree_from_manifest():
             loudness=np.array([-20.0, -18.0]),
             pitch=np.array([60.0, 62.0]),
         )
-        tree1 = tree1.replace(metadata={
-            "params": np.random.randn(2, 10).astype(np.float32),
-            "frame_id": np.array([100, 200], dtype=np.int32)
-        })
+        tree1 = tree1.replace(
+            metadata={
+                "params": np.random.randn(2, 10).astype(np.float32),
+                "frame_id": np.array([100, 200], dtype=np.int32),
+            }
+        )
 
         tree2 = AudioTree.create(
             np.random.randn(3, 2, 8000),
@@ -797,10 +840,12 @@ def test_audiotree_from_manifest():
             loudness=np.array([-15.0, -22.0, -19.0]),
             pitch=np.array([64.0, 66.0, 68.0]),
         )
-        tree2 = tree2.replace(metadata={
-            "params": np.random.randn(3, 10).astype(np.float32),
-            "frame_id": np.array([300, 400, 500], dtype=np.int32)
-        })
+        tree2 = tree2.replace(
+            metadata={
+                "params": np.random.randn(3, 10).astype(np.float32),
+                "frame_id": np.array([300, 400, 500], dtype=np.int32),
+            }
+        )
 
         # Write to manifest
         with AudioWriter(output_dir) as writer:
@@ -821,11 +866,10 @@ def test_audiotree_from_manifest():
         assert np.allclose(combined.pitch, [60.0, 62.0, 64.0, 66.0, 68.0])
 
         # Metadata arrays should be concatenated
-        assert combined.metadata['params'].shape == (5, 10)
-        assert combined.metadata['frame_id'].shape == (5,)
+        assert combined.metadata["params"].shape == (5, 10)
+        assert combined.metadata["frame_id"].shape == (5,)
         np.testing.assert_array_equal(
-            combined.metadata['frame_id'],
-            [100, 200, 300, 400, 500]
+            combined.metadata["frame_id"], [100, 200, 300, 400, 500]
         )
 
 
@@ -879,7 +923,7 @@ def test_audiotree_from_manifest_with_filter():
         # Load only items louder than -20 LUFS
         filtered = AudioTree.from_manifest(
             output_dir / "manifest.npz",
-            filter_fn=lambda entry: entry.get('loudness', -float('inf')) > -20.0
+            filter_fn=lambda entry: entry.get("loudness", -float("inf")) > -20.0,
         )
 
         # Should only have 2 items: -18.0 and -15.0
@@ -902,10 +946,12 @@ def test_manifest_datasource_without_audio_files():
             pitch=np.array([60.0, 62.0, 58.0]),
             velocity=np.array([64, 80, 45], dtype=np.int16),
         )
-        audio_tree = audio_tree.replace(metadata={
-            "params": np.random.randn(3, 10).astype(np.float32),
-            "frame_id": np.array([100, 200, 300], dtype=np.int32)
-        })
+        audio_tree = audio_tree.replace(
+            metadata={
+                "params": np.random.randn(3, 10).astype(np.float32),
+                "frame_id": np.array([100, 200, 300], dtype=np.int32),
+            }
+        )
 
         # Write manifest only (no audio files)
         with AudioWriter(output_dir, write_audio=False) as writer:
@@ -936,17 +982,17 @@ def test_manifest_datasource_without_audio_files():
             assert loaded_tree.velocity is not None
 
             # Check metadata arrays
-            assert 'params' in loaded_tree.metadata
-            assert loaded_tree.metadata['params'].shape == (1, 10)
-            assert 'frame_id' in loaded_tree.metadata
-            assert loaded_tree.metadata['frame_id'].shape == (1,)
+            assert "params" in loaded_tree.metadata
+            assert loaded_tree.metadata["params"].shape == (1, 10)
+            assert "frame_id" in loaded_tree.metadata
+            assert loaded_tree.metadata["frame_id"].shape == (1,)
 
         # Verify specific values for first item
         first_tree = source[0]
         assert np.allclose(first_tree.loudness, [-20.0])
         assert np.allclose(first_tree.pitch, [60.0])
         assert np.allclose(first_tree.velocity, [64])
-        assert first_tree.metadata['frame_id'][0] == 100
+        assert first_tree.metadata["frame_id"][0] == 100
 
 
 def test_write_empty_audiotree():
@@ -955,9 +1001,7 @@ def test_write_empty_audiotree():
         output_dir = Path(tmpdir)
 
         empty_tree = AudioTree.create(
-            np.zeros((0, 2, 44100)),
-            sample_rate=44100,
-            loudness=np.array([])
+            np.zeros((0, 2, 44100)), sample_rate=44100, loudness=np.array([])
         )
 
         with AudioWriter(output_dir) as writer:
@@ -975,9 +1019,7 @@ def test_write_empty_audiotree_first():
 
         with AudioWriter(output_dir) as writer:
             empty_tree = AudioTree.create(
-                np.zeros((0, 1, 8000)),
-                sample_rate=8000,
-                loudness=np.array([])
+                np.zeros((0, 1, 8000)), sample_rate=8000, loudness=np.array([])
             )
             paths1 = writer.write(empty_tree)
             assert len(paths1) == 0
@@ -985,7 +1027,7 @@ def test_write_empty_audiotree_first():
             nonempty_tree = AudioTree.create(
                 np.random.randn(2, 1, 8000),
                 sample_rate=8000,
-                loudness=np.array([-20.0, -18.0])
+                loudness=np.array([-20.0, -18.0]),
             )
             paths2 = writer.write(nonempty_tree)
             assert len(paths2) == 2
@@ -994,8 +1036,8 @@ def test_write_empty_audiotree_first():
         assert manifest_path.exists()
 
         data = np.load(manifest_path, allow_pickle=True)
-        assert len(data['index']) == 2
-        assert np.allclose(data['loudness'], [-20.0, -18.0])
+        assert len(data["index"]) == 2
+        assert np.allclose(data["loudness"], [-20.0, -18.0])
 
 
 def test_write_empty_audiotree_after_nonempty():
@@ -1007,15 +1049,13 @@ def test_write_empty_audiotree_after_nonempty():
             nonempty_tree = AudioTree.create(
                 np.random.randn(2, 1, 8000),
                 sample_rate=8000,
-                loudness=np.array([-20.0, -18.0])
+                loudness=np.array([-20.0, -18.0]),
             )
             paths1 = writer.write(nonempty_tree)
             assert len(paths1) == 2
 
             empty_tree = AudioTree.create(
-                np.zeros((0, 1, 8000)),
-                sample_rate=8000,
-                loudness=np.array([])
+                np.zeros((0, 1, 8000)), sample_rate=8000, loudness=np.array([])
             )
             paths2 = writer.write(empty_tree)
             assert len(paths2) == 0
@@ -1024,8 +1064,8 @@ def test_write_empty_audiotree_after_nonempty():
         assert manifest_path.exists()
 
         data = np.load(manifest_path, allow_pickle=True)
-        assert len(data['index']) == 2
-        assert np.allclose(data['loudness'], [-20.0, -18.0])
+        assert len(data["index"]) == 2
+        assert np.allclose(data["loudness"], [-20.0, -18.0])
 
 
 def test_write_filtered_empty_audiotree():
@@ -1035,9 +1075,7 @@ def test_write_filtered_empty_audiotree():
 
         waveform = np.random.randn(3, 2, 44100)
         audio_tree = AudioTree.create(
-            waveform,
-            sample_rate=44100,
-            loudness=np.array([-20.0, -15.0, -18.0])
+            waveform, sample_rate=44100, loudness=np.array([-20.0, -15.0, -18.0])
         )
 
         filtered_tree = audio_tree.filter(lambda x: False)
@@ -1059,18 +1097,18 @@ def test_write_empty_with_metadata_arrays():
         output_dir = Path(tmpdir)
 
         empty_tree = AudioTree.create(
-            np.zeros((0, 2, 44100)),
-            sample_rate=44100,
-            loudness=np.array([])
+            np.zeros((0, 2, 44100)), sample_rate=44100, loudness=np.array([])
         )
-        empty_tree = empty_tree.replace(metadata={
-            "params": np.zeros((0, 10), dtype=np.float32),
-            "frame_id": np.array([], dtype=np.int32)
-        })
+        empty_tree = empty_tree.replace(
+            metadata={
+                "params": np.zeros((0, 10), dtype=np.float32),
+                "frame_id": np.array([], dtype=np.int32),
+            }
+        )
 
         assert empty_tree.waveform.shape == (0, 2, 44100)
-        assert empty_tree.metadata['params'].shape == (0, 10)
-        assert empty_tree.metadata['frame_id'].shape == (0,)
+        assert empty_tree.metadata["params"].shape == (0, 10)
+        assert empty_tree.metadata["frame_id"].shape == (0,)
 
         with AudioWriter(output_dir) as writer:
             paths = writer.write(empty_tree)
@@ -1086,46 +1124,42 @@ def test_filter_with_partial_match():
     audio_tree = AudioTree.create(
         waveform,
         sample_rate=8000,
-        loudness=np.array([-30.0, -18.0, -25.0, -15.0, -22.0])
+        loudness=np.array([-30.0, -18.0, -25.0, -15.0, -22.0]),
     )
-    audio_tree = audio_tree.replace(metadata={
-        "params": np.random.randn(5, 10).astype(np.float32)
-    })
+    audio_tree = audio_tree.replace(
+        metadata={"params": np.random.randn(5, 10).astype(np.float32)}
+    )
 
     filtered = audio_tree.filter(lambda x: x.loudness[0] > -20.0)
 
     assert filtered.waveform.shape[0] == 2
     assert filtered.loudness.shape[0] == 2
     assert np.allclose(filtered.loudness, [-18.0, -15.0])
-    assert filtered.metadata['params'].shape == (2, 10)
+    assert filtered.metadata["params"].shape == (2, 10)
 
 
 def test_filter_with_no_match():
     """Test filtering AudioTree where no items match."""
     waveform = np.random.randn(3, 1, 8000)
     audio_tree = AudioTree.create(
-        waveform,
-        sample_rate=8000,
-        loudness=np.array([-20.0, -18.0, -22.0])
+        waveform, sample_rate=8000, loudness=np.array([-20.0, -18.0, -22.0])
     )
-    audio_tree = audio_tree.replace(metadata={
-        "params": np.random.randn(3, 10).astype(np.float32)
-    })
+    audio_tree = audio_tree.replace(
+        metadata={"params": np.random.randn(3, 10).astype(np.float32)}
+    )
 
     filtered = audio_tree.filter(lambda x: x.loudness[0] > 0.0)
 
     assert filtered.waveform.shape[0] == 0
     assert filtered.loudness.shape[0] == 0
-    assert filtered.metadata['params'].shape == (0, 10)
+    assert filtered.metadata["params"].shape == (0, 10)
 
 
 def test_filter_with_all_match():
     """Test filtering AudioTree where all items match."""
     waveform = np.random.randn(3, 1, 8000)
     audio_tree = AudioTree.create(
-        waveform,
-        sample_rate=8000,
-        loudness=np.array([-20.0, -18.0, -22.0])
+        waveform, sample_rate=8000, loudness=np.array([-20.0, -18.0, -22.0])
     )
 
     filtered = audio_tree.filter(lambda x: x.loudness[0] < 0.0)

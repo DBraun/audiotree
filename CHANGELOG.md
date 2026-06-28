@@ -75,7 +75,7 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 ## audiotree 0.2.0 (Feb 17, 2025)
 
 * `jit` has been removed in most places. We encourage users to jit as late as possible.
-* New class: `AudioDataBalancedDataset`, which is a grain Dataset, **not a Data Source**. 
+* New class: `AudioDataBalancedDataset`, which is a grain Dataset, **not a Data Source**.
 * `AudioTree` has a `.latents` property.
 * New transform: `NeuralLatentEncodeTransform`.
 * Class `NeuralAudioCodecEncodeTransform` has been adjusted. The arg is now `encoder_fn` and it takes an `AudioTree` instead of an audio data array.

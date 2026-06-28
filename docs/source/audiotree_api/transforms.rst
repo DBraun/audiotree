@@ -5,7 +5,7 @@
 audiotree.transforms
 ===========================
 
-..  
+..
 
 .. ---------------------------
 
@@ -19,4 +19,3 @@ audiotree.transforms.jax
 .. automodule:: audiotree.transforms.jax
    :members:
    :imported-members:
-

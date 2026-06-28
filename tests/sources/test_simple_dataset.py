@@ -203,7 +203,7 @@ def test_empty_directory():
     """Test that empty directory raises error."""
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
-            ds = create_audio_dataset(
+            create_audio_dataset(
                 sources=tmpdir,
                 sample_rate=44100,
                 duration=0.5,
@@ -215,4 +215,5 @@ def test_empty_directory():
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

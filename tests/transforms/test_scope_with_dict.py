@@ -1,10 +1,14 @@
 """Test scope functionality with Dict[str, AudioTree] inputs."""
 
-import jax
 import numpy as np
 
 from audiotree import AudioTree
-from audiotree.transforms.functional import volume_norm, volume_change, trim, invert_phase
+from audiotree.transforms.functional import (
+    volume_norm,
+    volume_change,
+    trim,
+    invert_phase,
+)
 
 
 class TestScopeWithDict:
@@ -25,13 +29,13 @@ class TestScopeWithDict:
         audio1 = audio1.replace_loudness()
         audio2 = audio2.replace_loudness()
 
-        batch = {'src': audio1, 'target': audio2}
+        batch = {"src": audio1, "target": audio2}
 
         # Create transform with scope - only transform 'src'
         transform = volume_norm(
             min_db=-20,
             max_db=-15,
-            scope={'src': {'scope': True}},
+            scope={"src": {"scope": True}},
         )
 
         # Apply to batch
@@ -39,8 +43,8 @@ class TestScopeWithDict:
         result_batch = transform.random_map(batch, rng)
 
         # Verify only src was transformed
-        assert not np.array_equal(result_batch['src'].loudness, audio1.loudness)
-        assert np.array_equal(result_batch['target'].loudness, audio2.loudness)
+        assert not np.array_equal(result_batch["src"].loudness, audio1.loudness)
+        assert np.array_equal(result_batch["target"].loudness, audio2.loudness)
 
     def test_scope_all_keys(self):
         """Test applying transform to all keys (no scope = transform everything)."""
@@ -57,7 +61,7 @@ class TestScopeWithDict:
         audio1 = audio1.replace_loudness()
         audio2 = audio2.replace_loudness()
 
-        batch = {'src': audio1, 'target': audio2}
+        batch = {"src": audio1, "target": audio2}
 
         # Create transform with no scope - should transform both
         transform = volume_norm(
@@ -70,8 +74,8 @@ class TestScopeWithDict:
         result_batch = transform.random_map(batch, rng)
 
         # Verify both were transformed
-        assert not np.array_equal(result_batch['src'].loudness, audio1.loudness)
-        assert not np.array_equal(result_batch['target'].loudness, audio2.loudness)
+        assert not np.array_equal(result_batch["src"].loudness, audio1.loudness)
+        assert not np.array_equal(result_batch["target"].loudness, audio2.loudness)
 
     def test_scope_multiple_keys(self):
         """Test applying transform to multiple specific keys."""
@@ -93,15 +97,15 @@ class TestScopeWithDict:
         audio2 = audio2.replace_loudness()
         audio3 = audio3.replace_loudness()
 
-        batch = {'dry': audio1, 'wet': audio2, 'reference': audio3}
+        batch = {"dry": audio1, "wet": audio2, "reference": audio3}
 
         # Create transform - only transform 'dry' and 'wet'
         transform = volume_norm(
             min_db=-20,
             max_db=-15,
             scope={
-                'dry': {'scope': True},
-                'wet': {'scope': True},
+                "dry": {"scope": True},
+                "wet": {"scope": True},
             },
         )
 
@@ -110,9 +114,9 @@ class TestScopeWithDict:
         result_batch = transform.random_map(batch, rng)
 
         # Verify dry and wet transformed, reference not
-        assert not np.array_equal(result_batch['dry'].loudness, audio1.loudness)
-        assert not np.array_equal(result_batch['wet'].loudness, audio2.loudness)
-        assert np.array_equal(result_batch['reference'].loudness, audio3.loudness)
+        assert not np.array_equal(result_batch["dry"].loudness, audio1.loudness)
+        assert not np.array_equal(result_batch["wet"].loudness, audio2.loudness)
+        assert np.array_equal(result_batch["reference"].loudness, audio3.loudness)
 
     def test_scope_with_nested_dict(self):
         """Test scope with nested dictionary structure."""
@@ -135,15 +139,15 @@ class TestScopeWithDict:
         audio3 = audio3.replace_loudness()
 
         batch = {
-            'input': {'dry': audio1, 'wet': audio2},
-            'target': audio3,
+            "input": {"dry": audio1, "wet": audio2},
+            "target": audio3,
         }
 
         # Create transform - only transform input.dry
         transform = volume_norm(
             min_db=-20,
             max_db=-15,
-            scope={'input': {'dry': {'scope': True}}},
+            scope={"input": {"dry": {"scope": True}}},
         )
 
         # Apply to batch
@@ -151,9 +155,11 @@ class TestScopeWithDict:
         result_batch = transform.random_map(batch, rng)
 
         # Verify only input.dry transformed
-        assert not np.array_equal(result_batch['input']['dry'].loudness, audio1.loudness)
-        assert np.array_equal(result_batch['input']['wet'].loudness, audio2.loudness)
-        assert np.array_equal(result_batch['target'].loudness, audio3.loudness)
+        assert not np.array_equal(
+            result_batch["input"]["dry"].loudness, audio1.loudness
+        )
+        assert np.array_equal(result_batch["input"]["wet"].loudness, audio2.loudness)
+        assert np.array_equal(result_batch["target"].loudness, audio3.loudness)
 
 
 class TestScopeWithOutputKey:
@@ -174,14 +180,14 @@ class TestScopeWithOutputKey:
         audio1 = audio1.replace_loudness()
         audio2 = audio2.replace_loudness()
 
-        batch = {'src': audio1, 'target': audio2}
+        batch = {"src": audio1, "target": audio2}
 
         # Transform only 'src' and output to 'src_modified'
         transform = volume_norm(
             min_db=-20,
             max_db=-15,
-            scope={'src': {'scope': True}},
-            output_key='modified',
+            scope={"src": {"scope": True}},
+            output_key="modified",
         )
 
         # Apply to batch
@@ -189,16 +195,16 @@ class TestScopeWithOutputKey:
         result_batch = transform.random_map(batch, rng)
 
         # Should have: src (original), target (original), modified (new)
-        assert 'src' in result_batch
-        assert 'target' in result_batch
-        assert 'modified' in result_batch
+        assert "src" in result_batch
+        assert "target" in result_batch
+        assert "modified" in result_batch
 
         # Original should be unchanged
-        assert np.array_equal(result_batch['src'].loudness, audio1.loudness)
-        assert np.array_equal(result_batch['target'].loudness, audio2.loudness)
+        assert np.array_equal(result_batch["src"].loudness, audio1.loudness)
+        assert np.array_equal(result_batch["target"].loudness, audio2.loudness)
 
         # Modified should be transformed
-        assert not np.array_equal(result_batch['modified'].loudness, audio1.loudness)
+        assert not np.array_equal(result_batch["modified"].loudness, audio1.loudness)
 
 
 class TestScopeWithMapTransforms:
@@ -216,20 +222,20 @@ class TestScopeWithMapTransforms:
             sample_rate=44100,
         )
 
-        batch = {'dry': audio1, 'wet': audio2}
+        batch = {"dry": audio1, "wet": audio2}
 
         # Trim only 'dry'
         transform = trim(
             length=3.0,
-            scope={'dry': {'scope': True}},
+            scope={"dry": {"scope": True}},
         )
 
         # Apply to batch
         result_batch = transform.map(batch)
 
         # Verify only dry was trimmed
-        assert result_batch['dry'].waveform.shape[-1] == int(3.0 * 44100)
-        assert result_batch['wet'].waveform.shape[-1] == int(5.0 * 44100)
+        assert result_batch["dry"].waveform.shape[-1] == int(3.0 * 44100)
+        assert result_batch["wet"].waveform.shape[-1] == int(5.0 * 44100)
 
 
 class TestCommonTrainingPipelinePattern:
@@ -250,7 +256,7 @@ class TestCommonTrainingPipelinePattern:
         dry_audio = dry_audio.replace_loudness()
         wet_audio = wet_audio.replace_loudness()
 
-        batch = {'dry': dry_audio, 'wet': wet_audio}
+        batch = {"dry": dry_audio, "wet": wet_audio}
 
         # Process dry and wet differently
         # 1. Normalize both
@@ -261,22 +267,22 @@ class TestCommonTrainingPipelinePattern:
         transform2 = volume_change(
             min_db=-6,
             max_db=6,
-            scope={'wet': {'scope': True}},
+            scope={"wet": {"scope": True}},
         )
         batch = transform2.random_map(batch, np.random.default_rng(43))
 
         # 3. Invert phase on dry only (50% prob)
         transform3 = invert_phase(
             prob=0.5,
-            scope={'dry': {'scope': True}},
+            scope={"dry": {"scope": True}},
         )
         batch = transform3.random_map(batch, np.random.default_rng(44))
 
         # Verify structure preserved
-        assert 'dry' in batch
-        assert 'wet' in batch
-        assert isinstance(batch['dry'], AudioTree)
-        assert isinstance(batch['wet'], AudioTree)
+        assert "dry" in batch
+        assert "wet" in batch
+        assert isinstance(batch["dry"], AudioTree)
+        assert isinstance(batch["wet"], AudioTree)
 
     def test_input_target_pattern(self):
         """Test common input/target pattern."""
@@ -293,7 +299,7 @@ class TestCommonTrainingPipelinePattern:
         input_audio = input_audio.replace_loudness()
         target_audio = target_audio.replace_loudness()
 
-        batch = {'input': input_audio, 'target': target_audio}
+        batch = {"input": input_audio, "target": target_audio}
 
         # Apply shared transforms to both
         transform1 = volume_norm(min_db=-20, max_db=-15)
@@ -304,13 +310,13 @@ class TestCommonTrainingPipelinePattern:
             min_db=-12,
             max_db=12,
             prob=0.9,
-            scope={'input': {'scope': True}},
+            scope={"input": {"scope": True}},
         )
         batch = transform2.random_map(batch, np.random.default_rng(43))
 
         # Both should be normalized
-        assert batch['input'].loudness is not None
-        assert batch['target'].loudness is not None
+        assert batch["input"].loudness is not None
+        assert batch["target"].loudness is not None
 
     def test_multi_key_batch(self):
         """Test batch with multiple audio keys (dry, wet, reference)."""
@@ -332,7 +338,7 @@ class TestCommonTrainingPipelinePattern:
         wet = wet.replace_loudness()
         reference = reference.replace_loudness()
 
-        batch = {'dry': dry, 'wet': wet, 'reference': reference}
+        batch = {"dry": dry, "wet": wet, "reference": reference}
 
         original_ref_loudness = reference.loudness.copy()
 
@@ -341,8 +347,8 @@ class TestCommonTrainingPipelinePattern:
             min_db=-20,
             max_db=-15,
             scope={
-                'dry': {'scope': True},
-                'wet': {'scope': True},
+                "dry": {"scope": True},
+                "wet": {"scope": True},
             },
         )
 
@@ -350,8 +356,8 @@ class TestCommonTrainingPipelinePattern:
         result = transform.random_map(batch, rng)
 
         # Verify dry and wet were transformed
-        assert not np.array_equal(result['dry'].loudness, dry.loudness)
-        assert not np.array_equal(result['wet'].loudness, wet.loudness)
+        assert not np.array_equal(result["dry"].loudness, dry.loudness)
+        assert not np.array_equal(result["wet"].loudness, wet.loudness)
 
         # Verify reference was not transformed
-        assert np.array_equal(result['reference'].loudness, original_ref_loudness)
+        assert np.array_equal(result["reference"].loudness, original_ref_loudness)

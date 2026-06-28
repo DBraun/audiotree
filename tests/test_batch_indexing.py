@@ -86,7 +86,8 @@ def test_batch_token_only_items():
     """Items without a waveform (codes-only training examples) batch fine."""
     items = [
         AudioTree(
-            waveform=None, sample_rate=48_000,
+            waveform=None,
+            sample_rate=48_000,
             codes=np.full((1, 4, 3), i, dtype=np.int32),
         )
         for i in range(3)

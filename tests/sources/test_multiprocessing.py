@@ -11,7 +11,9 @@ from audiotree import AudioTree
 from audiotree.sources import create_audio_dataset, create_balanced_audio_dataset
 
 
-def _create_test_audio_files(tmpdir, group_name, num_files, sample_rate=44100, duration=0.5):
+def _create_test_audio_files(
+    tmpdir, group_name, num_files, sample_rate=44100, duration=0.5
+):
     """Helper to create test audio files."""
     group_dir = Path(tmpdir) / group_name
     group_dir.mkdir(parents=True, exist_ok=True)
