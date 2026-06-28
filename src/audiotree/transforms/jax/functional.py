@@ -132,6 +132,16 @@ def stereo(audio_tree: AudioTree) -> AudioTree:
 
 
 @map_transform
+def resample(audio_tree: AudioTree, sample_rate: int | None = None) -> AudioTree:
+    """Resample audio to a new sample rate (JAX/Julius port for JAX waveforms)."""
+    if sample_rate is None:
+        raise ValueError(
+            "resample requires a target sample_rate, e.g. resample(sample_rate=16000)."
+        )
+    return audio_tree.resample(sample_rate)
+
+
+@map_transform
 def identity(audio_tree: AudioTree) -> AudioTree:
     """Return audio without any modifications."""
     return audio_tree

@@ -19,6 +19,7 @@ from audiotree.transforms import (
     corrupt_phase,
     rescale_audio,
     peak_norm,
+    resample,
     invert_phase,
     swap_stereo,
     encode_latents,
@@ -488,6 +489,15 @@ def test_peak_norm_silence():
     assert np.all(result.waveform == 0)
 
 
+def test_resample_transform():
+    """The resample transform changes the sample rate via AudioTree.resample."""
+    audio_tree = AudioTree(np.zeros((1, 1, 44_100), dtype=np.float32), 44_100)
+    result = resample(sample_rate=22_050).map(audio_tree)
+    assert isinstance(result.waveform, np.ndarray)  # NumPy backend stays NumPy
+    assert result.sample_rate == 22_050
+    assert result.waveform.shape == (1, 1, 22_050)
+
+
 def test_trim_invalidates_loudness():
     """Resizing the waveform invalidates cached loudness; a no-op preserves it."""
     sample_rate = 44100
@@ -650,4 +660,13 @@ def test_jax_peak_norm():
 
     assert jnp.allclose(jnp.max(jnp.abs(result.waveform)), 1.0)
     assert jnp.allclose(result.waveform[0, 0, 1], 1.0)
+
+
+def test_jax_resample_transform():
+    """The JAX resample transform changes the sample rate and stays a JAX array."""
+    audio_tree = AudioTree(jnp.zeros((1, 1, 44_100)), 44_100)
+    result = jax_transforms.resample(sample_rate=22_050).map(audio_tree)
+    assert isinstance(result.waveform, jax.Array)  # JAX backend stays JAX
+    assert result.sample_rate == 22_050
+    assert result.waveform.shape == (1, 1, 22_050)
     assert result.loudness is None

@@ -42,6 +42,7 @@ See also:
 from .functional import identity
 from .functional import mono
 from .functional import stereo
+from .functional import resample
 from .functional import volume_change
 from .functional import volume_norm
 from .functional import rescale_audio
@@ -63,6 +64,7 @@ __all__ = [
     "identity",
     "mono",
     "stereo",
+    "resample",
     "volume_change",
     "volume_norm",
     "rescale_audio",

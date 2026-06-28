@@ -257,6 +257,7 @@ Available Transforms
 - ``trim(length, mode)`` - Trim or pad to fixed length
 - ``mono()`` - Convert to mono
 - ``stereo()`` - Convert to stereo
+- ``resample(sample_rate)`` - Resample to a new sample rate (NumPy waveforms use librosa; JAX waveforms use the Julius port)
 - ``rescale_audio()`` - Scale down to [-1, 1] only if the audio clips
 - ``peak_norm()`` - Always scale each item so its peak is 1.0
 - ``identity()`` - No-op transform
