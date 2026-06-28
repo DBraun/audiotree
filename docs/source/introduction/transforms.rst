@@ -258,14 +258,14 @@ Available Transforms
 - ``mono()`` - Convert to mono
 - ``stereo()`` - Convert to stereo
 - ``rescale_audio()`` - Scale down to [-1, 1] only if the audio clips
-- ``peak_normalize()`` - Always scale each item so its peak is 1.0
+- ``peak_norm()`` - Always scale each item so its peak is 1.0
 - ``identity()`` - No-op transform
 
 .. note::
-   ``rescale_audio()`` and ``peak_normalize()`` are easy to confuse.
+   ``rescale_audio()`` and ``peak_norm()`` are easy to confuse.
    ``rescale_audio()`` only scales audio *down* when its peak exceeds 1.0 (leaving
    quieter audio untouched), which is handy after transforms that may have caused
-   clipping. ``peak_normalize()`` *always* divides each batch item by its peak (across
+   clipping. ``peak_norm()`` *always* divides each batch item by its peak (across
    channels and samples, clamped to a small epsilon) so the result peaks at exactly
    1.0. Both are available in the NumPy (``audiotree.transforms``) and JAX
    (``audiotree.transforms.jax``) backends.
@@ -286,7 +286,7 @@ signal's energy keep that cache honest by clearing it (setting ``loudness`` to
 
 - ``volume_norm`` sets ``loudness`` to its target; ``volume_change`` shifts the
   cached value by the applied gain — both keep ``loudness`` populated and correct.
-- ``trim``, ``roll(mode="constant")``, ``rescale_audio``, and ``peak_normalize``
+- ``trim``, ``roll(mode="constant")``, ``rescale_audio``, and ``peak_norm``
   change the signal's energy, so they **invalidate** ``loudness``.
 - ``invert_phase``, ``swap_stereo``, and ``roll(mode="wrap")`` leave the energy
   unchanged, so they **preserve** ``loudness``.

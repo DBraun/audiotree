@@ -34,7 +34,7 @@ from audiotree.transforms.helpers import (
     _volume_norm_jax,
     _volume_change_jax,
     _rescale_audio_jax,
-    _peak_normalize_jax,
+    _peak_norm_jax,
     _invert_phase_jax,
     _swap_stereo_jax,
     _corrupt_phase_jax,
@@ -144,7 +144,7 @@ def rescale_audio(audio_tree: AudioTree) -> AudioTree:
 
 
 @map_transform
-def peak_normalize(audio_tree: AudioTree) -> AudioTree:
+def peak_norm(audio_tree: AudioTree) -> AudioTree:
     """Peak-normalize audio so the largest absolute value is 1.0.
 
     Unlike :func:`rescale_audio`, which only scales down audio that exceeds the
@@ -152,7 +152,7 @@ def peak_normalize(audio_tree: AudioTree) -> AudioTree:
     epsilon) so the result peaks at 1.0. The peak is computed per item in the
     batch, across channels and samples.
     """
-    return _peak_normalize_jax(audio_tree).replace(loudness=None)
+    return _peak_norm_jax(audio_tree).replace(loudness=None)
 
 
 @random_transform

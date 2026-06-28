@@ -123,7 +123,7 @@ def _rescale_audio_np(audio_tree: AudioTree) -> AudioTree:
 # =============================================================================
 
 
-def _peak_normalize_jax(audio_tree: AudioTree) -> AudioTree:
+def _peak_norm_jax(audio_tree: AudioTree) -> AudioTree:
     """JAX implementation of peak normalization."""
     waveform = audio_tree.waveform
     peaks = jnp.max(jnp.absolute(waveform), axis=[-2, -1])
@@ -133,7 +133,7 @@ def _peak_normalize_jax(audio_tree: AudioTree) -> AudioTree:
     return audio_tree.replace(waveform=waveform)
 
 
-def _peak_normalize_np(audio_tree: AudioTree) -> AudioTree:
+def _peak_norm_np(audio_tree: AudioTree) -> AudioTree:
     """NumPy implementation of peak normalization."""
     waveform = audio_tree.waveform
     peaks = np.max(np.absolute(waveform), axis=(-2, -1))

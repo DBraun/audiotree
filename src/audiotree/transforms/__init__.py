@@ -45,7 +45,7 @@ from .functional import stereo
 from .functional import volume_change
 from .functional import volume_norm
 from .functional import rescale_audio
-from .functional import peak_normalize
+from .functional import peak_norm
 from .functional import invert_phase
 from .functional import swap_stereo
 from .functional import corrupt_phase
@@ -66,7 +66,7 @@ __all__ = [
     "volume_change",
     "volume_norm",
     "rescale_audio",
-    "peak_normalize",
+    "peak_norm",
     "invert_phase",
     "swap_stereo",
     "corrupt_phase",

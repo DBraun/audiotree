@@ -18,7 +18,7 @@ from audiotree.transforms import (
     shift_phase,
     corrupt_phase,
     rescale_audio,
-    peak_normalize,
+    peak_norm,
     invert_phase,
     swap_stereo,
     encode_latents,
@@ -457,8 +457,8 @@ def test_roll_no_change():
     assert np.array_equal(rolled.waveform, waveform)
 
 
-def test_peak_normalize():
-    """peak_normalize scales each batch item so its peak is 1.0."""
+def test_peak_norm():
+    """peak_norm scales each batch item so its peak is 1.0."""
     # Two items with different peaks (0.5 and 0.25) across channels.
     waveform = np.zeros((2, 2, 4), dtype=np.float32)
     waveform[0, 0, 1] = 0.5
@@ -467,7 +467,7 @@ def test_peak_normalize():
     waveform[1, 1, 3] = -0.1
     audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_loudness()
 
-    result = peak_normalize().map(audio_tree)
+    result = peak_norm().map(audio_tree)
 
     # Each item now peaks at exactly 1.0, computed across channels and samples.
     peaks = np.max(np.abs(result.waveform), axis=(-2, -1))
@@ -478,12 +478,12 @@ def test_peak_normalize():
     assert result.loudness is None
 
 
-def test_peak_normalize_silence():
-    """peak_normalize leaves silence untouched without dividing by zero."""
+def test_peak_norm_silence():
+    """peak_norm leaves silence untouched without dividing by zero."""
     audio_tree = AudioTree(
         waveform=np.zeros((1, 2, 8), dtype=np.float32), sample_rate=44100
     )
-    result = peak_normalize().map(audio_tree)
+    result = peak_norm().map(audio_tree)
     assert np.all(np.isfinite(result.waveform))
     assert np.all(result.waveform == 0)
 
@@ -587,7 +587,7 @@ def test_jax_transforms():
     jax_transforms.invert_phase().random_map(audio_tree, subkey)
 
     jax_transforms.rescale_audio().map(audio_tree)
-    jax_transforms.peak_normalize().map(audio_tree)
+    jax_transforms.peak_norm().map(audio_tree)
     jax_transforms.identity().map(audio_tree)
 
 
@@ -641,12 +641,12 @@ def test_jax_roll_constant_mode():
     assert jnp.all(rolled.waveform[0, :, 20:] == 1)
 
 
-def test_jax_peak_normalize():
-    """Test JAX peak_normalize scales each item to a peak of 1.0."""
+def test_jax_peak_norm():
+    """Test JAX peak_norm scales each item to a peak of 1.0."""
     waveform = jnp.array([[[0.0, 0.5, -0.25, 0.1]]], dtype=jnp.float32)  # peak 0.5
     audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_loudness()
 
-    result = jax_transforms.peak_normalize().map(audio_tree)
+    result = jax_transforms.peak_norm().map(audio_tree)
 
     assert jnp.allclose(jnp.max(jnp.abs(result.waveform)), 1.0)
     assert jnp.allclose(result.waveform[0, 0, 1], 1.0)

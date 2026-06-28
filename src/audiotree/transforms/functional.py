@@ -33,7 +33,7 @@ from audiotree.transforms.helpers import (
     _volume_norm_np,
     _volume_change_np,
     _rescale_audio_np,
-    _peak_normalize_np,
+    _peak_norm_np,
     _invert_phase_np,
     _swap_stereo_np,
     _corrupt_phase_np,
@@ -228,7 +228,7 @@ def rescale_audio(audio_tree: AudioTree) -> AudioTree:
 
 
 @map_transform
-def peak_normalize(audio_tree: AudioTree) -> AudioTree:
+def peak_norm(audio_tree: AudioTree) -> AudioTree:
     """Peak-normalize audio so the largest absolute value is 1.0.
 
     Unlike :func:`rescale_audio`, which only scales down audio that exceeds the
@@ -244,10 +244,10 @@ def peak_normalize(audio_tree: AudioTree) -> AudioTree:
         AudioTree with peak-normalized audio
 
     Example:
-        transform = peak_normalize()
+        transform = peak_norm()
         ds = ds.map(transform)
     """
-    return _peak_normalize_np(audio_tree).replace(loudness=None)
+    return _peak_norm_np(audio_tree).replace(loudness=None)
 
 
 @random_transform
