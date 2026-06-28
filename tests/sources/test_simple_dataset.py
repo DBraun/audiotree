@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from audiotree import AudioTree
@@ -211,6 +212,43 @@ def test_empty_directory():
             assert False, "Should have raised RuntimeError"
         except RuntimeError as e:
             assert "No audio files found" in str(e)
+
+
+def test_filepaths_custom_split():
+    """create_audio_dataset accepts an explicit filepaths list for custom splits."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 10)
+        all_files = find_audio_files(audio_dir)
+        assert len(all_files) == 10
+
+        # Split a single directory into train/val without reorganizing on disk.
+        train_ds = create_audio_dataset(
+            filepaths=all_files[:6], sample_rate=44100, duration=0.5
+        )
+        val_ds = create_audio_dataset(
+            filepaths=all_files[6:], sample_rate=44100, duration=0.5
+        )
+
+        assert len(train_ds) == 6
+        assert len(val_ds) == 4
+        assert isinstance(train_ds[0], AudioTree)
+
+
+def test_sources_xor_filepaths():
+    """Exactly one of sources / filepaths must be provided."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 2)
+        files = find_audio_files(audio_dir)
+
+        # Neither provided.
+        with pytest.raises(ValueError, match="exactly one"):
+            create_audio_dataset(sample_rate=44100, duration=0.5)
+
+        # Both provided.
+        with pytest.raises(ValueError, match="exactly one"):
+            create_audio_dataset(
+                sources=audio_dir, filepaths=files, sample_rate=44100, duration=0.5
+            )
 
 
 def test_find_audio_files_sorted_recursive_and_filtered():

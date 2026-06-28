@@ -124,7 +124,8 @@ def _load_audio_with_saliency(
 
 
 def create_audio_dataset(
-    sources: List[str] | str,
+    sources: List[str] | str | None = None,
+    filepaths: List[str] | None = None,
     shuffle: bool = True,
     repeat: bool = False,
     shuffle_seed: int = 0,
@@ -146,6 +147,12 @@ def create_audio_dataset(
 
     Args:
         sources: A directory path or list of directory paths containing audio files.
+            Mutually exclusive with ``filepaths`` — provide exactly one.
+        filepaths: An explicit list of audio file paths to use instead of searching
+            ``sources``. Mutually exclusive with ``sources`` — provide exactly one.
+            Useful for custom splits (e.g. train/val) over a single directory without
+            reorganizing it on disk. The given order is preserved (then shuffled if
+            ``shuffle=True``).
         shuffle: Whether to shuffle files.
         repeat: Whether to repeat the dataset infinitely. Set to True for training,
             False for validation/testing.
@@ -220,19 +227,26 @@ def create_audio_dataset(
     if excerpt_seed is None:
         excerpt_seed = shuffle_seed
 
-    if extensions is None:
-        extensions = _default_extensions
-
-    # Normalize sources to list
-    if isinstance(sources, str):
-        sources = [sources]
-
-    filepaths = find_audio_files(sources, extensions)
-
-    if not filepaths:
-        raise RuntimeError(
-            f"No audio files found in sources {sources} with extensions {extensions}"
+    if (sources is None) == (filepaths is None):
+        raise ValueError(
+            "Provide exactly one of `sources` or `filepaths` "
+            f"(got sources={sources!r}, filepaths={filepaths!r})."
         )
+
+    if filepaths is None:
+        # Discover files under the given directories.
+        if extensions is None:
+            extensions = _default_extensions
+        filepaths = find_audio_files(sources, extensions)
+        if not filepaths:
+            raise RuntimeError(
+                f"No audio files found in sources {sources} with extensions {extensions}"
+            )
+    else:
+        # Use the caller's explicit list as-is (order preserved).
+        filepaths = list(filepaths)
+        if not filepaths:
+            raise ValueError("`filepaths` must be a non-empty list of file paths.")
 
     # Create dataset from list of filepaths
     ds = grain.MapDataset.source(filepaths)
