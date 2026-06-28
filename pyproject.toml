@@ -31,3 +31,7 @@ filterwarnings = [
     "ignore:.*audioop.*:DeprecationWarning:audioread.rawread",
     "ignore:.*sunau.*:DeprecationWarning:audioread.rawread",
 ]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"

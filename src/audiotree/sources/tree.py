@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, SupportsIndex, Union
 
+import bagz
 import numpy as np
 from grain.sources import RandomAccessDataSource
 
@@ -205,13 +206,6 @@ class TreeDataSource(RandomAccessDataSource):
             del mm
 
         if self._string_leaf_info:
-            try:
-                import bagz
-            except ImportError:
-                raise ImportError(
-                    "The 'bagz' package is required for reading string leaves. "
-                    "Install it with: pip install bagz"
-                ) from None
             for name, info in self._string_leaf_info.items():
                 if _is_excluded(name, self.exclude_prefixes):
                     continue
@@ -246,13 +240,6 @@ class TreeDataSource(RandomAccessDataSource):
                 self._memmaps.append(mm)
 
         if self._string_leaf_info:
-            try:
-                import bagz
-            except ImportError:
-                raise ImportError(
-                    "The 'bagz' package is required for reading string leaves. "
-                    "Install it with: pip install bagz"
-                ) from None
             for name, info in self._string_leaf_info.items():
                 if _is_excluded(name, self.exclude_prefixes):
                     continue

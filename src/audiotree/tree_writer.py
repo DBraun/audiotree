@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import bagz
 import jax
 import jax.tree_util
 import numpy as np
@@ -274,13 +275,6 @@ class TreeWriter:
 
         # Create bagz writers for string leaves
         if self._string_leaf_names:
-            try:
-                import bagz
-            except ImportError:
-                raise ImportError(
-                    "The 'bagz' package is required for writing string leaves. "
-                    "Install it with: pip install bagz"
-                ) from None
             for name in self._string_leaf_names:
                 filename = f"{name}.bagz"
                 self._string_leaf_info[name] = {"file": filename}

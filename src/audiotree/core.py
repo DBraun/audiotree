@@ -1,7 +1,21 @@
+from __future__ import annotations
+
 from dataclasses import field
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Self, Sequence, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Literal,
+    Optional,
+    Self,
+    Sequence,
+    TYPE_CHECKING,
+    Union,
+)
 
 from absl import logging
 from flax import struct
@@ -13,6 +27,20 @@ import soundfile
 
 from .loudness import jit_integrated_loudness
 from .resample import resample
+
+if TYPE_CHECKING:
+    import jax
+
+    # An array field that may hold either a NumPy or a JAX array. ``import jax``
+    # stays inside ``TYPE_CHECKING`` so type checkers see the full union while
+    # reading these annotations never forces a runtime JAX import — possible
+    # because ``from __future__ import annotations`` keeps every annotation a
+    # string until something explicitly resolves it.
+    ArrayLike = Union[np.ndarray, jax.Array]
+else:
+    # Runtime fallback so the name still resolves (e.g. for
+    # ``typing.get_type_hints``) without JAX installed.
+    ArrayLike = np.ndarray
 
 
 @struct.dataclass
@@ -87,16 +115,16 @@ class AudioTree:
         .. _flax.struct.dataclass: https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass
 
     Args:
-        waveform (jnp.ndarray): Audio waveform data shaped ``(Samples)``, ``(Channels, Samples)``, or ``(Batch, Channels, Samples)``
+        waveform (np.ndarray or jax.Array): Audio waveform data shaped ``(Samples)``, ``(Channels, Samples)``, or ``(Batch, Channels, Samples)``
         sample_rate (int): Sample rate of ``waveform``, such as 44100 Hz.
-        loudness (jnp.ndarray, optional): Loudness of the audio waveform in LUFs. You may not need to set this when initializing. Instead,
+        loudness (np.ndarray or jax.Array, optional): Loudness of the audio waveform in LUFs. You may not need to set this when initializing. Instead,
             use ``replace_loudness()`` to create a new AudioTree with ``loudness`` calculated.
-        pitch (jnp.ndarray, optional): The MIDI pitch where 60 is middle C. The shape is ``(Batch,)``.
-        velocity (jnp.ndarray, optional): The MIDI velocity between 0 and 127. The shape is ``(Batch,)``.
-        note_duration (jnp.ndarray, optional): A note duration in units of your choice.
+        pitch (np.ndarray or jax.Array, optional): The MIDI pitch where 60 is middle C. The shape is ``(Batch,)``.
+        velocity (np.ndarray or jax.Array, optional): The MIDI velocity between 0 and 127. The shape is ``(Batch,)``.
+        note_duration (np.ndarray or jax.Array, optional): A note duration in units of your choice.
             The value is not necessarily the same as the duration of the audio data. The shape is ``(Batch,)``.
-        codes (jnp.ndarray, optional): The neural audio codec tokens for the audio.
-        latents (jnp.ndarray, optional): The latent representations of the audio.
+        codes (np.ndarray or jax.Array, optional): The neural audio codec tokens for the audio.
+        latents (np.ndarray or jax.Array, optional): The latent representations of the audio.
         metadata (dict): Any extra metadata can be placed here.
         filepaths (Union[str, Path, List[Union[str, Path]]] | None): List of filepaths for the batch of audio.
 
@@ -111,28 +139,28 @@ class AudioTree:
         If new fields are added to this class, update ``_AUDIOTREE_FIELDS`` in ``audiotree/writer.py``.
     """
 
-    waveform: np.ndarray
+    waveform: ArrayLike | None
     sample_rate: int = struct.field(pytree_node=False)
-    loudness: np.ndarray = None
-    pitch: np.ndarray = None
-    velocity: np.ndarray = None
-    note_duration: np.ndarray = None
-    codes: np.ndarray = None
-    latents: np.ndarray = None
+    loudness: ArrayLike | None = None
+    pitch: ArrayLike | None = None
+    velocity: ArrayLike | None = None
+    note_duration: ArrayLike | None = None
+    codes: ArrayLike | None = None
+    latents: ArrayLike | None = None
     metadata: dict = struct.field(pytree_node=True, default_factory=dict)
 
     @classmethod
     def create(
         cls,
-        waveform: np.ndarray,
+        waveform: ArrayLike | None,
         sample_rate: int,
-        loudness: np.ndarray = None,
-        pitch: np.ndarray = None,
-        velocity: np.ndarray = None,
-        note_duration: np.ndarray = None,
-        codes: np.ndarray = None,
-        latents: np.ndarray = None,
-        metadata: dict = None,
+        loudness: ArrayLike | None = None,
+        pitch: ArrayLike | None = None,
+        velocity: ArrayLike | None = None,
+        note_duration: ArrayLike | None = None,
+        codes: ArrayLike | None = None,
+        latents: ArrayLike | None = None,
+        metadata: dict | None = None,
         filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
     ) -> Self:
         """Create an ``AudioTree``, normalizing the waveform to ``(Batch, Channels, Samples)``.
@@ -142,7 +170,8 @@ class AudioTree:
 
         Args:
             waveform: Audio of shape ``(Samples)``, ``(Channels, Samples)``, or
-                ``(Batch, Channels, Samples)``.
+                ``(Batch, Channels, Samples)``, or ``None`` for token-only trees
+                (e.g. ``codes`` / ``latents`` without audio).
             sample_rate: Sample rate of ``waveform`` in Hz (e.g. 44100).
             loudness: Optional precomputed LUFS loudness; usually left ``None`` and filled by
                 :meth:`replace_loudness`.
@@ -164,11 +193,13 @@ class AudioTree:
             >>> audio.sample_rate
             44100
         """
-        # Handle audio dimensionality - ensure it's (Batch, Channels, Samples)
-        if waveform.ndim == 1:
-            waveform = waveform[None, None, :]  # Add batch and channel dimension
-        elif waveform.ndim == 2:
-            waveform = waveform[None, :, :]  # Add batch dimension
+        # Handle audio dimensionality - ensure it's (Batch, Channels, Samples).
+        # ``waveform`` may be None for token-only trees (codes/latents only).
+        if waveform is not None:
+            if waveform.ndim == 1:
+                waveform = waveform[None, None, :]  # Add batch and channel dimension
+            elif waveform.ndim == 2:
+                waveform = waveform[None, :, :]  # Add batch dimension
 
         # Handle metadata and filepaths
         if metadata is None:
@@ -428,12 +459,12 @@ class AudioTree:
         source: str | None = None,
         metadata: Optional[Dict[str, Any]] = None,
         # AudioTree properties
-        loudness: Optional[np.ndarray] = None,
-        pitch: Optional[np.ndarray] = None,
-        velocity: Optional[np.ndarray] = None,
-        note_duration: Optional[np.ndarray] = None,
-        codes: Optional[np.ndarray] = None,
-        latents: Optional[np.ndarray] = None,
+        loudness: Optional[ArrayLike] = None,
+        pitch: Optional[ArrayLike] = None,
+        velocity: Optional[ArrayLike] = None,
+        note_duration: Optional[ArrayLike] = None,
+        codes: Optional[ArrayLike] = None,
+        latents: Optional[ArrayLike] = None,
     ):
         """Create an AudioTree from an audio file path.
 
@@ -455,12 +486,12 @@ class AudioTree:
                 This is stored in metadata and accessible via the ``source`` property.
             metadata (dict, optional): Additional metadata to include in the AudioTree. This metadata is merged with
                 automatically generated fields (offset, note_duration, filepath).
-            loudness (np.ndarray, optional): Loudness values to assign to the AudioTree.
-            pitch (np.ndarray, optional): Pitch values to assign to the AudioTree.
-            velocity (np.ndarray, optional): Velocity values to assign to the AudioTree.
-            note_duration (np.ndarray, optional): Note note_duration values to assign to the AudioTree.
-            codes (jnp.ndarray, optional): The neural audio codec tokens for the audio.
-            latents (jnp.ndarray, optional): The latent representations of the audio.
+            loudness (np.ndarray or jax.Array, optional): Loudness values to assign to the AudioTree.
+            pitch (np.ndarray or jax.Array, optional): Pitch values to assign to the AudioTree.
+            velocity (np.ndarray or jax.Array, optional): Velocity values to assign to the AudioTree.
+            note_duration (np.ndarray or jax.Array, optional): Note note_duration values to assign to the AudioTree.
+            codes (np.ndarray or jax.Array, optional): The neural audio codec tokens for the audio.
+            latents (np.ndarray or jax.Array, optional): The latent representations of the audio.
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
