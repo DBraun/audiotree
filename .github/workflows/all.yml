@@ -102,6 +102,11 @@ jobs:
         pip install git+https://github.com/DBraun/argbind.git@dev
         pip install furo
 
+    - name: Run doctests
+      run: |
+        cd docs
+        make doctest
+
     - name: Build Docs
       run: |
         cd docs

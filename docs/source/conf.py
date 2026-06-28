@@ -39,6 +39,11 @@ extensions = [
 # Execute the ``>>>`` / ``.. testcode::`` examples at ``make doctest`` so the docs stay correct.
 # These names are pre-imported so each example can stay concise.
 doctest_global_setup = """
+# grain 0.2.17+ reads absl flags in its multiprocessing prefetch; the doctest
+# runner is not an ``absl.app`` entry point, so parse them with defaults.
+from absl import flags
+flags.FLAGS.mark_as_parsed()
+
 import jax
 import jax.numpy as jnp
 import numpy as np

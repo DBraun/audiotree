@@ -297,9 +297,10 @@ Because AudioTree implements ``__iter__`` it is a proper
         # process or write a single example...
 
 Pairing ``__iter__`` with ``len()`` means progress bars work out of the box —
-``tqdm`` reads ``len()`` to size the bar automatically:
+``tqdm`` reads ``len()`` to size the bar automatically (``tqdm`` is an optional
+dependency, so this snippet is illustrative rather than executed):
 
-.. testcode::
+.. code-block:: python
 
     import tqdm
 
