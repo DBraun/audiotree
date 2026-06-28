@@ -4,6 +4,8 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## Unreleased
 
+## audiotree 1.0.0 (Jun 27, 2026)
+
 ### Added
 
 * **`peak_normalize()` transform**: Peak-normalizes audio so its largest absolute value is `1.0`, dividing by the per-item peak (across channels and samples, clamped to a small epsilon). Unlike `rescale_audio()`, which only scales down audio exceeding `[-1.0, 1.0]`, this always normalizes to a peak of `1.0`. Available in both the NumPy (`audiotree.transforms`) and JAX (`audiotree.transforms.jax`) backends.

@@ -26,6 +26,11 @@ Issues = "https://github.com/DBraun/audiotree/issues"
 version = {attr = "audiotree.__version__"}
 
 [tool.pytest.ini_options]
+# Run docstring examples (``>>> ...``) alongside the unit tests so they can't
+# rot. ``testpaths`` lets a bare ``pytest`` collect both: doctests from ``src``
+# and the unit suite from ``tests``.
+addopts = "--doctest-modules"
+testpaths = ["src", "tests"]
 filterwarnings = [
     "ignore:.*aifc.*:DeprecationWarning:audioread.rawread",
     "ignore:.*audioop.*:DeprecationWarning:audioread.rawread",

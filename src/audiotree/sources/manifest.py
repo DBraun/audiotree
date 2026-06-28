@@ -37,11 +37,15 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         a ``manifest.npz`` to read back:
 
         >>> import tempfile
+        >>> import numpy as np
         >>> import jax.numpy as jnp
         >>> from audiotree import AudioTree, AudioWriter
         >>> out_dir = tempfile.mkdtemp()
+        >>> loudness = np.full((5,), -10.0, dtype=np.float32)
         >>> with AudioWriter(out_dir) as writer:
-        ...     _ = writer.write(AudioTree.create(jnp.zeros((5, 1, 44100)), 44100))
+        ...     _ = writer.write(
+        ...         AudioTree.create(jnp.zeros((5, 1, 44100)), 44100, loudness=loudness)
+        ...     )
         >>> manifest_path = f"{out_dir}/manifest.npz"
 
         Read straight from the NPZ manifest:

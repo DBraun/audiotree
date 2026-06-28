@@ -609,6 +609,7 @@ class AudioTree:
             quiet, so the loudness field is recorded for filtering):
 
             >>> import tempfile
+            >>> from audiotree import AudioWriter
             >>> out_dir = tempfile.mkdtemp()
             >>> loudness = np.where(np.arange(100) < 60, -10.0, -30.0).astype(np.float32)
             >>> batch = AudioTree.create(jnp.zeros((100, 2, 44100)), 44100, loudness=loudness)

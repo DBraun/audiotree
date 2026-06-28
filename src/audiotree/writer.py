@@ -66,9 +66,9 @@ class AudioWriter:
         Pass an external progress bar with ``pbar=...``, or have the writer
         create its own with ``show_progress=True``:
 
-        >>> from tqdm import tqdm
-        >>> pbar = tqdm(total=len(audio_trees), desc="Processing")
-        >>> with AudioWriter(out_dir, pbar=pbar) as writer:
+        >>> from tqdm import tqdm  # doctest: +SKIP
+        >>> pbar = tqdm(total=len(audio_trees), desc="Processing")  # doctest: +SKIP
+        >>> with AudioWriter(out_dir, pbar=pbar) as writer:  # doctest: +SKIP
         ...     for audio_tree in audio_trees:
         ...         _ = writer.write(audio_tree)
         >>> with AudioWriter(out_dir, show_progress=True) as writer:
