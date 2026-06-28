@@ -15,7 +15,7 @@ def _resample(
     y: np.ndarray,
     old_sr: int,
     new_sr: int,
-    output_path: str = None,
+    output_path: str | None = None,
     do_jit: bool = True,
 ):
 
@@ -24,8 +24,7 @@ def _resample(
 
     if do_jit:
 
-        @partial(
-            jax.jit,
+        @jax.jit(
             static_argnames=(
                 "old_sr",
                 "new_sr",
