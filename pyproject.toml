@@ -1,21 +1,52 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "audiotree"
-dynamic = ["version", "dependencies", "optional-dependencies"]
-authors = [
-  { name="David Braun", email="braun@ccrma.stanford.edu" },
-]
+dynamic = ["version"]
 description = "Audio as an ML-framework-agnostic pytree, with JAX data loading and augmentations"
 readme = "README.md"
 requires-python = ">=3.11"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+authors = [
+  { name = "David Braun", email = "braun@ccrma.stanford.edu" },
 ]
-
 keywords = [
     "audio",
     "machine learning",
+]
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "bagz>=0.2.0",
+    "einops>=0.8.1",
+    "grain>=0.2.15",
+    "jaxloudnorm>=0.3.0",
+    "librosa>=0.10.1",
+    "librosax>=0.1.2",
+    "loudness>=0.2.0",
+    "numpy>=1.24",
+    "soundfile>=0.12.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "argbind @ git+https://github.com/DBraun/argbind.git@dev",
+    "myst-parser",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
 ]
 
 [project.urls]
@@ -23,7 +54,10 @@ Homepage = "https://github.com/DBraun/audiotree"
 Issues = "https://github.com/DBraun/audiotree/issues"
 
 [tool.setuptools.dynamic]
-version = {attr = "audiotree.__version__"}
+version = { attr = "audiotree.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 # Run docstring examples (``>>> ...``) alongside the unit tests so they can't
