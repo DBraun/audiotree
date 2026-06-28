@@ -58,6 +58,7 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 * **Enhanced loudness computation**: `AudioTree.replace_loudness()` now uses the [loudness](https://github.com/iver56/loudness/) library for numpy arrays and [jaxloudnorm](https://github.com/DBraun/jaxloudnorm) for JAX arrays.
 * **`jaxloudnorm` dependency**: Now installed from PyPI.
 * **Loosened the `grain` pin to `>=0.2.15`** (was `==0.2.15`): `transforms/core.py` now imports `BatchOperation` and `SharedMemoryArray` from grain's public `grain.python` namespace and batches via `jax.tree_util.tree_map`, removing all `grain._src` private-API usage. Verified against grain 0.2.15 through 0.2.18. Note: grain 0.2.17+ reads absl flags inside its multiprocessing prefetch, so scripts doing multiprocessing data loading outside an `absl.app.run` entry point must call `flags.FLAGS.mark_as_parsed()` once at startup (the test suite does this in `tests/conftest.py`).
+* **Filepath/source metadata strings raise instead of truncating**: Encoding a filepath or source string longer than `audiotree.core._str_max_length` now raises `ValueError` instead of silently truncating it (which corrupted the round-tripped path). The default limit was also raised from 256 to 1024 characters.
 * **Updated examples**: argbind_augmentations examples demonstrate new function-based transform API with simpler YAML configs and working CLI parameter binding.
 * **Consolidated tests**: Merged `test_roll.py` into `test_core.py` for better organization.
 

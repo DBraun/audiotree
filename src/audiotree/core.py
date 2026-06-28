@@ -101,8 +101,11 @@ class SaliencyParams:
         return rng.uniform(lower_bound, upper_bound)
 
 
-# todo: configure when initializing an AudioTree instance?
-_str_max_length = 256
+# Fixed width (in Unicode code points) for filepath/source strings encoded into
+# metadata arrays, so they can be batched and stored in fixed-width int32 arrays.
+# Strings longer than this raise in ``_encode_string`` rather than being
+# truncated, to avoid silently corrupting paths.
+_str_max_length = 1024
 
 
 @struct.dataclass
@@ -309,9 +312,19 @@ class AudioTree:
 
         The returned array is shaped ``(1, _str_max_length)`` so that multiple
         rows (filepaths) can be concatenated along *axis=0*.
+
+        Raises:
+            ValueError: If *s* is longer than ``_str_max_length`` code points.
+                The string is not truncated, to avoid silently corrupting paths.
         """
         s = str(s)
-        encoded = [ord(char) for char in s[:_str_max_length]]
+        if len(s) > _str_max_length:
+            raise ValueError(
+                f"String of length {len(s)} exceeds the metadata encoding limit "
+                f"of {_str_max_length} characters and would be truncated: {s!r}. "
+                "Increase audiotree.core._str_max_length to store longer strings."
+            )
+        encoded = [ord(char) for char in s]
         encoded += [0] * (_str_max_length - len(encoded))
         return np.array([encoded], dtype=np.int32)  # [1, _str_max_length]
 

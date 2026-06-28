@@ -50,6 +50,23 @@ def test_audiotree_create_with_filepaths():
     assert "filepath" not in tree4.metadata
 
 
+def test_filepath_too_long_raises():
+    """Filepaths longer than the metadata limit raise instead of truncating."""
+    from audiotree.core import _str_max_length
+
+    audio = np.zeros((1, 1, 5))
+
+    # A path exactly at the limit round-trips intact.
+    exact = "a" * _str_max_length
+    tree = AudioTree.create(audio, 44100, filepaths=exact)
+    assert tree.filepath == [exact]
+
+    # One character over the limit raises rather than silently truncating.
+    too_long = "a" * (_str_max_length + 1)
+    with pytest.raises(ValueError, match="exceeds the metadata encoding limit"):
+        AudioTree.create(audio, 44100, filepaths=too_long)
+
+
 def test_audiotree_constructor_compatibility():
     """Test that original AudioTree constructor still works for backward compatibility."""
     audio_3d = np.array(
