@@ -77,8 +77,6 @@ jobs:
       run: uvx pre-commit run --all-files
 
   build_docs:
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -102,11 +100,27 @@ jobs:
     - name: Build Docs
       run: uv run make -C docs html
 
-    - name: Deploy Docs to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v4
+    - name: Upload Pages artifact
+      uses: actions/upload-pages-artifact@v5
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./docs/build/html
+        path: docs/build/html
+
+  deploy_docs:
+    # Deploy the built docs to GitHub Pages (requires Settings -> Pages ->
+    # Source = "GitHub Actions"). Only on main; PRs build but don't deploy.
+    needs: build_docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v5
 
   publish:
     needs: [test, test_grain_floor, lint, build_docs]
