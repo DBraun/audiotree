@@ -10,8 +10,7 @@ It provides a clean API for handling audio data in machine learning pipelines, w
 ## Common Development Commands
 
 This project uses [uv](https://docs.astral.sh/uv/). Dev dependencies live in the
-`dev` [dependency group](https://peps.python.org/pep-0735/) (installed by `uv sync`);
-`argbind` is sourced from a git branch via `[tool.uv.sources]`.
+`dev` [dependency group](https://peps.python.org/pep-0735/) (installed by `uv sync`).
 
 ```bash
 # Install for development (project + the `dev` dependency group)

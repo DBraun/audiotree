@@ -358,6 +358,6 @@ For complete guides and examples:
 - `tests/transforms/test_core.py <https://github.com/DBraun/audiotree/blob/main/tests/transforms/test_core.py>`_ - Test examples
 - `DAC-JAX`_ - Real-world usage in production
 
-.. _ArgBind: https://github.com/pseeth/argbind/
+.. _ArgBind: https://github.com/DBraun/argbind/
 .. _DAC-JAX: https://github.com/DBraun/DAC-JAX
 .. _Grain: https://github.com/google/grain

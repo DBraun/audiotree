@@ -351,7 +351,7 @@ See Also
 - `ArgBind Examples`_ - Official ArgBind examples
 - `argbind_augmentations examples`_ - AudioTree-specific examples
 
-.. _ArgBind: https://github.com/pseeth/argbind/
-.. _ArgBind Documentation: https://github.com/pseeth/argbind/blob/main/README.md
-.. _ArgBind Examples: https://github.com/pseeth/argbind/tree/main/examples
+.. _ArgBind: https://github.com/DBraun/argbind/
+.. _ArgBind Documentation: https://github.com/DBraun/argbind/blob/main/README.md
+.. _ArgBind Examples: https://github.com/DBraun/argbind/tree/main/examples
 .. _argbind_augmentations examples: ../../examples/argbind_augmentations/

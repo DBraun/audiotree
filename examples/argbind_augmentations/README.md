@@ -1,6 +1,6 @@
 # ArgBind Augmentations Examples
 
-This directory contains examples demonstrating how to use [argbind](https://github.com/pseeth/argbind) with AudioTree transforms for configurable audio data augmentation.
+This directory contains examples demonstrating how to use [argbind](https://github.com/DBraun/argbind) with AudioTree transforms for configurable audio data augmentation.
 
 ## Overview
 
@@ -167,6 +167,6 @@ See `audiotree.transforms` for all available transforms:
 
 ## Further Reading
 
-- [ArgBind Documentation](https://github.com/pseeth/argbind)
-- [ArgBind Examples](https://github.com/pseeth/argbind/tree/main/examples)
+- [ArgBind Documentation](https://github.com/DBraun/argbind)
+- [ArgBind Examples](https://github.com/DBraun/argbind/tree/main/examples)
 - [AudioTree Transforms](../../src/audiotree/transforms/)

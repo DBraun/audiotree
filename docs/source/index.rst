@@ -137,5 +137,5 @@ Citation
 .. _Pytree: https://jax.readthedocs.io/en/latest/pytrees.html
 .. _jax.tree.map: https://jax.readthedocs.io/en/latest/_autosummary/jax.tree.map.html#jax.tree.map
 .. _jax.jit: https://jax.readthedocs.io/en/latest/_autosummary/jax.jit.html
-.. _ArgBind: https://github.com/pseeth/argbind/
+.. _ArgBind: https://github.com/DBraun/argbind/
 .. _AudioTools: https://github.com/descriptinc/audiotools/

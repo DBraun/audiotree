@@ -166,5 +166,5 @@ test_outputs/
 
 .claude/*.local.*
 
-# uv (library: resolve fresh, no committed lock)
+# uv
 uv.lock

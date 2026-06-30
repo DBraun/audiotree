@@ -259,7 +259,7 @@ External Examples
 
 For production usage examples, see `DAC-JAX's input_pipeline.py <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_.
 
-.. _ArgBind: https://github.com/pseeth/argbind/
+.. _ArgBind: https://github.com/DBraun/argbind/
 .. _DAC-JAX: https://github.com/DBraun/DAC-JAX
 .. _Grain: https://github.com/google/grain
 .. _Orbax: https://orbax.readthedocs.io/en/latest/

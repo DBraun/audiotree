@@ -46,7 +46,7 @@ def filter_fn(fn):
 
 
 # Bind the entire JAX transforms module with scopes for "train" and "val"
-# See: https://github.com/pseeth/argbind/tree/main/examples/bind_module
+# See: https://github.com/DBraun/argbind/tree/main/examples/bind_module
 transforms_lib = argbind.bind_module(
     jax_transforms, "train", "val", filter_fn=filter_fn
 )
