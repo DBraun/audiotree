@@ -1,14 +1,10 @@
 # Change log
 
-AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+(categories: Added, Changed, Deprecated, Removed, Fixed, Security), and AudioTree
+follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## Unreleased
-
-### Bug Fixes
-
-* **`roll()` invalidates stale `metadata["offset"]`**: `AudioTree.from_file` records `metadata["offset"]` as the source-file time of sample 0. Since `roll` shifts the waveform along the time axis (in both `"wrap"` and `"constant"` modes), that offset no longer points at sample 0 and is now set to `None`, mirroring how `roll` already invalidates cached `loudness`. Trees without an `offset` key are unaffected. Applies to both the NumPy and JAX backends.
-
-## audiotree 1.0.0 (Jun 27, 2026)
 
 ### Added
 
@@ -80,6 +76,7 @@ AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+* **`roll()` invalidates stale `metadata["offset"]`**: `AudioTree.from_file` records `metadata["offset"]` as the source-file time of sample 0. Since `roll` shifts the waveform along the time axis (in both `"wrap"` and `"constant"` modes), that offset no longer points at sample 0 and is now set to `None`, mirroring how `roll` already invalidates cached `loudness`. Trees without an `offset` key are unaffected. Applies to both the NumPy and JAX backends.
 * **Stale loudness after length/channel changes**: `trim()`, `roll(mode="constant")`, and `AudioTree.to_stereo()` (mono→stereo) now invalidate the cached `loudness` field, since changing the audio length, zero-padding, or duplicating a channel all change the integrated loudness. `roll(mode="wrap")`, `invert_phase()`, and `swap_stereo()` continue to preserve `loudness` because they leave it unchanged.
 * **Stale loudness after phase transforms**: `corrupt_phase()` and `shift_phase()` now invalidate the cached `loudness` field by default. Their phase changes leave the magnitude spectrum (and thus energy) intact, so loudness is approximately unchanged, but the cached value is dropped to be safe. Pass `keep_loudness=True` to retain it.
 * **Excerpt diversity in `create_balanced_audio_dataset()`**: `record_key` was used as both an array index and an RNG seed, severely limiting excerpt diversity when datasets were repeated. Fixed by the `random_map` refactor (see Changed).

@@ -49,4 +49,4 @@ The `TreeWriter` class (`audiotree.tree_writer`) writes arbitrary pytrees — Au
 
 ## Changelog
 
-User-facing changes are tracked in `CHANGELOG.md`. When making changes that affect the public API, behavior, or dependencies, add a bullet under the `## Unreleased` section in the appropriate subsection (e.g., `### Enhancements`, `### Breaking Changes`, `### New Features`).
+User-facing changes (public API, behavior, or dependencies) are tracked in `CHANGELOG.md`. Add a bullet under its `## Unreleased` section, following the category conventions documented at the top of that file.
