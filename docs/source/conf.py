@@ -18,12 +18,12 @@ sys.path.insert(0, basedir)
 project = "AudioTree"
 copyright = "2025, David Braun"
 author = "David Braun"
-first_line = open(
-    os.path.join(pathlib.Path(__file__).parents[2], "src/audiotree/__init__.py"), "r"
-).readline()
-# first_line is '__version__ = "1.2.3"'
-assert first_line.startswith("__version__ = ")
-release = first_line.split("=")[1].strip()[1:-1]
+
+# Read the version from the package itself (importable via the sys.path insert
+# above), the same source pyproject.toml uses (`attr = "audiotree.__version__"`).
+import audiotree  # noqa: E402
+
+version = release = audiotree.__version__
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
