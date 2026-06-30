@@ -11,3 +11,6 @@ audiotree.sources
 
 .. automodule:: audiotree.sources.core
    :members:
+
+.. automodule:: audiotree.sources.windowed
+   :members:

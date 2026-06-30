@@ -1,13 +1,16 @@
 import functools
 import os
 from pathlib import Path
-from typing import List, Literal, Mapping, Optional
+from typing import TYPE_CHECKING, List, Literal, Mapping, Optional
 
 import grain
 import numpy as np
 
 from audiotree import AudioTree
 from audiotree.core import SaliencyParams
+
+if TYPE_CHECKING:
+    from audiotree.sources.windowed import WindowParams
 
 _default_extensions = [".wav", ".flac"]
 
@@ -287,6 +290,7 @@ def create_balanced_audio_dataset(
     | None = "constant",
     extensions: Optional[List[str]] = None,
     saliency_params: Optional[SaliencyParams] = None,
+    window_params: Optional["WindowParams"] = None,
 ) -> grain.MapDataset:
     """Create a balanced MapDataset from multiple audio groups and/or pre-constructed datasets.
 
@@ -325,6 +329,14 @@ def create_balanced_audio_dataset(
             "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
         extensions: List of audio file extensions to search for (only applies to file-based sources).
         saliency_params: Optional saliency parameters for excerpt selection (only applies to file-based sources).
+        window_params: Optional :class:`~audiotree.sources.WindowParams`. When
+            given, each file-based group is built with
+            :func:`~audiotree.sources.create_windowed_audio_dataset` (length-aware,
+            evenly-covering window sampling) instead of one excerpt per file, using
+            the group's ``duration``/``alpha``/etc. from the params and the shared
+            ``sample_rate``/``mono``/``pad_mode`` here. The group ``weights`` still
+            balance across groups, composing multiplicatively with the within-group
+            length weighting. Mutually exclusive with ``saliency_params``.
 
     Returns:
         An infinite grain.MapDataset that interleaves items from source groups
@@ -388,6 +400,12 @@ def create_balanced_audio_dataset(
     if sources is None and datasets is None:
         raise ValueError("At least one of 'sources' or 'datasets' must be provided")
 
+    if window_params is not None and saliency_params is not None:
+        raise ValueError(
+            "Pass at most one of `window_params` or `saliency_params`; windowed "
+            "sampling does its loudness filtering through `window_params` instead."
+        )
+
     if excerpt_seed is None:
         excerpt_seed = shuffle_seed
 
@@ -401,20 +419,44 @@ def create_balanced_audio_dataset(
     # Create datasets from file-based sources
     sources = sources or {}
     for group_name, folders in sources.items():
-        ds = create_audio_dataset(
-            sources=folders,
-            shuffle=shuffle,
-            repeat=repeat,
-            shuffle_seed=int(shuffle_rng.integers(2**31)),
-            excerpt_seed=int(excerpt_rng.integers(2**31)),
-            sample_rate=sample_rate,
-            mono=mono,
-            duration=duration,
-            pad_mode=pad_mode,
-            extensions=extensions,
-            saliency_params=saliency_params,
-            source=group_name,  # Set source metadata to group name
-        )
+        if window_params is not None:
+            # Length-aware windowed sampling within this group.
+            from audiotree.sources.windowed import create_windowed_audio_dataset
+
+            ds = create_windowed_audio_dataset(
+                sources=folders,
+                duration=window_params.duration,
+                hop=window_params.hop,
+                alpha=window_params.alpha,
+                jitter=window_params.jitter,
+                loudness_cache=window_params.loudness_cache,
+                loudness_cutoff=window_params.loudness_cutoff,
+                loudness_window_sec=window_params.loudness_window_sec,
+                shuffle=shuffle,
+                repeat=repeat,
+                shuffle_seed=int(shuffle_rng.integers(2**31)),
+                excerpt_seed=int(excerpt_rng.integers(2**31)),
+                sample_rate=sample_rate,
+                mono=mono,
+                pad_mode=pad_mode,
+                extensions=extensions,
+                source=group_name,
+            )
+        else:
+            ds = create_audio_dataset(
+                sources=folders,
+                shuffle=shuffle,
+                repeat=repeat,
+                shuffle_seed=int(shuffle_rng.integers(2**31)),
+                excerpt_seed=int(excerpt_rng.integers(2**31)),
+                sample_rate=sample_rate,
+                mono=mono,
+                duration=duration,
+                pad_mode=pad_mode,
+                extensions=extensions,
+                saliency_params=saliency_params,
+                source=group_name,  # Set source metadata to group name
+            )
 
         all_datasets.append(ds)
 

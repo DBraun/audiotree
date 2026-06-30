@@ -89,6 +89,7 @@ Content
    introduction/introduction
    introduction/sources
    introduction/balanced_datasets
+   introduction/windowed_datasets
    introduction/transforms
    introduction/transform_chaining
    introduction/dict_batches
