@@ -40,18 +40,29 @@ dependencies = [
     "soundfile>=0.12.1",
 ]
 
-[project.optional-dependencies]
+[project.urls]
+Homepage = "https://github.com/DBraun/audiotree"
+Issues = "https://github.com/DBraun/audiotree/issues"
+
+# Dev dependencies live in a PEP 735 group (not [project.optional-dependencies]),
+# so they stay out of the published wheel metadata. That matters because argbind
+# is sourced from a git branch (below): a direct URL in published metadata would
+# be rejected by PyPI. uv installs this group by default on `uv sync`.
+[dependency-groups]
 dev = [
-    "argbind @ git+https://github.com/DBraun/argbind.git@dev",
+    "argbind",
+    "furo",
     "myst-parser",
     "pre-commit",
     "pytest",
     "pytest-cov",
 ]
 
-[project.urls]
-Homepage = "https://github.com/DBraun/audiotree"
-Issues = "https://github.com/DBraun/audiotree/issues"
+# uv-only: resolve argbind from the fork's dev branch during development. Not part
+# of the build, so the published package just sees a normal `argbind` requirement
+# (and only if a consumer opts into it — it is not a runtime dependency).
+[tool.uv.sources]
+argbind = { git = "https://github.com/DBraun/argbind.git", branch = "dev" }
 
 [tool.setuptools.dynamic]
 version = { attr = "audiotree.__version__" }

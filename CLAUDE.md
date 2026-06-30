@@ -9,24 +9,28 @@ It provides a clean API for handling audio data in machine learning pipelines, w
 
 ## Common Development Commands
 
-```bash
-# Install for development (includes all dev dependencies)
-pip install ".[dev]"
+This project uses [uv](https://docs.astral.sh/uv/). Dev dependencies live in the
+`dev` [dependency group](https://peps.python.org/pep-0735/) (installed by `uv sync`);
+`argbind` is sourced from a git branch via `[tool.uv.sources]`.
 
-# Run tests
-python3 -m pytest tests
+```bash
+# Install for development (project + the `dev` dependency group)
+uv sync
+
+# Run tests (doctests in src/ + the tests/ suite)
+uv run pytest
 
 # Run tests with coverage
-pytest --cov
+uv run pytest --cov
 
 # Run a single test file
-python3 -m pytest tests/test_resample.py
+uv run pytest tests/test_resample.py
 
 # Build documentation
-cd docs && make html
+uv run make -C docs html
 
 # Build package
-python3 -m build
+uv build
 ```
 
 ## High-Level Architecture
