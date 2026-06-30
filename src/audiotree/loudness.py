@@ -25,10 +25,8 @@ def jit_integrated_loudness(data: jnp.ndarray, sample_rate: int, zeros: int):
         )
 
     meter = jln.Meter(sample_rate, block_size=block_size, use_fir=True, zeros=zeros)
+    # jaxloudnorm >= 0.3.1 returns -inf LUFS for digital silence (the mathematical
+    # limit of zero gated power), so no NaN guard is needed here.
     loudness = jax.vmap(meter.integrated_loudness)(data)
-
-    loudness = jnp.where(
-        jnp.isnan(loudness), jnp.full_like(loudness, -200), loudness
-    )  # todo: -200 dB good default?
 
     return loudness
