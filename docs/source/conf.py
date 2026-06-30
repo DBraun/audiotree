@@ -7,16 +7,15 @@
 # add these directories to sys.path here.
 import pathlib
 import sys
-import os.path
 
-basedir = os.path.abspath(os.path.join(pathlib.Path(__file__).parents[2], "src"))
-sys.path.insert(0, basedir)
+basedir = (pathlib.Path(__file__).parents[2] / "src").resolve()
+sys.path.insert(0, str(basedir))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "AudioTree"
-copyright = "2025, David Braun"
+copyright = "2024-%Y, David Braun"  # Sphinx substitutes %Y with the build year.
 author = "David Braun"
 
 # Read the version from the package itself (importable via the sys.path insert
