@@ -126,6 +126,11 @@ jobs:
     needs: [test, test_grain_floor, lint, build_docs]
     runs-on: ubuntu-latest
     if: github.event_name == 'release' && github.event.action == 'published'
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/audiotree
 
     steps:
     - name: Checkout code
@@ -141,5 +146,3 @@ jobs:
 
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
