@@ -1,7 +1,7 @@
 AudioTree documentation
 =======================
 
-**AudioTree** is a `JAX <https://jax.readthedocs.io/en/latest/>`_ library for audio data loading and augmentations.
+**AudioTree** represents audio as an ML-framework-agnostic `pytree <https://jax.readthedocs.io/en/latest/pytrees.html>`_, with `JAX <https://jax.readthedocs.io/en/latest/>`_ data loading and augmentations.
 The source code is `here <https://github.com/DBraun/audiotree>`_.
 
 AudioTree can be installed with pip:

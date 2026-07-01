@@ -65,8 +65,85 @@ to read it back as a Grain ``RandomAccessDataSource``.
             w.write(batch)
 
     # Read it back (Grain-compatible)
-    ds = TreeDataSource.from_directory("dataset/")
+    ds = TreeDataSource("dataset/")
     sample = ds[0]  # reconstructed AudioTree
+
+----
+
+TreeWriter
+----------
+
+:class:`~audiotree.tree_writer.TreeWriter` stores each pytree leaf as its own
+memory-mapped ``.bin`` file and **preserves the leaf's dtype**. That makes it a
+natural home for pre-computed features — a spectrogram, an embedding, a codec's
+tokens — cached next to (or instead of) the waveform and read back later as a
+zero-copy memmap slice via :class:`~audiotree.sources.TreeDataSource`.
+
+.. _quantized-features:
+
+Quantizing float features to int16
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Because TreeWriter keeps each leaf's dtype, you can store a floating-point feature
+as ``int16`` to halve its bytes on disk, then dequantize back to ``float32`` in the
+data loader. The convention below maps the feature's value range to ``[-1, 1]`` and
+then to the full ``int16`` range ``[-32767, 32767]``:
+
+.. testcode::
+
+    import numpy as np
+    import jax.numpy as jnp
+    import grain
+    from audiotree import AudioTree, TreeWriter
+    from audiotree.sources import TreeDataSource
+
+    # Stand in for a feature extractor: a batch of magnitude spectrograms of
+    # shape (batch, freq, frames) with values in [0, MAG_MAX].
+    MAG_MAX = 4.0
+    n_items = 6
+    rng = np.random.default_rng(0)
+    spec = rng.uniform(0.0, MAG_MAX, size=(n_items, 128, 44)).astype(np.float32)
+
+    # 1. Remap the feature range [0, MAG_MAX] to [-1, 1].
+    spec_unit = spec / MAG_MAX * 2.0 - 1.0
+
+    # 2. Quantize [-1, 1] to the full int16 range for compact storage.
+    spec_i16 = np.round(spec_unit * 32767.0).astype(np.int16)
+
+    # Carry the int16 feature in the AudioTree's metadata (a pytree node), so it
+    # batches and indexes alongside the waveform. TreeWriter keeps each leaf's
+    # dtype, so the spectrogram is written to disk as int16.
+    record = AudioTree.create(
+        jnp.zeros((n_items, 1, 16_000)),
+        16_000,
+        metadata={"spectrogram": spec_i16},
+    )
+    with TreeWriter("features", expected_samples=n_items) as writer:
+        writer.write(record)
+
+    # In the data loader, dequantize metadata["spectrogram"] back to float32.
+    def dequantize(audio_tree):
+        spec = audio_tree.metadata["spectrogram"].astype(np.float32) / 32767.0
+        return audio_tree.replace(
+            metadata={**audio_tree.metadata, "spectrogram": spec}
+        )
+
+    ds = grain.MapDataset.source(TreeDataSource("features")).map(dequantize)
+
+    item = ds[0]
+    print(item.metadata["spectrogram"].dtype)
+    print(item.metadata["spectrogram"].shape)   # the batch axis of 1 is added back
+    print(bool(np.all(np.abs(item.metadata["spectrogram"]) <= 1.0)))
+
+.. testoutput::
+
+    float32
+    (1, 128, 44)
+    True
+
+The round-trip is lossy only to ``int16`` precision (about ``1 / 32767``), which is
+negligible for most spectrogram and embedding features while cutting storage in
+half versus ``float32``.
 
 ----
 
@@ -471,9 +548,11 @@ Here's a complete example of creating a training dataset with AudioWriter:
             repeat=True,
         )
 
-        # Chain augmentation transforms (random_map ensures different augmentations)
-        ds = ds.random_map(volume_change(min_db=-6, max_db=6), seed=42)
-        ds = ds.random_map(choose(shift_phase(), prob=0.5), seed=43)
+        # Seed once; each random_map derives its own distinct seed so every
+        # augmentation differs.
+        ds = ds.seed(42)
+        ds = ds.random_map(volume_change(min_db=-6, max_db=6))
+        ds = ds.random_map(choose(shift_phase(), prob=0.5))
 
         pbar = tqdm(total=total_records, desc="Creating dataset")
 

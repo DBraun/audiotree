@@ -46,7 +46,9 @@ Apply transforms to a dataset using ``.random_map()`` or ``.map()``:
 - ``.random_map()`` for stochastic transforms (volume_norm, volume_change, etc.)
 - ``.map()`` for deterministic transforms (trim, mono, etc.)
 - Transforms are applied **lazily** when items are accessed
-- Each ``.random_map()`` needs a seed for reproducibility
+- Call ``ds.seed(n)`` **once** before your ``.random_map()`` calls; each one
+  derives its own distinct, reproducible seed from it, so you don't pass a
+  ``seed=`` to every map
 
 Multiple Transform Pipeline
 ----------------------------
@@ -133,10 +135,13 @@ Use ArgBind to configure transform chains from YAML:
             duration=5.0,
         )
 
+        # Seed the dataset once; each random_map derives its own distinct seed.
+        ds = ds.seed(42)
+
         # Chain transforms (configured via ArgBind)
-        ds = ds.random_map(volume_norm(), seed=42)
-        ds = ds.random_map(volume_change(), seed=43)
-        ds = ds.random_map(invert_phase(), seed=44)
+        ds = ds.random_map(volume_norm())
+        ds = ds.random_map(volume_change())
+        ds = ds.random_map(invert_phase())
         ds = ds.map(trim())
 
         return ds
@@ -195,10 +200,12 @@ Apply different transforms for training vs validation:
             duration=3.0,
         )
 
+        ds = ds.seed(42)
+
         # Aggressive augmentation for training
         with argbind.scope(args, "train"):
-            ds = ds.random_map(volume_norm(), seed=42)
-            ds = ds.random_map(volume_change(), seed=43)
+            ds = ds.random_map(volume_norm())
+            ds = ds.random_map(volume_change())
 
         return ds
 
@@ -211,9 +218,11 @@ Apply different transforms for training vs validation:
             duration=3.0,
         )
 
+        ds = ds.seed(42)
+
         # Light augmentation for validation
         with argbind.scope(args, "val"):
-            ds = ds.random_map(volume_norm(), seed=42)
+            ds = ds.random_map(volume_norm())
 
         return ds
 
@@ -248,13 +257,14 @@ The order of transforms affects the result:
         sample_rate=44100,
         duration=5.0,
     )
+    ds = ds.seed(42)  # both branches below inherit this seed
 
     # Option 1: Trim then normalize
     ds1 = ds.map(trim(length=3.0))
-    ds1 = ds1.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+    ds1 = ds1.random_map(volume_norm(min_db=-20, max_db=-15))
 
     # Option 2: Normalize then trim
-    ds2 = ds.random_map(volume_norm(min_db=-20, max_db=-15), seed=42)
+    ds2 = ds.random_map(volume_norm(min_db=-20, max_db=-15))
     ds2 = ds2.map(trim(length=3.0))
 
     # Results differ!
@@ -312,9 +322,9 @@ Combine datasets with different augmentation strategies:
         sample_rate=44100,
         duration=3.0,
     )
+    clean_ds = clean_ds.seed(42)
     clean_ds = clean_ds.random_map(
         volume_norm(min_db=-20, max_db=-20),  # No variation
-        seed=42,
     )
 
     # Noisy speech dataset
@@ -324,13 +334,12 @@ Combine datasets with different augmentation strategies:
         sample_rate=44100,
         duration=3.0,
     )
+    noisy_ds = noisy_ds.seed(42)
     noisy_ds = noisy_ds.random_map(
         volume_norm(min_db=-30, max_db=-10),  # High variation
-        seed=42,
     )
     noisy_ds = noisy_ds.random_map(
         volume_change(min_db=-6, max_db=6, prob=0.8),
-        seed=43,
     )
 
     # Combine with balanced sampling
@@ -361,28 +370,34 @@ Transforms are applied lazily when items are accessed:
 
 **Caching**
 
-For expensive transforms, consider pre-computing and using manifest datasets:
+For an expensive pipeline, pre-compute the augmented data once and export it with
+:class:`~audiotree.tree_writer.TreeWriter`, then read it back at training time with
+:class:`~audiotree.sources.TreeDataSource`. Each read is a zero-copy memmap slice
+with no re-augmentation or decoding cost:
 
 .. code-block:: python
 
-    from audiotree.sources import create_audio_dataset
-    from audiotree.writer import AudioWriter
+    from audiotree.sources import create_audio_dataset, TreeDataSource
+    from audiotree.tree_writer import TreeWriter
     from audiotree.transforms import volume_norm
 
-    # Load and augment
-    ds = create_audio_dataset(sources="/data/audio")
+    # Load and augment (finite and non-repeating, so len(ds) is known up front).
+    ds = create_audio_dataset(sources="/data/audio", duration=3.0)
     ds = ds.seed(42)
     ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
 
-    # Pre-compute and write to disk
-    writer = AudioWriter(output_dir="/data/augmented", format="npz")
-    for item in ds.to_iter_dataset():
-        writer.write(item)
-    manifest_path = writer.finalize()
+    # Pre-compute and write every item to a memory-mapped dataset. TreeWriter
+    # pre-allocates ``expected_samples`` rows, so pass the item count up front.
+    with TreeWriter("/data/augmented", expected_samples=len(ds)) as writer:
+        for item in ds:
+            writer.write(item)
 
-    # Later, load pre-augmented data
-    from audiotree.sources import ManifestDataSource
-    augmented_ds = ManifestDataSource(manifest_path)
+    # Later, read the pre-augmented data back — Grain-compatible, no re-augmenting.
+    augmented_ds = TreeDataSource("/data/augmented")
+
+To shrink the cache further — e.g. when storing pre-computed spectrograms or other
+float features — quantize them to ``int16`` before writing and dequantize in the
+loader. See :ref:`quantized-features` for a complete round-trip example.
 
 **Multiprocessing**
 
@@ -494,29 +509,31 @@ Common Patterns
 
 .. code-block:: python
 
-    ds = create_audio_dataset(sources="/data/audio")
-    ds = ds.random_map(invert_phase(prob=0.5), seed=42)  # 50% chance
-    ds = ds.random_map(volume_change(min_db=-6, max_db=6, prob=0.8), seed=43)  # 80% chance
+    ds = create_audio_dataset(sources="/data/audio").seed(42)
+    ds = ds.random_map(invert_phase(prob=0.5))  # 50% chance
+    ds = ds.random_map(volume_change(min_db=-6, max_db=6, prob=0.8))  # 80% chance
 
 **Pattern 4: Scoped Pipelines**
 
 .. code-block:: python
 
+    ds = ds.seed(42)
+
     with argbind.scope(args, "train"):
-        train_ds = ds.random_map(volume_norm(), seed=42)
+        train_ds = ds.random_map(volume_norm())
 
     with argbind.scope(args, "val"):
-        val_ds = ds.random_map(volume_norm(), seed=42)
+        val_ds = ds.random_map(volume_norm())
 
 Best Practices
 --------------
 
 1. **Apply volume_norm early**: Compute loudness before trimming or other operations
-2. **Use consistent seeds**: Each ``.random_map()`` needs a unique seed
+2. **Seed once**: Call ``ds.seed(n)`` before your ``.random_map()`` calls instead of passing a ``seed=`` to each — every map derives its own distinct, reproducible seed from it
 3. **Chain before batching**: Apply item-level transforms before batching
 4. **Add multiprocessing last**: Convert to IterDataset and add mp_prefetch at the end
 5. **Use ArgBind for configuration**: Keep transform parameters in YAML files
-6. **Consider pre-computing**: For expensive pipelines, pre-compute and save to manifest
+6. **Consider pre-computing**: For expensive pipelines, pre-compute the data and export it with :class:`~audiotree.tree_writer.TreeWriter`
 
 See Also
 --------

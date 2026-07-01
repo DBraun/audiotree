@@ -254,12 +254,49 @@ data iterator with your model state using Orbax's ``Composite`` args. For the
 full reference, see Grain's `checkpointing tutorial
 <https://github.com/google/grain/blob/main/docs/tutorials/dataset_advanced_tutorial.md>`_.
 
-External Examples
------------------
+.. _streaming-device-put:
 
-For production usage examples, see `DAC-JAX's input_pipeline.py <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_.
+Prefetching Batches onto an Accelerator
+---------------------------------------
 
-.. _ArgBind: https://github.com/DBraun/argbind/
-.. _DAC-JAX: https://github.com/DBraun/DAC-JAX
+Iterating a batched pipeline yields host (NumPy-backed) AudioTrees. To feed the
+model batches that already live on the GPU/TPU — and to overlap that transfer with
+the training step — wrap the ``IterDataset`` with
+:func:`grain.experimental.device_put`. It double-buffers: while the current batch
+trains, the next is staged on the device. Because an AudioTree is a pytree, every
+array leaf (``waveform`` and each ``metadata`` array) arrives on-device as a
+``jax.Array``:
+
+.. testcode::
+
+    import jax
+    import grain
+    from audiotree import AudioTree
+    from audiotree.sources import create_audio_dataset
+
+    ds = create_audio_dataset(sources=_speech_dir, sample_rate=44100, duration=1.0)
+    iter_ds = ds.to_iter_dataset().batch(2, batch_fn=AudioTree.batch)
+
+    # device=None targets the default JAX device (a GPU/TPU when present).
+    # cpu_buffer_size / device_buffer_size set how many batches are staged in host
+    # and device memory.
+    device_ds = grain.experimental.device_put(
+        iter_ds, None, cpu_buffer_size=4, device_buffer_size=2
+    )
+
+    for batch in device_ds:
+        print(isinstance(batch.waveform, jax.Array))
+        print(batch.waveform.shape)
+        break
+
+.. testoutput::
+
+    True
+    (2, 1, 44100)
+
+Add it as the final stage of the pipeline (after ``.batch()`` and
+``.to_iter_dataset()``), in place of manually calling :func:`jax.device_put` on
+each batch inside the training loop.
+
 .. _Grain: https://github.com/google/grain
 .. _Orbax: https://orbax.readthedocs.io/en/latest/

@@ -10,7 +10,7 @@ Introduction to AudioTree
 =========================
 
 This guide covers the fundamentals of working with :class:`~audiotree.core.AudioTree` objects,
-including instantiation, manipulation, batching, and integration with JAX's pytree system.
+including instantiation, manipulation, batching, and integration with JAX's Pytree system.
 
 .. testsetup::
 
@@ -34,7 +34,7 @@ Basic Instantiation
 -------------------
 
 The :class:`~audiotree.core.AudioTree` class is the central data structure in the library.
-It stores audio as JAX arrays with a consistent shape convention: ``(Batch, Channels, Samples)``.
+It stores audio as arrays with a consistent shape convention: ``(Batch, Channels, Samples)``.
 This format is familiar to PyTorch and librosa users.
 Note that JAX and NNX follow a different convention where data is commonly in
 ``(Batch, Samples, Channels)`` format.
@@ -139,16 +139,18 @@ AudioTree objects have several key properties:
     print(audio_tree.waveform.shape)
     print(audio_tree.sample_rate)
 
-    # Optional properties (can be None)
-    print(audio_tree.lufs)   # Computed on demand
-    print(audio_tree.metadata)   # Dictionary for custom data
+    # The metadata dict holds custom per-item data (empty by default)
+    print(audio_tree.metadata)
 
 .. testoutput::
 
     (2, 2, 44100)
     44100
-    None
     {}
+
+Loudness lives in the ``lufs`` field, which starts out ``None`` and is filled in
+by :meth:`~audiotree.core.AudioTree.replace_lufs` — see `Computing Loudness`_
+below.
 
 Creating Modified Copies
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -189,6 +191,36 @@ AudioTree can compute loudness in LUFS (Loudness Units Full Scale) for each item
 
     (4,)
     [-43.25 -43.25 -43.25 -43.25]
+
+Choosing a compute backend
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For a NumPy waveform, the default loudness path measures one batch item at a time
+on the CPU. When the batch is large and an accelerator is available, pass
+``backend="gpu"`` (or ``"tpu"``, or ``"cpu"``) to run the vmapped ``jaxloudnorm``
+kernel across the whole batch at once, which is much faster:
+
+.. testcode::
+
+    big_batch = AudioTree(np.ones((8, 2, 44_100)) * 0.1, 44_100)
+
+    # backend forces the JAX loudness kernel onto that XLA device. Swap in
+    # "gpu" or "tpu" when you have one; "cpu" always works and is used here so
+    # the example runs anywhere.
+    loud = big_batch.replace_lufs(backend="cpu")
+
+    # The returned lufs always matches the waveform's array library (NumPy here),
+    # so you never need a manual jax.device_put / jax.device_get round-trip.
+    print(type(loud.lufs).__module__)
+    print(loud.lufs.shape)
+
+.. testoutput::
+
+    numpy
+    (8,)
+
+:meth:`~audiotree.core.AudioTree.normalize_lufs` computes loudness internally, so
+it accepts the same ``backend`` argument.
 
 .. note::
    **Channel Limitations for Loudness Computation**
@@ -501,6 +533,25 @@ You can use :func:`jax.tree.map` to combine multiple AudioTree objects:
 
     (12, 1, 44100)
 
+This concatenating ``tree.map`` is exactly what
+:meth:`~audiotree.core.AudioTree.batch` does for you: it maps
+``np.concatenate(..., axis=0)`` over every leaf (treating each AudioTree as one
+leaf), so a list of trees collapses into the identical batched tree. It is the
+same function you pass to Grain as ``batch_fn=AudioTree.batch`` when building a
+data loader.
+
+.. testcode::
+
+    same_tree = AudioTree.batch(trees)
+
+    print(same_tree.waveform.shape)
+    print(np.array_equal(same_tree.waveform, big_tree.waveform))
+
+.. testoutput::
+
+    (12, 1, 44100)
+    True
+
 Nested Structures
 ~~~~~~~~~~~~~~~~~
 
@@ -558,6 +609,47 @@ JAX can flatten AudioTree objects for operations requiring flat arrays:
 .. testoutput::
 
     True
+
+Moving a Tree Between Devices
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Because an AudioTree is a pytree, :func:`jax.device_put` and :func:`jax.device_get`
+move *every* array leaf at once — you never touch ``waveform``, ``lufs``, and each
+``metadata`` array one by one. The static ``sample_rate`` and the tree structure
+are left untouched.
+
+.. testcode::
+
+    import jax
+
+    audio_tree = AudioTree(np.zeros((4, 2, 44_100), dtype=np.float32), 44_100)
+
+    # Move the whole tree onto the default JAX device (a GPU or TPU when present).
+    device_tree = jax.device_put(audio_tree)
+    print(isinstance(device_tree.waveform, jax.Array))
+
+    # Pull the whole tree back to host NumPy in one call.
+    host_tree = jax.device_get(device_tree)
+    print(isinstance(host_tree.waveform, np.ndarray))
+    print(host_tree.sample_rate)   # the static field is unchanged
+
+.. testoutput::
+
+    True
+    True
+    44100
+
+When you're feeding a Grain data loader rather than moving a single tree, keep the
+transfers off the training thread with :func:`grain.experimental.device_put`, which
+prefetches whole batches onto the accelerator as you iterate — see
+:ref:`streaming-device-put`.
+
+.. tip::
+   You rarely need to ``device_put`` a tree just to compute loudness on an
+   accelerator: :meth:`~audiotree.core.AudioTree.replace_lufs` and
+   :meth:`~audiotree.core.AudioTree.normalize_lufs` take a ``backend=`` argument
+   (see `Choosing a compute backend`_) that runs the kernel on the chosen device
+   and returns loudness in the waveform's own array library.
 
 Metadata and Filepaths
 -----------------------

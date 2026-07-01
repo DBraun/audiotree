@@ -48,12 +48,10 @@ Examples include:
         sample_rate=44100,
         duration=5.0,
     )
+    ds = ds.seed(42)  # seed once; each random_map derives its own seed
 
     # Chain transforms
-    ds = ds.random_map(
-        volume_norm(min_db=-20, max_db=-15),
-        seed=42,
-    )
+    ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
     ds = ds.map(trim(length=3.0))
 
     # Access augmented audio
