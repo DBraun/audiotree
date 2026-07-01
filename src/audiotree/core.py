@@ -952,6 +952,7 @@ class AudioTree:
             file_duration = info.duration
 
             duration = kwargs["duration"]
+            excerpt = None
             best_lufs = -np.inf
             current_try = 0
             num_tries = saliency_params.num_tries
@@ -982,6 +983,9 @@ class AudioTree:
                 current_try += 1
                 if num_tries is not None and current_try >= num_tries:
                     break
+            # ``best_lufs`` starts at -inf and ``loudness_cutoff`` is not None
+            # here, so the loop always runs (and assigns ``excerpt``) at least once.
+            assert excerpt is not None
 
         return excerpt
 

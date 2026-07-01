@@ -1,9 +1,18 @@
 __version__ = "1.0.0"  # Effort-based versioning. Single source of truth, read by pyproject.toml and the docs.
 __author__ = "David Braun"
+from typing import TYPE_CHECKING
+
 from .core import AudioTree
 from .core import SaliencyParams
 from .writer import AudioWriter
 from .tree_writer import TreeWriter
+
+if TYPE_CHECKING:
+    # The ``sources`` and ``transforms`` submodules are loaded lazily at runtime
+    # via ``__getattr__`` (below); make them visible to type checkers and satisfy
+    # ``__all__`` without forcing the grain import at import time.
+    from . import sources as sources
+    from . import transforms as transforms
 
 __all__ = [
     "AudioTree",
