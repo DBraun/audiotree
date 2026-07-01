@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 import soundfile
 
 from audiotree import AudioTree, AudioWriter
@@ -87,21 +88,27 @@ def test_multiple_writes():
         assert stats["current_index"] == 5
 
 
-def test_resampling():
-    """Test automatic resampling when target sample rate is specified."""
+def test_sample_rate_inferred_and_enforced():
+    """Sample rate is taken from the first write; later mismatches raise."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        # Create AudioTree at 44100 Hz
-        audio_tree = AudioTree.create(np.random.randn(1, 1, 44100), sample_rate=44100)
+        writer = AudioWriter(output_dir)
 
-        # Write with resampling to 16000 Hz
-        writer = AudioWriter(output_dir, sample_rate=16000)
-        paths = writer.write(audio_tree)
+        # The first write sets the writer's sample rate.
+        first = AudioTree.create(np.random.randn(1, 1, 44100), sample_rate=44100)
+        paths = writer.write(first)
+        assert writer.sample_rate == 44100
+        _, sr = soundfile.read(str(paths[0]))
+        assert sr == 44100
 
-        # Check output sample rate
-        data, sr = soundfile.read(str(paths[0]))
-        assert sr == 16000
+        # A matching sample rate is accepted.
+        writer.write(AudioTree.create(np.random.randn(1, 1, 44100), sample_rate=44100))
+
+        # A different sample rate is rejected.
+        mismatched = AudioTree.create(np.random.randn(1, 1, 16000), sample_rate=16000)
+        with pytest.raises(ValueError, match="sample_rate"):
+            writer.write(mismatched)
 
 
 def test_context_manager():
@@ -1195,7 +1202,7 @@ if __name__ == "__main__":
     # Run tests
     test_basic_sequential_writing()
     test_multiple_writes()
-    test_resampling()
+    test_sample_rate_inferred_and_enforced()
     test_context_manager()
     test_manual_save_manifest()
     test_directory_creation()

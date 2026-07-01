@@ -32,7 +32,6 @@ class AudioWriter:
     Args:
         output_dir: Directory where audio files will be written
         pattern: Filename pattern with {index} placeholder for sequential numbering
-        sample_rate: Optional target sample rate for resampling all audio
         include_timestamp: Whether to include timestamps in manifest entries
         compress_manifest: Whether to compress NPZ manifest files (only applies to npz format)
         write_audio: Whether to write audio files to disk (default True). When False,
@@ -81,7 +80,6 @@ class AudioWriter:
         self,
         output_dir: Union[str, Path] = ".",
         pattern: str = "audio_{index:04d}.wav",
-        sample_rate: Optional[int] = None,
         include_timestamp: bool = False,
         compress_manifest: bool = True,
         write_audio: bool = True,
@@ -94,7 +92,8 @@ class AudioWriter:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.pattern = pattern
-        self.sample_rate = sample_rate
+        # Inferred from the first written tree; every later write must match it.
+        self.sample_rate = None
         self.include_timestamp = include_timestamp
         self.compress_manifest = compress_manifest
         self.write_audio = write_audio
@@ -151,9 +150,17 @@ class AudioWriter:
         Raises:
             ValueError: If AudioTree fields don't match previously written trees
         """
-        # Optionally resample if target sample rate specified
-        if self.sample_rate and tree.sample_rate != self.sample_rate:
-            tree = tree.resample(self.sample_rate)
+        # Take the sample rate from the first written tree and require every later
+        # tree to match it (resample beforehand with AudioTree.resample if needed).
+        if self.sample_rate is None:
+            self.sample_rate = tree.sample_rate
+        elif tree.sample_rate != self.sample_rate:
+            raise ValueError(
+                f"AudioTree sample_rate {tree.sample_rate} does not match the "
+                f"writer's sample_rate {self.sample_rate} (set by the first write). "
+                f"All AudioTrees written to one manifest must share a sample rate; "
+                f"resample beforehand with AudioTree.resample()."
+            )
 
         # Validate field consistency
         present_fields = self._get_present_fields(tree)
