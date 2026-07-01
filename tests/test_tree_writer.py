@@ -38,7 +38,7 @@ def test_manifest_structure_audiotree():
         tree = AudioTree(
             waveform=np.zeros((3, 1, 50), dtype=np.float32),
             sample_rate=48000,
-            loudness=np.zeros(3, dtype=np.float32),
+            lufs=np.zeros(3, dtype=np.float32),
         )
 
         with TreeWriter(output_dir, expected_samples=3) as w:
@@ -51,7 +51,7 @@ def test_manifest_structure_audiotree():
         assert structure["type"] == "AudioTree"
         assert structure["sample_rate"] == 48000
         assert "waveform" in structure["children"]
-        assert "loudness" in structure["children"]
+        assert "lufs" in structure["children"]
         # pitch etc. should be absent (None)
         assert "pitch" not in structure["children"]
 

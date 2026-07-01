@@ -12,7 +12,8 @@ from .core import AudioTree
 
 # AudioTree fields that should be tracked (excluding waveform, sample_rate, metadata)
 _AUDIOTREE_FIELDS = [
-    "loudness",
+    "lufs",
+    "lufs_windows",
     "pitch",
     "velocity",
     "note_duration",

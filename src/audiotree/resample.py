@@ -47,6 +47,14 @@ def resample(
             to ensure sufficient margin due to the imperfection of the FIR filter used.
             Lowering this value will reduce anti-aliasing, but will reduce some of the
             highest frequencies.
+        output_length (Optional[int]): Desired length of the output's last axis.
+            Must be between 0 and `ceil(new_sr * T / old_sr)`. When None (default),
+            the floored length `floor(new_sr * T / old_sr)` is used (or the ceiled
+            length when `full=True`). Cannot be combined with `full=True`.
+        full (bool): If True (and `output_length` is None), return the longest
+            possible output (`ceil(new_sr * T / old_sr)`) rather than the floored
+            default. Useful when chaining resamplings: pass `full=True` to every
+            intermediate step and give `output_length` only for the last one.
 
     Shape:
 

@@ -23,8 +23,8 @@ AudioTree transforms support this pattern with **scope** for selective transform
     from audiotree import AudioTree
 
     _g = np.random.default_rng(0)
-    audio1 = AudioTree(_g.standard_normal((2, 1, 44_100)), 44_100).replace_loudness()
-    audio2 = AudioTree(_g.standard_normal((2, 1, 44_100)), 44_100).replace_loudness()
+    audio1 = AudioTree(_g.standard_normal((2, 1, 44_100)), 44_100).replace_lufs()
+    audio2 = AudioTree(_g.standard_normal((2, 1, 44_100)), 44_100).replace_lufs()
     rng = np.random.default_rng(42)
 
 Why Use Dict Batches?
@@ -54,8 +54,8 @@ Audio effect modeling often uses dry (original) and wet (processed) pairs:
     dry_audio = AudioTree(...)
     wet_audio = AudioTree(...)
 
-    dry_audio = dry_audio.replace_loudness()
-    wet_audio = wet_audio.replace_loudness()
+    dry_audio = dry_audio.replace_lufs()
+    wet_audio = wet_audio.replace_lufs()
 
     batch = {'dry': dry_audio, 'wet': wet_audio}
 
@@ -695,8 +695,8 @@ Always test that scope works correctly:
         result = transform.random_map(batch, np.random.default_rng(42))
 
         # Verify only src changed
-        assert not np.array_equal(result['src'].loudness, audio1.loudness)
-        assert np.array_equal(result['target'].loudness, audio2.loudness)
+        assert not np.array_equal(result['src'].lufs, audio1.lufs)
+        assert np.array_equal(result['target'].lufs, audio2.lufs)
 
     test_scope_selective_transform()
 

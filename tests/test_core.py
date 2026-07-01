@@ -153,16 +153,26 @@ def test_methods_work_after_reshape_mini_batches():
     assert mini.samples == 8000
     assert mini.num_channels == 2
 
-    # replace_loudness matches the flat computation, reshaped
-    flat_loudness = tree.replace_loudness().loudness
-    mini_loudness = mini.replace_loudness().loudness
+    # replace_lufs matches the flat computation, reshaped
+    flat_tree = tree.replace_lufs()
+    mini_tree = mini.replace_lufs()
+    flat_loudness = flat_tree.lufs
+    mini_loudness = mini_tree.lufs
     assert mini_loudness.shape == (2, 2)
     np.testing.assert_allclose(mini_loudness, flat_loudness.reshape(2, 2), rtol=1e-5)
 
-    # normalize_loudness
-    normalized = mini.normalize_loudness(-18.0)
+    # lufs_windows carries the same leading axes; 8000 samples / 0.4s window at
+    # 16 kHz (6400 samples) is a single window.
+    assert flat_tree.lufs_windows.shape == (4, 1)
+    assert mini_tree.lufs_windows.shape == (2, 2, 1)
+    np.testing.assert_allclose(
+        mini_tree.lufs_windows, flat_tree.lufs_windows.reshape(2, 2, 1), rtol=1e-5
+    )
+
+    # normalize_lufs
+    normalized = mini.normalize_lufs(-18.0)
     assert normalized.waveform.shape == mini.waveform.shape
-    np.testing.assert_allclose(normalized.replace_loudness().loudness, -18.0, atol=0.5)
+    np.testing.assert_allclose(normalized.replace_lufs().lufs, -18.0, atol=0.5)
 
     # to_mono / to_stereo
     mono = mini.to_mono()
@@ -419,3 +429,94 @@ def test_forward_batches_with_scan():
     assert out_naive.waveform.shape == (batch_size, 2, 1000)
     assert out_batched.waveform.shape == (batch_size, 2, 1000)
     np.testing.assert_allclose(out_batched.waveform, 2.0)
+
+
+def _tone(sample_rate: int, seconds: float, amplitude: float = 0.5) -> np.ndarray:
+    t = np.arange(int(seconds * sample_rate)) / sample_rate
+    return (amplitude * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+
+
+def test_replace_lufs_windows_shape_and_default_window():
+    """replace_lufs fills both ``lufs`` (B,) and ``lufs_windows`` (B, n_windows)."""
+    sr = 44100
+    tree = AudioTree.create(_tone(sr, 2.0), sr).replace_lufs()  # default 0.4s window
+    assert tree.lufs.shape == (1,)
+    # 2.0s / 0.4s -> 5 non-overlapping windows.
+    assert tree.lufs_windows.shape == (1, 5)
+    # A steady tone is uniformly loud window to window (the first window carries a
+    # small K-filter start-up transient, hence the loose tolerance), and its gated
+    # integrated LUFS sits near the ungated per-window LUFS.
+    windows = np.asarray(tree.lufs_windows[0])
+    np.testing.assert_allclose(windows, windows.mean(), atol=0.05)
+    assert abs(float(tree.lufs[0]) - float(windows.mean())) < 1.0
+
+
+def test_replace_lufs_windows_custom_duration_and_short_excerpt():
+    """The window length is configurable; a sub-window excerpt yields no windows."""
+    sr = 44100
+    tree = AudioTree.create(_tone(sr, 2.0), sr)
+    assert tree.replace_lufs(window_duration_sec=1.0).lufs_windows.shape == (1, 2)
+    # Shorter than one 0.4s window -> empty (but ``lufs`` is still computed).
+    short = AudioTree.create(_tone(sr, 0.2), sr).replace_lufs()
+    assert short.lufs.shape == (1,)
+    assert short.lufs_windows.shape == (1, 0)
+    with pytest.raises(ValueError):
+        tree.replace_lufs(window_duration_sec=0.2)
+
+
+def test_replace_lufs_windows_tracks_per_window_loudness():
+    """Per-window LUFS reflects a loud-then-quiet signal window by window."""
+    sr = 44100
+    loud = _tone(sr, 1.0, amplitude=0.5)
+    quiet = _tone(sr, 1.0, amplitude=0.005)
+    waveform = np.concatenate([loud, quiet])[None, None, :]
+    tree = AudioTree.create(waveform, sr).replace_lufs()  # 2.0s -> 5 windows of 0.4s
+    windows = np.asarray(tree.lufs_windows[0])
+    # The first ~half of the windows are much louder than the last ~half.
+    assert windows[0] > windows[-1] + 20.0
+
+
+def test_replace_lufs_windows_hop_and_silence():
+    """`hop_duration_sec` overlaps windows; fully silent windows are -inf."""
+    sr = 44100
+    tone = _tone(sr, 2.0)
+    # 0.4s windows stepping 0.2s over 2.0s -> (2.0 - 0.4) / 0.2 + 1 = 9 windows.
+    overlapped = AudioTree.create(tone, sr).replace_lufs(
+        window_duration_sec=0.4, hop_duration_sec=0.2
+    )
+    assert overlapped.lufs_windows.shape == (1, 9)
+    # Non-overlapping (default hop) gives 2.0 / 0.4 = 5 windows.
+    assert AudioTree.create(tone, sr).replace_lufs().lufs_windows.shape == (1, 5)
+    with pytest.raises(ValueError):
+        AudioTree.create(tone, sr).replace_lufs(hop_duration_sec=0.0)
+
+    # Ungated windows report -inf for digital silence (comparable across windows).
+    silent = AudioTree.create(np.zeros(2 * sr, dtype=np.float32), sr).replace_lufs()
+    assert np.all(np.isneginf(np.asarray(silent.lufs_windows[0])))
+
+
+def test_normalize_lufs_shifts_windows():
+    """normalize_lufs retargets ``lufs`` and shifts ``lufs_windows`` by the same gain."""
+    sr = 44100
+    tree = AudioTree.create(_tone(sr, 2.0), sr).replace_lufs()
+    before = np.asarray(tree.lufs_windows[0])
+    gain = -18.0 - float(tree.lufs[0])
+    normalized = tree.normalize_lufs(-18.0)
+    np.testing.assert_allclose(float(normalized.lufs[0]), -18.0, atol=1e-4)
+    np.testing.assert_allclose(
+        np.asarray(normalized.lufs_windows[0]), before + gain, atol=1e-3
+    )
+
+
+def test_replace_lufs_windows_numpy_jax_agree():
+    """NumPy and JAX backends produce close (not bit-identical) windowed LUFS."""
+    import jax.numpy as jnp
+
+    sr = 44100
+    waveform = _tone(sr, 2.0)
+    np_tree = AudioTree.create(waveform, sr).replace_lufs()
+    jax_tree = AudioTree.create(jnp.asarray(waveform), sr).replace_lufs()
+    assert np_tree.lufs_windows.shape == jax_tree.lufs_windows.shape == (1, 5)
+    np.testing.assert_allclose(
+        np.asarray(np_tree.lufs_windows), np.asarray(jax_tree.lufs_windows), atol=0.2
+    )

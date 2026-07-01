@@ -310,7 +310,7 @@ def test_transforms():
     audio_tree = AudioTree(
         waveform=np.ones(shape=(1, 1, 44100), dtype=np.float32), sample_rate=44100
     )
-    audio_tree = audio_tree.replace_loudness()  # Required for volume_norm
+    audio_tree = audio_tree.replace_lufs()  # Required for volume_norm
     rng = np.random.default_rng(0)
 
     # Test all transforms (with prob=1.0 to avoid edge cases)
@@ -466,7 +466,7 @@ def test_peak_norm():
     waveform[0, 1, 2] = -0.25
     waveform[1, 0, 0] = 0.25
     waveform[1, 1, 3] = -0.1
-    audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_loudness()
+    audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_lufs()
 
     result = peak_norm().map(audio_tree)
 
@@ -476,7 +476,7 @@ def test_peak_norm():
     # Inter-channel balance is preserved (both channels scaled by the same factor).
     np.testing.assert_allclose(result.waveform[0, 1, 2], -0.5, atol=1e-6)
     # Volume changed, so cached loudness is invalidated.
-    assert result.loudness is None
+    assert result.lufs is None
 
 
 def test_peak_norm_silence():
@@ -502,35 +502,33 @@ def test_trim_invalidates_loudness():
     """Resizing the waveform invalidates cached loudness; a no-op preserves it."""
     sample_rate = 44100
     waveform = np.random.randn(2, 1, sample_rate * 2).astype(np.float32) * 0.1
-    audio_tree = AudioTree(
-        waveform=waveform, sample_rate=sample_rate
-    ).replace_loudness()
-    assert audio_tree.loudness is not None
+    audio_tree = AudioTree(waveform=waveform, sample_rate=sample_rate).replace_lufs()
+    assert audio_tree.lufs is not None
 
     # Shorten -> loudness invalidated.
-    assert trim(length=1.0).map(audio_tree).loudness is None
+    assert trim(length=1.0).map(audio_tree).lufs is None
     # Lengthen -> loudness invalidated.
-    assert trim(length=3.0).map(audio_tree).loudness is None
+    assert trim(length=3.0).map(audio_tree).lufs is None
     # Same length is a no-op and keeps the cached loudness.
     same = trim(length=2.0).map(audio_tree)
-    assert same.loudness is not None
+    assert same.lufs is not None
 
 
 def test_roll_loudness_invalidation():
     """Constant-mode roll invalidates loudness; wrap-mode preserves it."""
     waveform = np.random.randn(1, 2, 10000).astype(np.float32) * 0.1
-    audio_tree = AudioTree(waveform=waveform, sample_rate=10000).replace_loudness()
+    audio_tree = AudioTree(waveform=waveform, sample_rate=10000).replace_lufs()
     rng = np.random.default_rng(0)
 
     wrapped = roll(min_seconds=0.1, max_seconds=0.1, mode="wrap").random_map(
         audio_tree, rng
     )
-    assert wrapped.loudness is not None
+    assert wrapped.lufs is not None
 
     constant = roll(min_seconds=0.1, max_seconds=0.1, mode="constant").random_map(
         audio_tree, rng
     )
-    assert constant.loudness is None
+    assert constant.lufs is None
 
 
 def test_roll_invalidates_offset():
@@ -558,31 +556,31 @@ def test_to_stereo_invalidates_loudness():
     mono_tree = AudioTree(
         waveform=np.random.randn(2, 1, 44100).astype(np.float32) * 0.1,
         sample_rate=44100,
-    ).replace_loudness()
-    assert mono_tree.loudness is not None
+    ).replace_lufs()
+    assert mono_tree.lufs is not None
 
     stereo_tree = mono_tree.to_stereo()
     assert stereo_tree.num_channels == 2
-    assert stereo_tree.loudness is None
+    assert stereo_tree.lufs is None
 
     # Already-stereo audio is unchanged, so its loudness is preserved.
-    assert stereo_tree.replace_loudness().to_stereo().loudness is not None
+    assert stereo_tree.replace_lufs().to_stereo().lufs is not None
 
 
-def test_phase_transforms_keep_loudness():
-    """Phase transforms invalidate loudness by default, kept via keep_loudness."""
+def test_phase_transforms_keep_lufs():
+    """Phase transforms invalidate loudness by default, kept via keep_lufs."""
     waveform = np.random.randn(2, 1, 44100).astype(np.float32) * 0.1
-    audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_loudness()
-    original_loudness = audio_tree.loudness
+    audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_lufs()
+    original_loudness = audio_tree.lufs
     assert original_loudness is not None
     rng = np.random.default_rng(0)
 
     for transform in (shift_phase, corrupt_phase):
         # Default: loudness invalidated.
-        assert transform().random_map(audio_tree, rng).loudness is None
-        # keep_loudness=True: cached value carried through unchanged.
-        kept = transform(keep_loudness=True).random_map(audio_tree, rng)
-        np.testing.assert_array_equal(kept.loudness, original_loudness)
+        assert transform().random_map(audio_tree, rng).lufs is None
+        # keep_lufs=True: cached value carried through unchanged.
+        kept = transform(keep_lufs=True).random_map(audio_tree, rng)
+        np.testing.assert_array_equal(kept.lufs, original_loudness)
 
 
 # =============================================================================
@@ -594,7 +592,7 @@ def test_jax_transforms():
     """Test that all JAX transforms can be instantiated and applied."""
     # Use JAX arrays for the JAX module transforms
     audio_tree = AudioTree(waveform=jnp.ones(shape=(1, 1, 44100)), sample_rate=44100)
-    audio_tree = audio_tree.replace_loudness()  # Required for volume_norm
+    audio_tree = audio_tree.replace_lufs()  # Required for volume_norm
     rng = jax.random.key(0)
 
     # Test all transforms (with prob=1.0 to avoid edge cases)
@@ -674,7 +672,7 @@ def test_jax_roll_constant_mode():
 def test_jax_peak_norm():
     """Test JAX peak_norm scales each item to a peak of 1.0."""
     waveform = jnp.array([[[0.0, 0.5, -0.25, 0.1]]], dtype=jnp.float32)  # peak 0.5
-    audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_loudness()
+    audio_tree = AudioTree(waveform=waveform, sample_rate=44100).replace_lufs()
 
     result = jax_transforms.peak_norm().map(audio_tree)
 
@@ -689,4 +687,4 @@ def test_jax_resample_transform():
     assert isinstance(result.waveform, jax.Array)  # JAX backend stays JAX
     assert result.sample_rate == 22_050
     assert result.waveform.shape == (1, 1, 22_050)
-    assert result.loudness is None
+    assert result.lufs is None

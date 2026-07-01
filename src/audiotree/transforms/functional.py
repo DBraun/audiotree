@@ -40,6 +40,7 @@ from audiotree.transforms.helpers import (
     _shift_phase_np,
     _roll_np,
     _trim_np,
+    _shift_lufs_windows,
 )
 
 
@@ -65,7 +66,7 @@ def volume_norm(
         transform = volume_norm(min_db=-20, max_db=-15)
         ds = ds.random_map(transform, seed=42)
     """
-    audio_tree = audio_tree.replace_loudness()
+    audio_tree = audio_tree.replace_lufs()
     return _volume_norm_np(audio_tree, rng, min_db, max_db)
 
 
@@ -92,8 +93,11 @@ def volume_change(
         ds = ds.random_map(transform, seed=42)
     """
     audio_tree, gain_db = _volume_change_np(audio_tree, rng, min_db, max_db)
-    if audio_tree.loudness is not None:
-        audio_tree = audio_tree.replace(loudness=(audio_tree.loudness + gain_db))
+    if audio_tree.lufs is not None:
+        audio_tree = audio_tree.replace(
+            lufs=(audio_tree.lufs + gain_db),
+            lufs_windows=_shift_lufs_windows(audio_tree.lufs_windows, gain_db),
+        )
     return audio_tree
 
 
@@ -249,7 +253,7 @@ def rescale_audio(audio_tree: AudioTree) -> AudioTree:
         transform = rescale_audio()
         ds = ds.map(transform)
     """
-    return _rescale_audio_np(audio_tree).replace(loudness=None)
+    return _rescale_audio_np(audio_tree).replace(lufs=None, lufs_windows=None)
 
 
 @map_transform
@@ -272,7 +276,7 @@ def peak_norm(audio_tree: AudioTree) -> AudioTree:
         transform = peak_norm()
         ds = ds.map(transform)
     """
-    return _peak_norm_np(audio_tree).replace(loudness=None)
+    return _peak_norm_np(audio_tree).replace(lufs=None, lufs_windows=None)
 
 
 @random_transform
@@ -307,7 +311,7 @@ def corrupt_phase(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
-    keep_loudness: bool = False,
+    keep_lufs: bool = False,
 ) -> AudioTree:
     """Perform phase corruption on audio.
 
@@ -321,10 +325,10 @@ def corrupt_phase(
         hop_factor: Hop size as fraction of frame_length
         frame_length: STFT frame length in samples
         window: Window function name
-        keep_loudness: If True, preserve the cached ``loudness``. Phase
-            corruption leaves the magnitude spectrum (and thus energy) intact,
-            so loudness is approximately unchanged; the cached value is
-            invalidated by default to be safe.
+        keep_lufs: If True, preserve the cached ``lufs`` and ``lufs_windows``.
+            Phase corruption leaves the magnitude spectrum (and thus energy)
+            intact, so loudness is approximately unchanged; the cached values
+            are invalidated by default to be safe.
 
     Returns:
         AudioTree with corrupted phase
@@ -334,7 +338,7 @@ def corrupt_phase(
         ds = ds.random_map(transform, seed=42)
     """
     return _corrupt_phase_np(
-        audio_tree, rng, amount, hop_factor, frame_length, window, keep_loudness
+        audio_tree, rng, amount, hop_factor, frame_length, window, keep_lufs
     )
 
 
@@ -343,7 +347,7 @@ def shift_phase(
     audio_tree: AudioTree,
     rng: np.random.Generator,
     amount: float = 1.0,
-    keep_loudness: bool = False,
+    keep_lufs: bool = False,
 ) -> AudioTree:
     """Perform a phase shift on audio.
 
@@ -353,10 +357,10 @@ def shift_phase(
         audio_tree: Input audio
         rng: numpy random Generator
         amount: Maximum phase shift in multiples of pi
-        keep_loudness: If True, preserve the cached ``loudness``. A phase shift
-            leaves the magnitude spectrum (and thus energy) intact, so loudness
-            is approximately unchanged; the cached value is invalidated by
-            default to be safe.
+        keep_lufs: If True, preserve the cached ``lufs`` and ``lufs_windows``. A
+            phase shift leaves the magnitude spectrum (and thus energy) intact, so
+            loudness is approximately unchanged; the cached values are invalidated
+            by default to be safe.
 
     Returns:
         AudioTree with shifted phase
@@ -365,7 +369,7 @@ def shift_phase(
         transform = shift_phase(amount=0.5)
         ds = ds.random_map(transform, seed=42)
     """
-    return _shift_phase_np(audio_tree, rng, amount, keep_loudness=keep_loudness)
+    return _shift_phase_np(audio_tree, rng, amount, keep_lufs=keep_lufs)
 
 
 @random_transform

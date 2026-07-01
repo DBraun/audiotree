@@ -38,8 +38,8 @@ from audiotree import AudioTree
 
 from .core import _default_extensions, find_audio_files
 
-_LOUDNESS_BAGZ = "loudness.bagz"
-_LOUDNESS_MANIFEST = "manifest.json"
+_LUFS_BAGZ = "lufs.bagz"
+_LUFS_MANIFEST = "manifest.json"
 
 
 @dataclass(frozen=True)
@@ -60,20 +60,20 @@ class WindowParams:
         alpha: Length power for slots-per-file (0 = uniform per file, 1 =
             proportional to length).
         jitter: Randomize each draw's offset within its slot's stride.
-        loudness_cache: Optional path to a cache from
-            :func:`build_window_loudness_cache` for build-time saliency filtering.
-        loudness_cutoff: Minimum per-window LUFS to keep a slot (when filtering).
-        loudness_window_sec: Analysis window of the loudness cache; taken from the
-            cache when ``loudness_cache`` is given.
+        lufs_cache: Optional path to a cache from
+            :func:`build_window_lufs_cache` for build-time saliency filtering.
+        lufs_cutoff: Minimum per-window LUFS to keep a slot (when filtering).
+        lufs_window_sec: Analysis window of the loudness cache; taken from the
+            cache when ``lufs_cache`` is given.
     """
 
     duration: float = 1.0
     hop: Optional[float] = None
     alpha: float = 1.0
     jitter: bool = True
-    loudness_cache: Optional[str] = None
-    loudness_cutoff: float = -40.0
-    loudness_window_sec: Optional[float] = None
+    lufs_cache: Optional[str] = None
+    lufs_cutoff: float = -40.0
+    lufs_window_sec: Optional[float] = None
 
 
 def scan_durations(filepaths: List[str]) -> dict[str, float]:
@@ -127,7 +127,7 @@ def _file_windows(
     return np.ascontiguousarray(windows, dtype=np.float32), sr
 
 
-def precompute_window_loudness(
+def precompute_window_lufs(
     filepaths: List[str],
     window_duration_sec: float,
     *,
@@ -139,7 +139,7 @@ def precompute_window_loudness(
     Each value is the integrated loudness (LUFS, ITU-R BS.1770) of one
     non-overlapping ``window_duration_sec`` window, measured on the **CPU** with
     the upstream ``loudness`` library (``loudness.integrated_loudness``, the same
-    kernel :meth:`AudioTree.replace_loudness` uses for NumPy waveforms). This is a
+    kernel :meth:`AudioTree.replace_lufs` uses for NumPy waveforms). This is a
     one-time offline pass that runs entirely on the CPU -- it performs no
     JAX/GPU computation -- so it is safe to run before forking grain workers and
     keeps the data-source layer free of GPU work. For large corpora it
@@ -147,8 +147,8 @@ def precompute_window_loudness(
 
     The arrays are **ragged** (length scales with file duration); files shorter
     than one window get an empty array, which downstream filtering treats as
-    "keep". The result is suitable for passing as ``loudness_per_file=`` to
-    :func:`create_windowed_audio_dataset`; use :func:`build_window_loudness_cache`
+    "keep". The result is suitable for passing as ``lufs_per_file=`` to
+    :func:`create_windowed_audio_dataset`; use :func:`build_window_lufs_cache`
     to compute and persist it to disk (bagz) in one pass.
 
     The ``sample_rate`` and ``mono`` defaults match those of
@@ -194,11 +194,11 @@ def precompute_window_loudness(
 
 
 @dataclass(frozen=True)
-class WindowLoudnessCache:
-    """A loaded windowed-loudness cache (see :func:`load_window_loudness`).
+class WindowLufsCache:
+    """A loaded windowed-loudness cache (see :func:`load_window_lufs`).
 
     Attributes:
-        loudness: Mapping from filepath to its 1-D per-window LUFS array.
+        lufs: Mapping from filepath to its 1-D per-window LUFS array.
         durations: Mapping from filepath to duration in seconds, or ``None`` if
             durations were not stored.
         window_duration_sec: The analysis window length the cache was built with.
@@ -207,16 +207,16 @@ class WindowLoudnessCache:
         mono: Whether channels were averaged to mono before measuring.
     """
 
-    loudness: dict[str, np.ndarray]
+    lufs: dict[str, np.ndarray]
     durations: Optional[dict[str, float]]
     window_duration_sec: float
     sample_rate: Optional[int]
     mono: bool
 
 
-def save_window_loudness(
+def save_window_lufs(
     out_dir: str | Path,
-    loudness_per_file: Mapping[str, np.ndarray],
+    lufs_per_file: Mapping[str, np.ndarray],
     *,
     window_duration_sec: float,
     durations: Optional[Mapping[str, float]] = None,
@@ -226,15 +226,15 @@ def save_window_loudness(
     """Persist a windowed-loudness cache to ``out_dir`` as bagz + JSON manifest.
 
     The ragged per-file LUFS arrays are stored as one ``float32`` record each in
-    a single ``loudness.bagz`` file (no padding), in the order of
-    ``loudness_per_file``. A ``manifest.json`` records the filepaths (parallel to
+    a single ``lufs.bagz`` file (no padding), in the order of
+    ``lufs_per_file``. A ``manifest.json`` records the filepaths (parallel to
     the bagz records), the analysis window, optional durations, and the
     ``sample_rate``/``mono`` the loudness was measured at (so the dataset can
     verify the cache matches the audio it loads).
 
     Args:
         out_dir: Directory to write the cache into (created if missing).
-        loudness_per_file: Mapping from filepath to its per-window LUFS array.
+        lufs_per_file: Mapping from filepath to its per-window LUFS array.
         window_duration_sec: Analysis window length the arrays were computed with.
         durations: Optional mapping from filepath to duration in seconds; stored
             so the cache can also supply ``durations=`` to the dataset.
@@ -247,11 +247,11 @@ def save_window_loudness(
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    filepaths = list(loudness_per_file.keys())
+    filepaths = list(lufs_per_file.keys())
 
-    writer = bagz.Writer(str(out_dir / _LOUDNESS_BAGZ))
+    writer = bagz.Writer(str(out_dir / _LUFS_BAGZ))
     for fp in filepaths:
-        writer.write(np.asarray(loudness_per_file[fp], dtype=np.float32).tobytes())
+        writer.write(np.asarray(lufs_per_file[fp], dtype=np.float32).tobytes())
     writer.close()
 
     manifest = {
@@ -265,25 +265,25 @@ def save_window_loudness(
             if durations is not None
             else None
         ),
-        "bagz_file": _LOUDNESS_BAGZ,
+        "bagz_file": _LUFS_BAGZ,
     }
-    with open(out_dir / _LOUDNESS_MANIFEST, "w") as f:
+    with open(out_dir / _LUFS_MANIFEST, "w") as f:
         json.dump(manifest, f)
     return out_dir
 
 
-def load_window_loudness(cache_dir: str | Path) -> WindowLoudnessCache:
-    """Load a windowed-loudness cache written by :func:`save_window_loudness`.
+def load_window_lufs(cache_dir: str | Path) -> WindowLufsCache:
+    """Load a windowed-loudness cache written by :func:`save_window_lufs`.
 
     Args:
-        cache_dir: Directory containing ``loudness.bagz`` and ``manifest.json``.
+        cache_dir: Directory containing ``lufs.bagz`` and ``manifest.json``.
 
     Returns:
-        A :class:`WindowLoudnessCache` with the per-file LUFS arrays, optional
+        A :class:`WindowLufsCache` with the per-file LUFS arrays, optional
         durations, and the analysis window length.
     """
     cache_dir = Path(cache_dir)
-    with open(cache_dir / _LOUDNESS_MANIFEST) as f:
+    with open(cache_dir / _LUFS_MANIFEST) as f:
         manifest = json.load(f)
 
     filepaths = manifest["filepaths"]
@@ -293,7 +293,7 @@ def load_window_loudness(cache_dir: str | Path) -> WindowLoudnessCache:
             f"Cache corruption: {len(reader)} bagz records for "
             f"{len(filepaths)} filepaths in {cache_dir}."
         )
-    loudness_per_file = {
+    lufs_per_file = {
         fp: np.frombuffer(reader[i], dtype=np.float32).copy()
         for i, fp in enumerate(filepaths)
     }
@@ -302,8 +302,8 @@ def load_window_loudness(cache_dir: str | Path) -> WindowLoudnessCache:
     if manifest["durations"] is not None:
         durations = dict(zip(filepaths, manifest["durations"]))
 
-    return WindowLoudnessCache(
-        loudness=loudness_per_file,
+    return WindowLufsCache(
+        lufs=lufs_per_file,
         durations=durations,
         window_duration_sec=manifest["window_duration_sec"],
         sample_rate=manifest.get("sample_rate"),
@@ -311,7 +311,7 @@ def load_window_loudness(cache_dir: str | Path) -> WindowLoudnessCache:
     )
 
 
-def build_window_loudness_cache(
+def build_window_lufs_cache(
     filepaths: List[str],
     window_duration_sec: float,
     out_dir: str | Path,
@@ -322,10 +322,10 @@ def build_window_loudness_cache(
 ) -> Path:
     """Compute and persist a windowed-loudness cache in one preprocessing pass.
 
-    Convenience wrapper that runs :func:`precompute_window_loudness`, scans
+    Convenience wrapper that runs :func:`precompute_window_lufs`, scans
     durations (via :func:`scan_durations` unless ``durations`` is given), and
-    writes both to ``out_dir`` with :func:`save_window_loudness`. Run this once
-    offline, then pass ``loudness_cache=out_dir`` to
+    writes both to ``out_dir`` with :func:`save_window_lufs`. Run this once
+    offline, then pass ``lufs_cache=out_dir`` to
     :func:`create_windowed_audio_dataset`.
 
     Args:
@@ -339,7 +339,7 @@ def build_window_loudness_cache(
     Returns:
         The cache directory as a ``Path``.
     """
-    loudness_per_file = precompute_window_loudness(
+    lufs_per_file = precompute_window_lufs(
         filepaths,
         window_duration_sec,
         sample_rate=sample_rate,
@@ -347,9 +347,9 @@ def build_window_loudness_cache(
     )
     if durations is None:
         durations = scan_durations(filepaths)
-    return save_window_loudness(
+    return save_window_lufs(
         out_dir,
-        loudness_per_file,
+        lufs_per_file,
         window_duration_sec=window_duration_sec,
         durations=durations,
         sample_rate=sample_rate,
@@ -363,9 +363,9 @@ def _build_slot_index(
     duration: float,
     hop: float,
     alpha: float,
-    loudness_per_file: Optional[Mapping[str, np.ndarray]],
-    loudness_window_sec: float,
-    loudness_cutoff: float,
+    lufs_per_file: Optional[Mapping[str, np.ndarray]],
+    lufs_window_sec: float,
+    lufs_cutoff: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Build the flat, globally-shuffleable slot index.
 
@@ -393,15 +393,15 @@ def _build_slot_index(
         offsets = (j * stride).astype(np.float32)
 
         keep = np.ones(num_slots, dtype=bool)
-        if loudness_per_file is not None:
-            lufs = loudness_per_file[fp]  # KeyError if a file is missing: fail loud
+        if lufs_per_file is not None:
+            lufs = lufs_per_file[fp]  # KeyError if a file is missing: fail loud
             if lufs.size > 0:
                 # Map each slot's center to its loudness-grid cell.
                 centers = offsets + duration / 2.0
                 cell = np.clip(
-                    (centers / loudness_window_sec).astype(int), 0, lufs.size - 1
+                    (centers / lufs_window_sec).astype(int), 0, lufs.size - 1
                 )
-                keep = lufs[cell] >= loudness_cutoff
+                keep = lufs[cell] >= lufs_cutoff
 
         if not keep.any():
             continue
@@ -414,7 +414,7 @@ def _build_slot_index(
     if not file_idx_parts:
         raise RuntimeError(
             "No slots were produced. If loudness filtering is enabled, the "
-            f"cutoff ({loudness_cutoff} LUFS) may have rejected every window."
+            f"cutoff ({lufs_cutoff} LUFS) may have rejected every window."
         )
 
     return (
@@ -468,10 +468,10 @@ def create_windowed_audio_dataset(
     alpha: float = 1.0,
     jitter: bool = True,
     durations: Optional[Mapping[str, float]] = None,
-    loudness_cache: str | Path | None = None,
-    loudness_per_file: Optional[Mapping[str, np.ndarray]] = None,
-    loudness_window_sec: float | None = None,
-    loudness_cutoff: float = -40.0,
+    lufs_cache: str | Path | None = None,
+    lufs_per_file: Optional[Mapping[str, np.ndarray]] = None,
+    lufs_window_sec: float | None = None,
+    lufs_cutoff: float = -40.0,
     shuffle: bool = True,
     repeat: bool = False,
     shuffle_seed: int = 0,
@@ -506,20 +506,20 @@ def create_windowed_audio_dataset(
             coverage spans the whole file and excerpts never repeat across epochs.
         durations: Optional precomputed ``{filepath: seconds}`` cache (see
             :func:`scan_durations`). If None, durations are scanned from headers
-            (or taken from ``loudness_cache`` if it stored them).
-        loudness_cache: Optional path to an on-disk cache written by
-            :func:`build_window_loudness_cache`. When given, its per-file LUFS
+            (or taken from ``lufs_cache`` if it stored them).
+        lufs_cache: Optional path to an on-disk cache written by
+            :func:`build_window_lufs_cache`. When given, its per-file LUFS
             arrays, analysis window, and durations are loaded and used for
             build-time saliency filtering (overridable by the explicit
-            ``loudness_per_file`` / ``loudness_window_sec`` / ``durations`` args).
-        loudness_per_file: Optional precomputed per-file windowed-LUFS arrays (see
-            :func:`precompute_window_loudness`). If given, slots whose center is
-            below ``loudness_cutoff`` are dropped at build time. If None and no
-            ``loudness_cache`` (the default), no loudness filtering is done --
+            ``lufs_per_file`` / ``lufs_window_sec`` / ``durations`` args).
+        lufs_per_file: Optional precomputed per-file windowed-LUFS arrays (see
+            :func:`precompute_window_lufs`). If given, slots whose center is
+            below ``lufs_cutoff`` are dropped at build time. If None and no
+            ``lufs_cache`` (the default), no loudness filtering is done --
             assume curated data.
-        loudness_window_sec: Analysis window of ``loudness_per_file`` in seconds.
-            Required when ``loudness_per_file`` is given without a ``loudness_cache``.
-        loudness_cutoff: Minimum per-window LUFS to keep a slot.
+        lufs_window_sec: Analysis window of ``lufs_per_file`` in seconds.
+            Required when ``lufs_per_file`` is given without a ``lufs_cache``.
+        lufs_cutoff: Minimum per-window LUFS to keep a slot.
         shuffle: Whether to globally shuffle slots (required for batch diversity).
         repeat: Whether to repeat infinitely (True for training).
         shuffle_seed: Seed for the global slot shuffle.
@@ -563,34 +563,34 @@ def create_windowed_audio_dataset(
             raise ValueError("`filepaths` must be a non-empty list of file paths.")
 
     # Resolve the optional on-disk loudness cache; explicit args take precedence.
-    if loudness_cache is not None:
-        cache = load_window_loudness(loudness_cache)
+    if lufs_cache is not None:
+        cache = load_window_lufs(lufs_cache)
         # The cached loudness only reflects the audio the dataset loads if it was
         # measured at the same sample_rate/mono; otherwise the cutoff is applied
         # to a different signal than the model sees.
         if cache.sample_rate is not None and cache.sample_rate != sample_rate:
             raise ValueError(
-                f"loudness_cache was measured at sample_rate={cache.sample_rate} "
+                f"lufs_cache was measured at sample_rate={cache.sample_rate} "
                 f"but the dataset loads at sample_rate={sample_rate}. Rebuild the "
                 "cache with a matching sample_rate."
             )
         if cache.mono != mono:
             raise ValueError(
-                f"loudness_cache was measured with mono={cache.mono} but the "
+                f"lufs_cache was measured with mono={cache.mono} but the "
                 f"dataset loads with mono={mono}. Rebuild the cache with a "
                 "matching mono setting."
             )
-        if loudness_per_file is None:
-            loudness_per_file = cache.loudness
-        if loudness_window_sec is None:
-            loudness_window_sec = cache.window_duration_sec
+        if lufs_per_file is None:
+            lufs_per_file = cache.lufs
+        if lufs_window_sec is None:
+            lufs_window_sec = cache.window_duration_sec
         if durations is None:
             durations = cache.durations
 
-    if loudness_per_file is not None and loudness_window_sec is None:
+    if lufs_per_file is not None and lufs_window_sec is None:
         raise ValueError(
-            "loudness_window_sec is required when loudness_per_file is provided "
-            "without a loudness_cache."
+            "lufs_window_sec is required when lufs_per_file is provided "
+            "without a lufs_cache."
         )
 
     if durations is None:
@@ -602,10 +602,10 @@ def create_windowed_audio_dataset(
         duration=duration,
         hop=hop,
         alpha=alpha,
-        loudness_per_file=loudness_per_file,
-        # Unused when loudness_per_file is None; coalesce to keep arithmetic valid.
-        loudness_window_sec=loudness_window_sec if loudness_window_sec else 1.0,
-        loudness_cutoff=loudness_cutoff,
+        lufs_per_file=lufs_per_file,
+        # Unused when lufs_per_file is None; coalesce to keep arithmetic valid.
+        lufs_window_sec=lufs_window_sec if lufs_window_sec else 1.0,
+        lufs_cutoff=lufs_cutoff,
     )
 
     # Source over slot ids; lookups go through the parallel arrays above.

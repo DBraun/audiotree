@@ -28,6 +28,18 @@ def _db2linear_np(decibels):
     return np.power(10.0, decibels / 20.0)
 
 
+def _shift_lufs_windows(lufs_windows, gain_db):
+    """Shift per-window LUFS by a per-item dB gain (a constant gain shifts every
+    window equally), or return ``None`` if ``lufs_windows`` is not populated.
+
+    Works for both NumPy and JAX arrays: ``gain_db`` is ``(batch,)`` and
+    broadcasts over the window axis.
+    """
+    if lufs_windows is None:
+        return None
+    return lufs_windows + gain_db[:, None]
+
+
 # =============================================================================
 # Volume Norm - JAX and NumPy implementations
 # =============================================================================
@@ -41,10 +53,13 @@ def _volume_norm_jax(
     B = waveform.shape[0]
 
     target_db = random.uniform(key, shape=(B,), minval=min_db, maxval=max_db)
-    gain_db = target_db - audio_tree.loudness
+    gain_db = target_db - audio_tree.lufs
 
     waveform = waveform * _db2linear_jax(gain_db)[:, None, None]
-    return audio_tree.replace(waveform=waveform, loudness=target_db)
+    lufs_windows = _shift_lufs_windows(audio_tree.lufs_windows, gain_db)
+    return audio_tree.replace(
+        waveform=waveform, lufs=target_db, lufs_windows=lufs_windows
+    )
 
 
 def _volume_norm_np(
@@ -55,11 +70,13 @@ def _volume_norm_np(
     B = waveform.shape[0]
 
     target_db = rng.uniform(min_db, max_db, size=(B,)).astype(np.float32)
-    loudness = audio_tree.loudness
-    gain_db = target_db - loudness
+    gain_db = target_db - audio_tree.lufs
 
     waveform = waveform * _db2linear_np(gain_db)[:, None, None]
-    return audio_tree.replace(waveform=waveform, loudness=target_db)
+    lufs_windows = _shift_lufs_windows(audio_tree.lufs_windows, gain_db)
+    return audio_tree.replace(
+        waveform=waveform, lufs=target_db, lufs_windows=lufs_windows
+    )
 
 
 # =============================================================================
@@ -184,7 +201,7 @@ def _corrupt_phase_jax(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
-    keep_loudness: bool = False,
+    keep_lufs: bool = False,
 ) -> AudioTree:
     """JAX implementation of phase corruption."""
     waveform = audio_tree.waveform
@@ -211,8 +228,9 @@ def _corrupt_phase_jax(
         length=length,
     )
 
-    loudness = audio_tree.loudness if keep_loudness else None
-    return audio_tree.replace(waveform=waveform, loudness=loudness)
+    lufs = audio_tree.lufs if keep_lufs else None
+    lufs_windows = audio_tree.lufs_windows if keep_lufs else None
+    return audio_tree.replace(waveform=waveform, lufs=lufs, lufs_windows=lufs_windows)
 
 
 def _corrupt_phase_np(
@@ -222,7 +240,7 @@ def _corrupt_phase_np(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
-    keep_loudness: bool = False,
+    keep_lufs: bool = False,
 ) -> AudioTree:
     """NumPy implementation of phase corruption."""
     waveform = audio_tree.waveform
@@ -256,8 +274,9 @@ def _corrupt_phase_np(
                 length=length,
             )
 
-    loudness = audio_tree.loudness if keep_loudness else None
-    return audio_tree.replace(waveform=result, loudness=loudness)
+    lufs = audio_tree.lufs if keep_lufs else None
+    lufs_windows = audio_tree.lufs_windows if keep_lufs else None
+    return audio_tree.replace(waveform=result, lufs=lufs, lufs_windows=lufs_windows)
 
 
 # =============================================================================
@@ -272,7 +291,7 @@ def _shift_phase_jax(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
-    keep_loudness: bool = False,
+    keep_lufs: bool = False,
 ) -> AudioTree:
     """JAX implementation of phase shift."""
     waveform = audio_tree.waveform
@@ -302,8 +321,9 @@ def _shift_phase_jax(
         length=length,
     )
 
-    loudness = audio_tree.loudness if keep_loudness else None
-    return audio_tree.replace(waveform=waveform, loudness=loudness)
+    lufs = audio_tree.lufs if keep_lufs else None
+    lufs_windows = audio_tree.lufs_windows if keep_lufs else None
+    return audio_tree.replace(waveform=waveform, lufs=lufs, lufs_windows=lufs_windows)
 
 
 def _shift_phase_np(
@@ -313,7 +333,7 @@ def _shift_phase_np(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
-    keep_loudness: bool = False,
+    keep_lufs: bool = False,
 ) -> AudioTree:
     """NumPy implementation of phase shift."""
     waveform = audio_tree.waveform
@@ -346,8 +366,9 @@ def _shift_phase_np(
                 length=length,
             )
 
-    loudness = audio_tree.loudness if keep_loudness else None
-    return audio_tree.replace(waveform=result, loudness=loudness)
+    lufs = audio_tree.lufs if keep_lufs else None
+    lufs_windows = audio_tree.lufs_windows if keep_lufs else None
+    return audio_tree.replace(waveform=result, lufs=lufs, lufs_windows=lufs_windows)
 
 
 # =============================================================================
@@ -411,12 +432,13 @@ def _roll_jax(
             raise ValueError(f"Unknown mode: {mode}. Use 'wrap' or 'constant'.")
 
     rolled_audio = roll_single_item(audio_tree.waveform, roll_amounts)
-    # "wrap" reorders existing samples (loudness preserved); "constant" zeros
-    # out part of the signal, which changes its integrated loudness.
-    loudness = None if mode == "constant" else audio_tree.loudness
+    # "wrap" reorders existing samples (integrated loudness preserved); "constant"
+    # zeros out part of the signal, changing it. Either way, rolling moves samples
+    # across window boundaries, so ``lufs_windows`` is invalidated below.
+    lufs = None if mode == "constant" else audio_tree.lufs
     metadata = _invalidate_offset(audio_tree.metadata)
     return audio_tree.replace(
-        waveform=rolled_audio, loudness=loudness, metadata=metadata
+        waveform=rolled_audio, lufs=lufs, lufs_windows=None, metadata=metadata
     )
 
 
@@ -451,11 +473,14 @@ def _roll_np(
         else:
             raise ValueError(f"Unknown mode: {mode}. Use 'wrap' or 'constant'.")
 
-    # "wrap" reorders existing samples (loudness preserved); "constant" zeros
-    # out part of the signal, which changes its integrated loudness.
-    loudness = None if mode == "constant" else audio_tree.loudness
+    # "wrap" reorders existing samples (integrated loudness preserved); "constant"
+    # zeros out part of the signal, changing it. Either way, rolling moves samples
+    # across window boundaries, so ``lufs_windows`` is invalidated below.
+    lufs = None if mode == "constant" else audio_tree.lufs
     metadata = _invalidate_offset(audio_tree.metadata)
-    return audio_tree.replace(waveform=result, loudness=loudness, metadata=metadata)
+    return audio_tree.replace(
+        waveform=result, lufs=lufs, lufs_windows=None, metadata=metadata
+    )
 
 
 # =============================================================================
@@ -481,7 +506,7 @@ def _trim_jax(audio_tree: AudioTree, length: float, mode: str = "wrap") -> Audio
         waveform = waveform[..., :target_T]
 
     # Changing the audio length changes its integrated loudness.
-    return audio_tree.replace(waveform=waveform, loudness=None)
+    return audio_tree.replace(waveform=waveform, lufs=None, lufs_windows=None)
 
 
 def _trim_np(audio_tree: AudioTree, length: float, mode: str = "wrap") -> AudioTree:
@@ -502,4 +527,4 @@ def _trim_np(audio_tree: AudioTree, length: float, mode: str = "wrap") -> AudioT
         waveform = waveform[..., :target_T]
 
     # Changing the audio length changes its integrated loudness.
-    return audio_tree.replace(waveform=waveform, loudness=None)
+    return audio_tree.replace(waveform=waveform, lufs=None, lufs_windows=None)

@@ -129,18 +129,18 @@ Loudness-Based Saliency (Optional)
 
 For uncurated corpora you can drop quiet windows up front. Precompute a per-file
 **windowed-LUFS** cache once (computed on the CPU, no JAX/GPU work), then point
-the dataset at it -- slots below ``loudness_cutoff`` are removed at build time,
+the dataset at it -- slots below ``lufs_cutoff`` are removed at build time,
 so no loudness search happens during training:
 
 .. code-block:: python
 
-    from audiotree.sources import build_window_loudness_cache, create_windowed_audio_dataset
+    from audiotree.sources import build_window_lufs_cache, create_windowed_audio_dataset
 
     # One-time offline pass. Ragged per-file LUFS arrays are stored as bagz.
-    build_window_loudness_cache(
+    build_window_lufs_cache(
         filepaths,
         window_duration_sec=1.0,
-        out_dir="loudness_cache/",
+        out_dir="lufs_cache/",
         sample_rate=44100,   # match the dataset so LUFS reflects the loaded audio
         mono=True,
     )
@@ -151,14 +151,14 @@ so no loudness search happens during training:
         alpha=0.5,
         sample_rate=44100,
         mono=True,
-        loudness_cache="loudness_cache/",   # supplies durations + LUFS + window
-        loudness_cutoff=-40.0,              # keep windows at or above -40 LUFS
+        lufs_cache="lufs_cache/",   # supplies durations + LUFS + window
+        lufs_cutoff=-40.0,              # keep windows at or above -40 LUFS
     )
 
 The cache also stores durations (so it doubles as the duration cache) and the
 ``sample_rate``/``mono`` it was measured with; the dataset raises if those don't
 match what it loads, since the cutoff would otherwise apply to a different signal.
-Well-curated data needs none of this -- omit ``loudness_cache`` and no filtering
+Well-curated data needs none of this -- omit ``lufs_cache`` and no filtering
 is done.
 
 Composing with Balanced Datasets

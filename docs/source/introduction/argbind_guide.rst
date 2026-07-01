@@ -40,7 +40,7 @@ Given this Python code:
     def main():
         # Create audio
         audio_tree = AudioTree(np.random.randn(4, 1, 44100*4), sample_rate=44100)
-        audio_tree = audio_tree.replace_loudness()
+        audio_tree = audio_tree.replace_lufs()
 
         # Apply transforms (config set via argbind)
         rng = np.random.default_rng(42)

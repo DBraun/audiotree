@@ -140,7 +140,7 @@ AudioTree objects have several key properties:
     print(audio_tree.sample_rate)
 
     # Optional properties (can be None)
-    print(audio_tree.loudness)   # Computed on demand
+    print(audio_tree.lufs)   # Computed on demand
     print(audio_tree.metadata)   # Dictionary for custom data
 
 .. testoutput::
@@ -180,10 +180,10 @@ AudioTree can compute loudness in LUFS (Loudness Units Full Scale) for each item
 
     # Create audio_tree with 4 batches and compute loudness for each
     audio_tree = AudioTree(np.ones((4, 2, 44_100)) * 0.1, 44_100)
-    tree_with_loudness = audio_tree.replace_loudness()
+    tree_with_loudness = audio_tree.replace_lufs()
 
-    print(tree_with_loudness.loudness.shape)   # One loudness value per batch item
-    print(tree_with_loudness.loudness)         # LUFS values (constant 0.1 signal)
+    print(tree_with_loudness.lufs.shape)   # One loudness value per batch item
+    print(tree_with_loudness.lufs)         # LUFS values (constant 0.1 signal)
 
 .. testoutput::
 
@@ -255,8 +255,8 @@ to change the channel layout. ``to_mono`` takes a ``strategy``:
 
 .. note::
    Changing the channel layout changes the integrated loudness, so ``to_mono`` and
-   the mono→stereo path of ``to_stereo`` clear any cached ``loudness``. It is
-   recomputed on the next :meth:`~audiotree.core.AudioTree.replace_loudness`.
+   the mono→stereo path of ``to_stereo`` clear any cached ``lufs``. It is
+   recomputed on the next :meth:`~audiotree.core.AudioTree.replace_lufs`.
 
 Indexing and Iterating Batches
 ------------------------------
@@ -353,13 +353,13 @@ and :meth:`~audiotree.core.AudioTree.flatten_mini_batches` removes it again:
 
 .. note::
    AudioTree methods operate on mini-batched trees directly. Methods like
-   :meth:`~audiotree.core.AudioTree.replace_loudness`,
-   :meth:`~audiotree.core.AudioTree.normalize_loudness`,
+   :meth:`~audiotree.core.AudioTree.replace_lufs`,
+   :meth:`~audiotree.core.AudioTree.normalize_lufs`,
    :meth:`~audiotree.core.AudioTree.to_mono`, :meth:`~audiotree.core.AudioTree.to_stereo`,
    and :meth:`~audiotree.core.AudioTree.resample` treat *all* leading axes as batch
    axes, so you can call them on a ``(num_mini_batches, mini_batch_size, C, T)`` tree
    without flattening first. Per-item results follow the leading shape — e.g.
-   ``loudness`` comes back shaped ``(num_mini_batches, mini_batch_size)``.
+   ``lufs`` comes back shaped ``(num_mini_batches, mini_batch_size)``.
 
 Splitting into Multiple Trees
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -409,18 +409,18 @@ The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively ke
         noise * 1.0   # Full scale
     ])
 
-    audio_tree = AudioTree(waveform, 44_100).replace_loudness()
+    audio_tree = AudioTree(waveform, 44_100).replace_lufs()
 
     # Filter to keep only audio louder than -20 LUFS
     def keep_loud_audio(mini_tree):
-        return mini_tree.loudness[0] > -20.0
+        return mini_tree.lufs[0] > -20.0
 
     filtered_tree = audio_tree.filter(keep_loud_audio)
 
     # 9 batches remain (excluding silent and very quiet ones)
     print(filtered_tree.waveform.shape)
     # LUFS values for remaining batches (rounded for display)
-    print(np.round(filtered_tree.loudness, 2))
+    print(np.round(filtered_tree.lufs, 2))
 
 .. testoutput::
 
@@ -703,7 +703,7 @@ Basic Example
     audio_tree = AudioTree.create(
         np.random.randn(3, 2, 44_100),  # 3 batches, stereo, 1 second
         sample_rate=44_100,
-        loudness=np.array([-20.0, -15.0, -18.0])
+        lufs=np.array([-20.0, -15.0, -18.0])
     )
 
     # Write to disk with automatic manifest
@@ -715,7 +715,7 @@ Basic Example
     # Read the data back
     from audiotree.sources import ManifestDataSource
     source = ManifestDataSource.from_writer_output("output")
-    print(source[0].loudness)   # Metadata is preserved
+    print(source[0].lufs)   # Metadata is preserved
 
 .. testoutput::
 

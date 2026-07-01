@@ -41,10 +41,10 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         >>> import jax.numpy as jnp
         >>> from audiotree import AudioTree, AudioWriter
         >>> out_dir = tempfile.mkdtemp()
-        >>> loudness = np.full((5,), -10.0, dtype=np.float32)
+        >>> lufs = np.full((5,), -10.0, dtype=np.float32)
         >>> with AudioWriter(out_dir) as writer:
         ...     _ = writer.write(
-        ...         AudioTree.create(jnp.zeros((5, 1, 44100)), 44100, loudness=loudness)
+        ...         AudioTree.create(jnp.zeros((5, 1, 44100)), 44100, lufs=lufs)
         ...     )
         >>> manifest_path = f"{out_dir}/manifest.npz"
 
@@ -60,7 +60,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
 
         >>> source = ManifestDataSource(
         ...     manifest_path,
-        ...     filter_fn=lambda entry: entry.get('loudness', -float('inf')) > -20
+        ...     filter_fn=lambda entry: entry.get('lufs', -float('inf')) > -20
         ... )
 
         Or use the convenience constructor that points at the output directory:
@@ -343,12 +343,12 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             filter_fn=filter_fn,
         )
 
-    def filter_by_loudness(
+    def filter_by_lufs(
         self, min_lufs: float = None, max_lufs: float = None
     ) -> "ManifestDataSource":
         """Create a new ManifestDataSource filtered by loudness range.
 
-        Filters entries based on the 'loudness' field in the manifest.
+        Filters entries based on the 'lufs' field in the manifest.
         Works with manifests created by AudioWriter in NPZ format.
 
         Args:
@@ -360,7 +360,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
 
         Example:
             Write four items with known per-item loudness so the manifest
-            records a ``loudness`` field to filter on:
+            records a ``lufs`` field to filter on:
 
             >>> import tempfile
             >>> import numpy as np
@@ -369,7 +369,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             >>> out_dir = tempfile.mkdtemp()
             >>> tree = AudioTree.create(
             ...     jnp.zeros((4, 1, 44100)), 44100,
-            ...     loudness=np.array([-30.0, -18.0, -10.0, -25.0], dtype=np.float32),
+            ...     lufs=np.array([-30.0, -18.0, -10.0, -25.0], dtype=np.float32),
             ... )
             >>> with AudioWriter(out_dir) as writer:
             ...     _ = writer.write(tree)
@@ -377,24 +377,24 @@ class ManifestDataSource(grain.RandomAccessDataSource):
 
             Keep only samples louder than -20 LUFS:
 
-            >>> loud_source = source.filter_by_loudness(min_lufs=-20.0)
+            >>> loud_source = source.filter_by_lufs(min_lufs=-20.0)
             >>> len(loud_source)
             2
 
             Keep samples within a specific loudness range:
 
-            >>> mid_source = source.filter_by_loudness(min_lufs=-30.0, max_lufs=-15.0)
+            >>> mid_source = source.filter_by_lufs(min_lufs=-30.0, max_lufs=-15.0)
             >>> len(mid_source)
             3
         """
 
         def filter_fn(entry):
-            loudness = entry.get("loudness")
-            if loudness is None:
+            lufs = entry.get("lufs")
+            if lufs is None:
                 return False
-            if min_lufs is not None and loudness < min_lufs:
+            if min_lufs is not None and lufs < min_lufs:
                 return False
-            if max_lufs is not None and loudness > max_lufs:
+            if max_lufs is not None and lufs > max_lufs:
                 return False
             return True
 

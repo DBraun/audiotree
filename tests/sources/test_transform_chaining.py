@@ -52,9 +52,9 @@ class TestBasicChaining:
 
             # Load item and verify transform was applied
             item = ds[0]
-            assert item.loudness is not None
-            assert item.loudness[0] >= -20 - 1  # Allow 1dB tolerance
-            assert item.loudness[0] <= -15 + 1
+            assert item.lufs is not None
+            assert item.lufs[0] >= -20 - 1  # Allow 1dB tolerance
+            assert item.lufs[0] <= -15 + 1
 
     def test_single_map_transform(self):
         """Test chaining a single deterministic transform."""
@@ -109,7 +109,7 @@ class TestBasicChaining:
 
             # trim runs last and changes the audio length, so it invalidates
             # the loudness set by the earlier volume transforms.
-            assert item.loudness is None
+            assert item.lufs is None
 
             # Check Trim was applied
             expected_length = int(3.0 * 44100)
@@ -146,7 +146,7 @@ class TestBalancedDatasetChaining:
             # Verify transforms applied and source tracking preserved. trim runs
             # last and changes the length, invalidating volume_norm's loudness.
             item = ds[0]
-            assert item.loudness is None
+            assert item.lufs is None
             assert item.waveform.shape[-1] == int(3.0 * 44100)
             assert item.source[0] in ["group1", "group2"]
 
@@ -186,8 +186,8 @@ class TestBalancedDatasetChaining:
             assert item2.waveform.shape[-1] == int(3.0 * 44100)
             # Order matters for loudness: option 1 normalizes last so loudness is
             # set, while option 2 trims last, which invalidates it.
-            assert item1.loudness is not None
-            assert item2.loudness is None
+            assert item1.lufs is not None
+            assert item2.lufs is None
 
 
 class TestProbabilisticTransforms:
@@ -250,11 +250,11 @@ class TestLazyEvaluation:
 
             # Access first item - transform applied now
             item = ds[0]
-            assert item.loudness is not None
+            assert item.lufs is not None
 
             # Access another item - transform applied independently
             item2 = ds[1]
-            assert item2.loudness is not None
+            assert item2.lufs is not None
 
 
 class TestStereoMonoChaining:

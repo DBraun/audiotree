@@ -22,7 +22,7 @@ Transforms
     from audiotree import AudioTree
 
     audio_tree = AudioTree(np.random.default_rng(0).standard_normal((2, 1, 44_100)), 44_100)
-    audio_tree = audio_tree.replace_loudness()
+    audio_tree = audio_tree.replace_lufs()
     rng = np.random.default_rng(0)
 
 Transforms in ``audiotree.transforms`` are `Grain`_
@@ -96,7 +96,7 @@ Transforms are functions that return transform instances:
 
     # Create audio
     audio_tree = AudioTree(...)
-    audio_tree = audio_tree.replace_loudness()
+    audio_tree = audio_tree.replace_lufs()
 
     # Apply transforms
     rng = jax.random.key(42)
@@ -248,8 +248,8 @@ Available Transforms
 - ``volume_change(min_db, max_db)`` - Random gain adjustment
 - ``invert_phase()`` - Invert audio phase
 - ``swap_stereo()`` - Swap stereo channels
-- ``corrupt_phase(amount, ..., keep_loudness=False)`` - Corrupt phase spectrum
-- ``shift_phase(amount, keep_loudness=False)`` - Shift phase spectrum
+- ``corrupt_phase(amount, ..., keep_lufs=False)`` - Corrupt phase spectrum
+- ``shift_phase(amount, keep_lufs=False)`` - Shift phase spectrum
 - ``roll(min_seconds, max_seconds, mode)`` - Circular shift audio
 
 **Map Transforms** (use with ``.map()``):
@@ -280,36 +280,36 @@ Available Transforms
 Loudness and Transforms
 -----------------------
 
-AudioTree caches a per-item ``loudness`` (in LUFS) once you call
-:meth:`~audiotree.core.AudioTree.replace_loudness`. Transforms that change the
-signal's energy keep that cache honest by clearing it (setting ``loudness`` to
+AudioTree caches a per-item ``lufs`` (in LUFS) once you call
+:meth:`~audiotree.core.AudioTree.replace_lufs`. Transforms that change the
+signal's energy keep that cache honest by clearing it (setting ``lufs`` to
 ``None``), so a later read recomputes it instead of returning a stale value:
 
-- ``volume_norm`` sets ``loudness`` to its target; ``volume_change`` shifts the
-  cached value by the applied gain — both keep ``loudness`` populated and correct.
+- ``volume_norm`` sets ``lufs`` to its target; ``volume_change`` shifts the
+  cached value by the applied gain — both keep ``lufs`` populated and correct.
 - ``trim``, ``roll(mode="constant")``, ``rescale_audio``, and ``peak_norm``
-  change the signal's energy, so they **invalidate** ``loudness``.
+  change the signal's energy, so they **invalidate** ``lufs``.
 - ``invert_phase``, ``swap_stereo``, and ``roll(mode="wrap")`` leave the energy
-  unchanged, so they **preserve** ``loudness``.
+  unchanged, so they **preserve** ``lufs``.
 
 The phase transforms ``corrupt_phase`` and ``shift_phase`` are a special case: they
 only rotate phase, leaving the magnitude spectrum (and thus the energy) essentially
-unchanged. By default they still invalidate ``loudness`` to be safe, but you can pass
-``keep_loudness=True`` to carry the cached value through:
+unchanged. By default they still invalidate ``lufs`` to be safe, but you can pass
+``keep_lufs=True`` to carry the cached value through:
 
 .. testcode::
 
     from audiotree.transforms import shift_phase
 
-    audio_tree = audio_tree.replace_loudness()
+    audio_tree = audio_tree.replace_lufs()
 
     # Default: loudness is recomputed on next access.
     t1 = shift_phase(amount=0.5)
-    print(t1.random_map(audio_tree, rng).loudness is None)
+    print(t1.random_map(audio_tree, rng).lufs is None)
 
     # Opt in to preserving the cached loudness.
-    t2 = shift_phase(amount=0.5, keep_loudness=True)
-    print(t2.random_map(audio_tree, rng).loudness is None)
+    t2 = shift_phase(amount=0.5, keep_lufs=True)
+    print(t2.random_map(audio_tree, rng).lufs is None)
 
 .. testoutput::
 

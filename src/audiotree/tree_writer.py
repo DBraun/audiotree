@@ -18,7 +18,8 @@ from audiotree.core import AudioTree
 # sample_rate is excluded (pytree_node=False).
 _AUDIOTREE_FIELD_ORDER = [
     "waveform",
-    "loudness",
+    "lufs",
+    "lufs_windows",
     "pitch",
     "velocity",
     "note_duration",

@@ -25,7 +25,13 @@ import loudness
 import numpy as np
 import soundfile
 
-from .loudness import jit_integrated_loudness
+from .loudness import (
+    jit_integrated_loudness,
+    jit_windowed_loudness,
+    numpy_windowed_lufs,
+    window_samples,
+    windowed_num_windows,
+)
 from .resample import resample
 
 if TYPE_CHECKING:
@@ -120,8 +126,12 @@ class AudioTree:
     Args:
         waveform (np.ndarray or jax.Array): Audio waveform data shaped ``(Samples)``, ``(Channels, Samples)``, or ``(Batch, Channels, Samples)``
         sample_rate (int): Sample rate of ``waveform``, such as 44100 Hz.
-        loudness (np.ndarray or jax.Array, optional): Loudness of the audio waveform in LUFs. You may not need to set this when initializing. Instead,
-            use ``replace_loudness()`` to create a new AudioTree with ``loudness`` calculated.
+        lufs (np.ndarray or jax.Array, optional): Integrated loudness of the audio waveform in LUFS, shaped ``(Batch,)``.
+            You may not need to set this when initializing. Instead, use ``replace_lufs()`` to create a new AudioTree with
+            ``lufs`` (and ``lufs_windows``) calculated.
+        lufs_windows (np.ndarray or jax.Array, optional): Per-window integrated loudness in LUFS, shaped
+            ``(Batch, Windows)`` — one value per non-overlapping analysis window. Populated alongside ``lufs`` by
+            ``replace_lufs()``.
         pitch (np.ndarray or jax.Array, optional): The MIDI pitch where 60 is middle C. The shape is ``(Batch,)``.
         velocity (np.ndarray or jax.Array, optional): The MIDI velocity between 0 and 127. The shape is ``(Batch,)``.
         note_duration (np.ndarray or jax.Array, optional): A note duration in units of your choice.
@@ -144,7 +154,8 @@ class AudioTree:
 
     waveform: ArrayLike | None
     sample_rate: int = struct.field(pytree_node=False)
-    loudness: ArrayLike | None = None
+    lufs: ArrayLike | None = None
+    lufs_windows: ArrayLike | None = None
     pitch: ArrayLike | None = None
     velocity: ArrayLike | None = None
     note_duration: ArrayLike | None = None
@@ -157,7 +168,8 @@ class AudioTree:
         cls,
         waveform: ArrayLike | None,
         sample_rate: int,
-        loudness: ArrayLike | None = None,
+        lufs: ArrayLike | None = None,
+        lufs_windows: ArrayLike | None = None,
         pitch: ArrayLike | None = None,
         velocity: ArrayLike | None = None,
         note_duration: ArrayLike | None = None,
@@ -176,8 +188,10 @@ class AudioTree:
                 ``(Batch, Channels, Samples)``, or ``None`` for token-only trees
                 (e.g. ``codes`` / ``latents`` without audio).
             sample_rate: Sample rate of ``waveform`` in Hz (e.g. 44100).
-            loudness: Optional precomputed LUFS loudness; usually left ``None`` and filled by
-                :meth:`replace_loudness`.
+            lufs: Optional precomputed integrated loudness (LUFS); usually left ``None`` and filled by
+                :meth:`replace_lufs`.
+            lufs_windows: Optional precomputed per-window loudness ``(Batch, Windows)``; usually left ``None``
+                and filled by :meth:`replace_lufs`.
             pitch: Optional MIDI pitch ``(Batch,)`` (60 = middle C).
             velocity: Optional MIDI velocity ``(Batch,)`` in ``[0, 127]``.
             note_duration: Optional per-note duration ``(Batch,)`` (not the audio duration).
@@ -216,7 +230,8 @@ class AudioTree:
         return cls(
             waveform=waveform,
             sample_rate=sample_rate,
-            loudness=loudness,
+            lufs=lufs,
+            lufs_windows=lufs_windows,
             pitch=pitch,
             velocity=velocity,
             note_duration=note_duration,
@@ -225,14 +240,39 @@ class AudioTree:
             metadata=metadata,
         )
 
-    def replace_loudness(self) -> Self:
-        """Compute and set the loudness in LUFS for each item in the batch.
+    def replace_lufs(
+        self,
+        window_duration_sec: float = 0.4,
+        hop_duration_sec: float | None = None,
+    ) -> Self:
+        """Compute and set the integrated and per-window loudness (LUFS).
 
-        Calculates the integrated loudness following ITU-R BS.1770-4 standard.
-        Returns a new AudioTree with the ``loudness`` property populated.
+        Returns a new AudioTree with both ``lufs`` and ``lufs_windows`` populated:
+
+        * ``lufs`` — the **gated** integrated loudness of each batch item, per the
+          ITU-R BS.1770-4 standard (the standard "program loudness"). Measured on
+          the CPU with the ``loudness`` library for NumPy waveforms, or a vmapped
+          ``jaxloudnorm`` meter for JAX waveforms.
+        * ``lufs_windows`` — the **ungated** K-weighted loudness of each window (a
+          loudness-over-time curve). The signal is K-weighted once and each window
+          reports the K-weighted mean-square of its samples in LUFS, so windows are
+          directly comparable and a fully silent window is ``-inf``. NumPy uses
+          exact IIR biquads (``scipy``); JAX uses ``jaxloudnorm``'s FIR-approximated
+          filters on the accelerator.
+
+        The two backends are not bit-identical.
+
+        Args:
+            window_duration_sec: Length in seconds of each ``lufs_windows`` window.
+                Must be at least 0.4s (the EBU momentary integration time).
+            hop_duration_sec: Step in seconds between window starts. Defaults to
+                ``window_duration_sec`` (non-overlapping windows); a smaller value
+                overlaps them. The trailing partial window is dropped, so an
+                excerpt shorter than one window yields an empty ``lufs_windows``.
 
         Returns:
-            AudioTree with loudness values computed, shaped (batch_size,).
+            AudioTree with ``lufs`` shaped ``(*batch,)`` and ``lufs_windows`` shaped
+            ``(*batch, num_windows)``.
 
         Note:
             **Channel Limitations**: Supports up to 5 channels:
@@ -243,34 +283,61 @@ class AudioTree:
 
             Will raise ValueError if audio has more than 5 channels.
         """
-        # Flatten any leading axes (e.g. after reshape_mini_batches) to a
-        # single batch axis, then restore them on the computed loudness.
+        if window_duration_sec < 0.4:
+            raise ValueError(
+                f"window_duration_sec must be at least 0.4s (the EBU momentary "
+                f"integration time), got {window_duration_sec}."
+            )
+        if hop_duration_sec is None:
+            hop_duration_sec = window_duration_sec
+        if hop_duration_sec <= 0:
+            raise ValueError(
+                f"hop_duration_sec must be positive, got {hop_duration_sec}."
+            )
+        # Flatten any leading axes (e.g. after reshape_mini_batches) to a single
+        # batch axis, then restore them on the computed loudness.
         leading_shape = self.waveform.shape[:-2]
         waveform = self.waveform.reshape(-1, *self.waveform.shape[-2:])
-        if isinstance(waveform, np.ndarray):
-            # integrated_loudness requires at least 400ms of audio
-            min_samples = int(np.ceil(0.4 * self.sample_rate))
-            if waveform.shape[-1] < min_samples:
-                pad_right = min_samples - waveform.shape[-1]
-                waveform = np.pad(waveform, ((0, 0), (0, 0), (0, pad_right)))
-            audio_transposed = np.transpose(waveform, (0, 2, 1))  # [B, T, C]
-            loudness_values = []
-            for audio_item in audio_transposed:
-                lufs = loudness.integrated_loudness(audio_item, self.sample_rate)
-                loudness_values.append(lufs)
-            loudness_array = np.array(loudness_values, dtype=np.float32)
-        else:
-            loudness_array = jit_integrated_loudness(
-                jnp.array(waveform), self.sample_rate, zeros=512
-            )
-        return self.replace(loudness=loudness_array.reshape(leading_shape))
+        ws = window_samples(window_duration_sec, self.sample_rate)
+        hs = window_samples(hop_duration_sec, self.sample_rate)
+        num_windows = windowed_num_windows(waveform.shape[-1], ws, hs)
 
-    def normalize_loudness(self, target_lufs: float) -> Self:
+        if isinstance(waveform, np.ndarray):
+            lufs_array = _numpy_integrated_lufs(waveform, self.sample_rate)
+            if num_windows == 0:
+                lufs_windows_array = np.zeros((waveform.shape[0], 0), dtype=np.float32)
+            else:
+                lufs_windows_array = numpy_windowed_lufs(
+                    waveform, self.sample_rate, window_duration_sec, hop_duration_sec
+                )
+        else:
+            waveform = jnp.asarray(waveform)
+            lufs_array = jit_integrated_loudness(waveform, self.sample_rate, zeros=512)
+            if num_windows == 0:
+                lufs_windows_array = jnp.zeros(
+                    (waveform.shape[0], 0), dtype=jnp.float32
+                )
+            else:
+                lufs_windows_array = jit_windowed_loudness(
+                    waveform,
+                    self.sample_rate,
+                    window_duration_sec,
+                    hop_duration_sec,
+                    zeros=512,
+                )
+
+        return self.replace(
+            lufs=lufs_array.reshape(leading_shape),
+            lufs_windows=lufs_windows_array.reshape(*leading_shape, num_windows),
+        )
+
+    def normalize_lufs(self, target_lufs: float) -> Self:
         """Normalize audio to a target LUFS level.
 
         Computes the current loudness (if not already set), then scales the audio
-        to achieve the target LUFS. The returned AudioTree has both updated
-        ``waveform`` and ``loudness`` fields.
+        to achieve the target LUFS. The returned AudioTree has updated
+        ``waveform``, ``lufs``, and ``lufs_windows`` fields (a constant gain shifts
+        every window's LUFS by the same amount).
 
         Args:
             target_lufs: Target loudness in LUFS (e.g., -18.0 for broadcast standard).
@@ -281,18 +348,19 @@ class AudioTree:
         Example:
             >>> t = jnp.arange(44100) / 44100  # 1 s at 44.1 kHz
             >>> tree = AudioTree.create(0.5 * jnp.sin(2 * jnp.pi * 1000 * t), 44100)
-            >>> normalized = tree.normalize_loudness(-18.0)
-            >>> float(normalized.loudness[0])  # now at the target LUFS
+            >>> normalized = tree.normalize_lufs(-18.0)
+            >>> float(normalized.lufs[0])  # now at the target LUFS
             -18.0
         """
         # Ensure loudness is computed
-        if self.loudness is None:
-            tree = self.replace_loudness()
+        if self.lufs is None:
+            tree = self.replace_lufs()
         else:
             tree = self
 
         numpy = np if isinstance(self.waveform, np.ndarray) else jnp
-        linear_gain = numpy.power(10.0, (target_lufs - tree.loudness) / 20.0)
+        gain_db = target_lufs - tree.lufs  # per-item dB shift
+        linear_gain = numpy.power(10.0, gain_db / 20.0)
         # Cast to audio dtype to avoid float64 promotion
         linear_gain = linear_gain.astype(tree.waveform.dtype)
         # Expand gain for broadcasting: [..., 1, 1] over the channel and
@@ -300,11 +368,20 @@ class AudioTree:
         linear_gain = linear_gain[..., None, None]
         scaled_waveform = tree.waveform * linear_gain
 
-        # Update loudness to target (shape [B])
-        target_loudness = numpy.full(
-            tree.loudness.shape, target_lufs, dtype=numpy.float32
+        # A constant gain shifts every window's LUFS by the same dB as the
+        # integrated value, so ``lufs`` goes to the target and ``lufs_windows``
+        # shifts by ``gain_db`` (kept aligned rather than left stale).
+        target_loudness = numpy.full(tree.lufs.shape, target_lufs, dtype=numpy.float32)
+        shifted_windows = None
+        if tree.lufs_windows is not None:
+            shifted_windows = (tree.lufs_windows + gain_db[..., None]).astype(
+                numpy.float32
+            )
+        return tree.replace(
+            waveform=scaled_waveform,
+            lufs=target_loudness,
+            lufs_windows=shifted_windows,
         )
-        return tree.replace(waveform=scaled_waveform, loudness=target_loudness)
 
     @staticmethod
     def _encode_string(s: str) -> np.ndarray:
@@ -472,7 +549,8 @@ class AudioTree:
         source: str | None = None,
         metadata: Optional[Dict[str, Any]] = None,
         # AudioTree properties
-        loudness: Optional[ArrayLike] = None,
+        lufs: Optional[ArrayLike] = None,
+        lufs_windows: Optional[ArrayLike] = None,
         pitch: Optional[ArrayLike] = None,
         velocity: Optional[ArrayLike] = None,
         note_duration: Optional[ArrayLike] = None,
@@ -499,7 +577,8 @@ class AudioTree:
                 This is stored in metadata and accessible via the ``source`` property.
             metadata (dict, optional): Additional metadata to include in the AudioTree. This metadata is merged with
                 automatically generated fields (offset, note_duration, filepath).
-            loudness (np.ndarray or jax.Array, optional): Loudness values to assign to the AudioTree.
+            lufs (np.ndarray or jax.Array, optional): Integrated loudness (LUFS) values to assign to the AudioTree.
+            lufs_windows (np.ndarray or jax.Array, optional): Per-window loudness (LUFS) values to assign to the AudioTree.
             pitch (np.ndarray or jax.Array, optional): Pitch values to assign to the AudioTree.
             velocity (np.ndarray or jax.Array, optional): Velocity values to assign to the AudioTree.
             note_duration (np.ndarray or jax.Array, optional): Note note_duration values to assign to the AudioTree.
@@ -588,7 +667,8 @@ class AudioTree:
             waveform=data,
             sample_rate=sample_rate,
             metadata=combined_metadata,
-            loudness=wrap_if_scalar(loudness, np.float32),
+            lufs=wrap_if_scalar(lufs, np.float32),
+            lufs_windows=lufs_windows,
             pitch=wrap_if_scalar(pitch, np.float32),
             velocity=wrap_if_scalar(velocity, np.int16),
             note_duration=wrap_if_scalar(note_duration, np.float32),
@@ -619,13 +699,13 @@ class AudioTree:
         Example:
             First, write a small manifest with :class:`~audiotree.AudioWriter`
             (here, 100 one-second stereo items; the first 60 are loud, the rest
-            quiet, so the loudness field is recorded for filtering):
+            quiet, so the lufs field is recorded for filtering):
 
             >>> import tempfile
             >>> from audiotree import AudioWriter
             >>> out_dir = tempfile.mkdtemp()
-            >>> loudness = np.where(np.arange(100) < 60, -10.0, -30.0).astype(np.float32)
-            >>> batch = AudioTree.create(jnp.zeros((100, 2, 44100)), 44100, loudness=loudness)
+            >>> lufs = np.where(np.arange(100) < 60, -10.0, -30.0).astype(np.float32)
+            >>> batch = AudioTree.create(jnp.zeros((100, 2, 44100)), 44100, lufs=lufs)
             >>> with AudioWriter(out_dir) as writer:
             ...     _ = writer.write(batch)
             >>> manifest_path = f"{out_dir}/manifest.npz"
@@ -641,7 +721,7 @@ class AudioTree:
 
             >>> tree = AudioTree.from_manifest(
             ...     manifest_path,
-            ...     filter_fn=lambda entry: entry.get('loudness', -float('inf')) > -20
+            ...     filter_fn=lambda entry: entry.get('lufs', -float('inf')) > -20
             ... )
             >>> tree.waveform.shape
             (60, 2, 44100)
@@ -820,14 +900,14 @@ class AudioTree:
             file_duration = info.duration
 
             duration = kwargs["duration"]
-            loudness = -np.inf
+            best_lufs = -np.inf
             current_try = 0
             num_tries = saliency_params.num_tries
             if isinstance(saliency_params.search_function, str):
                 _search_function = eval(saliency_params.search_function)
             else:
                 _search_function = saliency_params.search_function
-            while loudness <= saliency_params.loudness_cutoff:
+            while best_lufs <= saliency_params.loudness_cutoff:
                 search_function = partial(
                     _search_function,
                     attempt=current_try,
@@ -843,10 +923,10 @@ class AudioTree:
                         f"Empty audio loaded from {audio_path} at offset "
                         f"{random_offset:.2f}s (file_duration={file_duration:.2f}s)"
                     )
-                new_excerpt = new_excerpt.replace_loudness()
-                if current_try == 0 or new_excerpt.loudness > loudness:
+                new_excerpt = new_excerpt.replace_lufs()
+                if current_try == 0 or new_excerpt.lufs > best_lufs:
                     excerpt = new_excerpt
-                    loudness = new_excerpt.loudness
+                    best_lufs = new_excerpt.lufs
                 current_try += 1
                 if num_tries is not None and current_try >= num_tries:
                     break
@@ -879,7 +959,7 @@ class AudioTree:
             raise ValueError(
                 f"Unsupported to_mono strategy {strategy!r} for {C} channels."
             )
-        return self.replace(waveform=waveform, loudness=None)
+        return self.replace(waveform=waveform, lufs=None, lufs_windows=None)
 
     def to_stereo(self) -> Self:
         """Make the ``waveform`` stereo.
@@ -894,7 +974,7 @@ class AudioTree:
             waveform = numpy.concatenate([waveform, waveform], axis=-2)
             # Duplicating the channel changes the integrated loudness (BS.1770
             # sums per-channel energy), so the cached value is no longer valid.
-            return self.replace(waveform=waveform, loudness=None)
+            return self.replace(waveform=waveform, lufs=None, lufs_windows=None)
         elif C == 2:
             return self
         else:
@@ -1027,7 +1107,9 @@ class AudioTree:
                 full=full,
             )
             waveform = waveform.reshape(*leading_shape, *waveform.shape[-2:])
-        return self.replace(waveform=waveform, sample_rate=sample_rate, loudness=None)
+        return self.replace(
+            waveform=waveform, sample_rate=sample_rate, lufs=None, lufs_windows=None
+        )
 
     def split(self, n_splits: int) -> List[Self]:
         """Split batch dimension into a list of smaller AudioTree objects.
@@ -1228,3 +1310,22 @@ def _batch_audiotrees(audio_trees: Sequence[AudioTree]) -> AudioTree:
         raise ValueError("Cannot batch empty list of AudioTrees")
 
     return tree_util.tree_map(lambda *xs: np.concatenate(xs, axis=0), *audio_trees)
+
+
+def _numpy_integrated_lufs(waveform: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Integrated loudness (LUFS) per item of a ``(batch, channels, samples)`` waveform.
+
+    Measured on the CPU with ``loudness.integrated_loudness``. Excerpts shorter
+    than the BS.1770 gating block (400ms) are right-padded with silence so the
+    measurement is valid.
+    """
+    min_samples = int(np.ceil(0.4 * sample_rate))
+    if waveform.shape[-1] < min_samples:
+        pad_right = min_samples - waveform.shape[-1]
+        waveform = np.pad(waveform, ((0, 0), (0, 0), (0, pad_right)))
+    audio_transposed = np.transpose(waveform, (0, 2, 1))  # [B, T, C]
+    values = [
+        loudness.integrated_loudness(np.ascontiguousarray(item), sample_rate)
+        for item in audio_transposed
+    ]
+    return np.array(values, dtype=np.float32)

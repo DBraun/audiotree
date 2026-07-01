@@ -41,6 +41,7 @@ from audiotree.transforms.helpers import (
     _shift_phase_jax,
     _roll_jax,
     _trim_jax,
+    _shift_lufs_windows,
 )
 
 
@@ -62,7 +63,7 @@ def volume_norm(
     Returns:
         AudioTree with normalized loudness
     """
-    audio_tree = audio_tree.replace_loudness()
+    audio_tree = audio_tree.replace_lufs()
     return _volume_norm_jax(audio_tree, rng, min_db, max_db)
 
 
@@ -85,8 +86,11 @@ def volume_change(
         AudioTree with volume changed
     """
     audio_tree, gain_db = _volume_change_jax(audio_tree, rng, min_db, max_db)
-    if audio_tree.loudness is not None:
-        audio_tree = audio_tree.replace(loudness=(audio_tree.loudness + gain_db))
+    if audio_tree.lufs is not None:
+        audio_tree = audio_tree.replace(
+            lufs=(audio_tree.lufs + gain_db),
+            lufs_windows=_shift_lufs_windows(audio_tree.lufs_windows, gain_db),
+        )
     return audio_tree
 
 
@@ -150,7 +154,7 @@ def identity(audio_tree: AudioTree) -> AudioTree:
 @map_transform
 def rescale_audio(audio_tree: AudioTree) -> AudioTree:
     """Rescale audio so the largest absolute value is 1.0."""
-    return _rescale_audio_jax(audio_tree).replace(loudness=None)
+    return _rescale_audio_jax(audio_tree).replace(lufs=None, lufs_windows=None)
 
 
 @map_transform
@@ -162,7 +166,7 @@ def peak_norm(audio_tree: AudioTree) -> AudioTree:
     epsilon) so the result peaks at 1.0. The peak is computed per item in the
     batch, across channels and samples.
     """
-    return _peak_norm_jax(audio_tree).replace(loudness=None)
+    return _peak_norm_jax(audio_tree).replace(lufs=None, lufs_windows=None)
 
 
 @random_transform
@@ -187,7 +191,7 @@ def corrupt_phase(
     hop_factor: float = 0.5,
     frame_length: int = 2048,
     window: str = "hann",
-    keep_loudness: bool = False,
+    keep_lufs: bool = False,
 ) -> AudioTree:
     """Perform phase corruption on audio.
 
@@ -198,16 +202,16 @@ def corrupt_phase(
         hop_factor: Hop size as fraction of frame_length
         frame_length: STFT frame length in samples
         window: Window function name
-        keep_loudness: If True, preserve the cached ``loudness``. Phase
-            corruption leaves the magnitude spectrum (and thus energy) intact,
-            so loudness is approximately unchanged; the cached value is
-            invalidated by default to be safe.
+        keep_lufs: If True, preserve the cached ``lufs`` and ``lufs_windows``.
+            Phase corruption leaves the magnitude spectrum (and thus energy)
+            intact, so loudness is approximately unchanged; the cached values
+            are invalidated by default to be safe.
 
     Returns:
         AudioTree with corrupted phase
     """
     return _corrupt_phase_jax(
-        audio_tree, rng, amount, hop_factor, frame_length, window, keep_loudness
+        audio_tree, rng, amount, hop_factor, frame_length, window, keep_lufs
     )
 
 
@@ -216,7 +220,7 @@ def shift_phase(
     audio_tree: AudioTree,
     rng: jax.Array,
     amount: float = 1.0,
-    keep_loudness: bool = False,
+    keep_lufs: bool = False,
 ) -> AudioTree:
     """Perform a phase shift on audio.
 
@@ -224,15 +228,15 @@ def shift_phase(
         audio_tree: Input audio
         rng: JAX random key
         amount: Maximum phase shift in multiples of pi
-        keep_loudness: If True, preserve the cached ``loudness``. A phase shift
-            leaves the magnitude spectrum (and thus energy) intact, so loudness
-            is approximately unchanged; the cached value is invalidated by
-            default to be safe.
+        keep_lufs: If True, preserve the cached ``lufs`` and ``lufs_windows``. A
+            phase shift leaves the magnitude spectrum (and thus energy) intact, so
+            loudness is approximately unchanged; the cached values are invalidated
+            by default to be safe.
 
     Returns:
         AudioTree with shifted phase
     """
-    return _shift_phase_jax(audio_tree, rng, amount, keep_loudness=keep_loudness)
+    return _shift_phase_jax(audio_tree, rng, amount, keep_lufs=keep_lufs)
 
 
 @random_transform

@@ -20,7 +20,7 @@ def test_round_trip_audiotree():
         output_dir = Path(tmpdir)
         audio = np.random.randn(5, 2, 100).astype(np.float32)
         loudness = np.random.randn(5).astype(np.float32)
-        tree = AudioTree(waveform=audio, sample_rate=44100, loudness=loudness)
+        tree = AudioTree(waveform=audio, sample_rate=44100, lufs=loudness)
 
         with TreeWriter(output_dir, expected_samples=5) as w:
             w.write(tree)
@@ -35,9 +35,7 @@ def test_round_trip_audiotree():
             np.testing.assert_array_almost_equal(
                 sample.waveform[0], audio[i], decimal=5
             )
-            np.testing.assert_array_almost_equal(
-                sample.loudness[0], loudness[i], decimal=5
-            )
+            np.testing.assert_array_almost_equal(sample.lufs[0], loudness[i], decimal=5)
             assert sample.pitch is None
 
 
@@ -182,7 +180,7 @@ def test_raw_mode():
         tree = AudioTree(
             waveform=np.zeros((3, 2, 100), dtype=np.float32),
             sample_rate=44100,
-            loudness=np.zeros(3, dtype=np.float32),
+            lufs=np.zeros(3, dtype=np.float32),
             metadata={"mel": np.zeros((3, 16), dtype=np.float32)},
         )
 
@@ -194,7 +192,7 @@ def test_raw_mode():
 
         assert isinstance(sample, dict)
         assert "waveform" in sample
-        assert "loudness" in sample
+        assert "lufs" in sample
         assert "metadata.mel" in sample
         assert sample["waveform"].shape == (1, 2, 100)
 
@@ -308,7 +306,7 @@ def test_none_fields_default():
         sample = source[0]
         assert sample.pitch is None
         assert sample.velocity is None
-        assert sample.loudness is None
+        assert sample.lufs is None
         assert sample.codes is None
         assert sample.latents is None
 

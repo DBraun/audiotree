@@ -19,7 +19,7 @@ def test_round_trip_npz_manifest():
         audio_tree = AudioTree.create(
             waveform,
             sample_rate=22050,
-            loudness=np.array([-20.0, -18.0, -22.0]),
+            lufs=np.array([-20.0, -18.0, -22.0]),
             pitch=np.array([60.0, 62.0, 64.0]),
             velocity=np.array([64, 80, 100]),
             filepaths=["original1.wav", "original2.wav", "original3.wav"],
@@ -43,7 +43,7 @@ def test_round_trip_npz_manifest():
             assert loaded_tree.waveform.shape == (1, 2, 22050)
 
             # Check restored metadata
-            assert loaded_tree.loudness[0] == audio_tree.loudness[i]
+            assert loaded_tree.lufs[0] == audio_tree.lufs[i]
             assert loaded_tree.pitch[0] == audio_tree.pitch[i]
             assert loaded_tree.velocity[0] == audio_tree.velocity[i]
 
@@ -64,17 +64,17 @@ def test_filter_function():
             AudioTree.create(
                 np.random.randn(1, 1, 8000),
                 sample_rate=8000,
-                loudness=np.array([-10.0]),
+                lufs=np.array([-10.0]),
             ),
             AudioTree.create(
                 np.random.randn(1, 1, 8000),
                 sample_rate=8000,
-                loudness=np.array([-25.0]),
+                lufs=np.array([-25.0]),
             ),
             AudioTree.create(
                 np.random.randn(1, 1, 8000),
                 sample_rate=8000,
-                loudness=np.array([-18.0]),
+                lufs=np.array([-18.0]),
             ),
         ]
 
@@ -85,13 +85,13 @@ def test_filter_function():
         # Filter for loud samples only
         source = ManifestDataSource(
             output_dir / "manifest.npz",
-            filter_fn=lambda entry: entry.get("loudness", -float("inf")) > -20,
+            filter_fn=lambda entry: entry.get("lufs", -float("inf")) > -20,
         )
 
         # Should only have 2 entries (-10 and -18)
         assert len(source) == 2
-        assert source[0].loudness[0] == -10.0
-        assert source[1].loudness[0] == -18.0
+        assert source[0].lufs[0] == -10.0
+        assert source[1].lufs[0] == -18.0
 
 
 def test_filter_by_tag():
@@ -120,7 +120,7 @@ def test_filter_by_tag():
         assert entries[1]["tags"]["index"] == 2
 
 
-def test_filter_by_loudness():
+def test_filter_by_lufs():
     """Test filtering by loudness range."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
@@ -131,7 +131,7 @@ def test_filter_by_loudness():
 
         for lufs in loudness_values:
             audio_tree = AudioTree.create(
-                np.random.randn(1, 1, 8000), sample_rate=8000, loudness=np.array([lufs])
+                np.random.randn(1, 1, 8000), sample_rate=8000, lufs=np.array([lufs])
             )
             writer.write(audio_tree)
 
@@ -139,10 +139,10 @@ def test_filter_by_loudness():
 
         # Filter by loudness range
         source = ManifestDataSource(output_dir / "manifest.npz")
-        filtered = source.filter_by_loudness(min_lufs=-20, max_lufs=-10)
+        filtered = source.filter_by_lufs(min_lufs=-20, max_lufs=-10)
 
         assert len(filtered) == 3  # -20, -15, -10
-        loudness_values = [filtered[i].loudness[0] for i in range(len(filtered))]
+        loudness_values = [filtered[i].lufs[0] for i in range(len(filtered))]
         assert set(loudness_values) == {-20.0, -15.0, -10.0}
 
 
@@ -220,7 +220,7 @@ def test_get_entry():
         audio_tree = AudioTree.create(
             np.random.randn(2, 1, 8000),
             sample_rate=8000,
-            loudness=np.array([-20.0, -18.0]),
+            lufs=np.array([-20.0, -18.0]),
         )
         with AudioWriter(output_dir) as writer:
             writer.write(audio_tree, tags={"test": True})
@@ -229,7 +229,7 @@ def test_get_entry():
 
         # Get raw entry
         entry = source.get_entry(0)
-        assert entry["loudness"] == -20.0
+        assert entry["lufs"] == -20.0
         assert entry["tags"]["test"] is True
         assert "filename" in entry
 
@@ -275,7 +275,7 @@ def test_grain_dataloader_with_batch_transform():
 
         # Add properties that will be preserved
         audio_tree = audio_tree.replace(
-            loudness=np.linspace(-30.0, -10.0, 8),
+            lufs=np.linspace(-30.0, -10.0, 8),
             pitch=np.linspace(60.0, 72.0, 8),
             velocity=np.arange(32, 40, dtype=np.int16),
         )
@@ -300,20 +300,20 @@ def test_grain_dataloader_with_batch_transform():
         # Check first batch
         assert isinstance(batch1, AudioTree)
         assert batch1.waveform.shape == (4, 2, 1000)
-        assert batch1.loudness.shape == (4,)
+        assert batch1.lufs.shape == (4,)
         assert batch1.pitch.shape == (4,)
         assert batch1.velocity.shape == (4,)
 
         # Check second batch
         assert batch2.waveform.shape == (4, 2, 1000)
-        assert batch2.loudness.shape == (4,)
+        assert batch2.lufs.shape == (4,)
 
         # Verify data integrity
         expected_loudness_batch1 = np.linspace(-30.0, -10.0, 8)[:4]
         expected_loudness_batch2 = np.linspace(-30.0, -10.0, 8)[4:]
 
-        assert np.allclose(batch1.loudness, expected_loudness_batch1, atol=0.01)
-        assert np.allclose(batch2.loudness, expected_loudness_batch2, atol=0.01)
+        assert np.allclose(batch1.lufs, expected_loudness_batch1, atol=0.01)
+        assert np.allclose(batch2.lufs, expected_loudness_batch2, atol=0.01)
 
         # The key result: ManifestDataSource items can be successfully batched
         # This demonstrates compatibility with grain.DataLoader + Batch transform
@@ -337,7 +337,7 @@ def test_manifest_metadata_with_batch_transform():
 
         # Add metadata arrays that should be preserved through write/read
         audio_tree = audio_tree.replace(
-            loudness=np.linspace(-30.0, -10.0, batch_size),
+            lufs=np.linspace(-30.0, -10.0, batch_size),
             metadata={
                 "params": np.random.randn(batch_size, param_dim).astype(np.float32),
                 "confidence": np.linspace(0.5, 1.0, batch_size).astype(np.float32),
@@ -397,7 +397,7 @@ def test_manifest_with_batch_transform():
 
         # Add some metadata
         audio_tree = audio_tree.replace(
-            loudness=np.linspace(-30.0, -10.0, 8),
+            lufs=np.linspace(-30.0, -10.0, 8),
             pitch=np.linspace(60.0, 72.0, 8),
             velocity=np.arange(32, 40, dtype=np.int16),
         )
@@ -432,20 +432,20 @@ def test_manifest_with_batch_transform():
         # Check first batch
         assert isinstance(batch1, AudioTree)
         assert batch1.waveform.shape == (4, 2, 1000)  # 4 samples batched
-        assert batch1.loudness.shape == (4,)
+        assert batch1.lufs.shape == (4,)
         assert batch1.pitch.shape == (4,)
         assert batch1.velocity.shape == (4,)
 
         # Check second batch
         assert batch2.waveform.shape == (4, 2, 1000)
-        assert batch2.loudness.shape == (4,)
+        assert batch2.lufs.shape == (4,)
 
         # Verify data integrity - loudness values should be sequential
         expected_loudness_batch1 = np.linspace(-30.0, -10.0, 8)[:4]
         expected_loudness_batch2 = np.linspace(-30.0, -10.0, 8)[4:]
 
-        assert np.allclose(batch1.loudness, expected_loudness_batch1, atol=0.01)
-        assert np.allclose(batch2.loudness, expected_loudness_batch2, atol=0.01)
+        assert np.allclose(batch1.lufs, expected_loudness_batch1, atol=0.01)
+        assert np.allclose(batch2.lufs, expected_loudness_batch2, atol=0.01)
 
         # Verify velocity values
         expected_velocity_batch1 = np.arange(32, 36, dtype=np.int16)
@@ -459,7 +459,7 @@ if __name__ == "__main__":
     test_round_trip_npz_manifest()
     test_filter_function()
     test_filter_by_tag()
-    test_filter_by_loudness()
+    test_filter_by_lufs()
     test_from_writer_output()
     test_num_records_limit()
     test_resampling()

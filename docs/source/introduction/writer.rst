@@ -153,7 +153,7 @@ AudioWriter automatically tracks all AudioTree metadata in the manifest:
     meta_tree = AudioTree.create(
         np.random.randn(2, 1, 44_100),
         sample_rate=44_100,
-        loudness=np.array([-20.0, -15.0]),
+        lufs=np.array([-20.0, -15.0]),
         pitch=np.array([60.0, 62.0]),
         velocity=np.array([64, 80]),
         note_duration=np.array([1.0, 0.5]),
@@ -260,7 +260,7 @@ AudioWriter supports progress tracking via tqdm integration:
 
     with AudioWriter("output", pbar=pbar) as writer:
         for audio_tree in big_audio_tree.split(batch_size):
-            if audio_tree.loudness > -30:  # Only write loud samples
+            if audio_tree.lufs > -30:  # Only write loud samples
                 writer.write(audio_tree)  # Automatically updates pbar
 
 **Using Internal Progress Bar:**
@@ -281,13 +281,13 @@ AudioWriter supports progress tracking via tqdm integration:
     from tqdm import tqdm
 
     # Count total samples that will be written
-    loud_trees = [t for t in trees if t.loudness.mean() > -30]
+    loud_trees = [t for t in trees if t.lufs.mean() > -30]
     total_samples = sum(t.waveform.shape[0] for t in loud_trees)
 
     pbar = tqdm(total=total_samples, desc="Writing loud samples")
     with AudioWriter("output", pbar=pbar, close_pbar=True) as writer:
         for audio_tree in trees:
-            if audio_tree.loudness.mean() > -30:
+            if audio_tree.lufs.mean() > -30:
                 writer.write(audio_tree)
     # pbar automatically closed when close_pbar=True
 
@@ -322,7 +322,7 @@ Use :class:`~audiotree.sources.manifest.ManifestDataSource` to read AudioWriter 
     loudness_tree = AudioTree.create(
         np.random.randn(3, 2, 44_100),
         sample_rate=44_100,
-        loudness=np.array([-20.0, -15.0, -18.0]),
+        lufs=np.array([-20.0, -15.0, -18.0]),
     )
     with AudioWriter("output_read") as writer:
         writer.write(loudness_tree, tags={"split": "train"})
@@ -333,10 +333,10 @@ Use :class:`~audiotree.sources.manifest.ManifestDataSource` to read AudioWriter 
     # Access individual items
     loaded_tree = source[0]
     print(loaded_tree.sample_rate)
-    print(loaded_tree.loudness)   # Metadata is restored
+    print(loaded_tree.lufs)   # Metadata is restored
 
     # Filter by metadata
-    loud_source = source.filter_by_loudness(min_lufs=-18.0)
+    loud_source = source.filter_by_lufs(min_lufs=-18.0)
 
     # Filter by tags
     train_source = source.filter_by_tag("split", "train")
@@ -392,7 +392,7 @@ Here's how metadata flows through AudioTree transformations and into the manifes
 
     # Metadata is preserved through transformations
     processed = audio_tree.resample(16_000)
-    processed = processed.replace_loudness()
+    processed = processed.replace_lufs()
 
     # Check metadata is still there
     print(processed.metadata["instrument"])
@@ -487,7 +487,7 @@ Here's a complete example of creating a training dataset with AudioWriter:
         ) as writer:
 
             for audio_tree in ds:
-                augmented = audio_tree.replace_loudness()
+                augmented = audio_tree.replace_lufs()
                 writer.write(augmented)
 
         print(f"Created dataset with {writer.get_stats()['total_files']} files")

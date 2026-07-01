@@ -26,8 +26,8 @@ class TestScopeWithDict:
             sample_rate=44100,
         )
 
-        audio1 = audio1.replace_loudness()
-        audio2 = audio2.replace_loudness()
+        audio1 = audio1.replace_lufs()
+        audio2 = audio2.replace_lufs()
 
         batch = {"src": audio1, "target": audio2}
 
@@ -43,8 +43,8 @@ class TestScopeWithDict:
         result_batch = transform.random_map(batch, rng)
 
         # Verify only src was transformed
-        assert not np.array_equal(result_batch["src"].loudness, audio1.loudness)
-        assert np.array_equal(result_batch["target"].loudness, audio2.loudness)
+        assert not np.array_equal(result_batch["src"].lufs, audio1.lufs)
+        assert np.array_equal(result_batch["target"].lufs, audio2.lufs)
 
     def test_scope_all_keys(self):
         """Test applying transform to all keys (no scope = transform everything)."""
@@ -58,8 +58,8 @@ class TestScopeWithDict:
             sample_rate=44100,
         )
 
-        audio1 = audio1.replace_loudness()
-        audio2 = audio2.replace_loudness()
+        audio1 = audio1.replace_lufs()
+        audio2 = audio2.replace_lufs()
 
         batch = {"src": audio1, "target": audio2}
 
@@ -74,8 +74,8 @@ class TestScopeWithDict:
         result_batch = transform.random_map(batch, rng)
 
         # Verify both were transformed
-        assert not np.array_equal(result_batch["src"].loudness, audio1.loudness)
-        assert not np.array_equal(result_batch["target"].loudness, audio2.loudness)
+        assert not np.array_equal(result_batch["src"].lufs, audio1.lufs)
+        assert not np.array_equal(result_batch["target"].lufs, audio2.lufs)
 
     def test_scope_multiple_keys(self):
         """Test applying transform to multiple specific keys."""
@@ -93,9 +93,9 @@ class TestScopeWithDict:
             sample_rate=44100,
         )
 
-        audio1 = audio1.replace_loudness()
-        audio2 = audio2.replace_loudness()
-        audio3 = audio3.replace_loudness()
+        audio1 = audio1.replace_lufs()
+        audio2 = audio2.replace_lufs()
+        audio3 = audio3.replace_lufs()
 
         batch = {"dry": audio1, "wet": audio2, "reference": audio3}
 
@@ -114,9 +114,9 @@ class TestScopeWithDict:
         result_batch = transform.random_map(batch, rng)
 
         # Verify dry and wet transformed, reference not
-        assert not np.array_equal(result_batch["dry"].loudness, audio1.loudness)
-        assert not np.array_equal(result_batch["wet"].loudness, audio2.loudness)
-        assert np.array_equal(result_batch["reference"].loudness, audio3.loudness)
+        assert not np.array_equal(result_batch["dry"].lufs, audio1.lufs)
+        assert not np.array_equal(result_batch["wet"].lufs, audio2.lufs)
+        assert np.array_equal(result_batch["reference"].lufs, audio3.lufs)
 
     def test_scope_with_nested_dict(self):
         """Test scope with nested dictionary structure."""
@@ -134,9 +134,9 @@ class TestScopeWithDict:
             sample_rate=44100,
         )
 
-        audio1 = audio1.replace_loudness()
-        audio2 = audio2.replace_loudness()
-        audio3 = audio3.replace_loudness()
+        audio1 = audio1.replace_lufs()
+        audio2 = audio2.replace_lufs()
+        audio3 = audio3.replace_lufs()
 
         batch = {
             "input": {"dry": audio1, "wet": audio2},
@@ -155,11 +155,9 @@ class TestScopeWithDict:
         result_batch = transform.random_map(batch, rng)
 
         # Verify only input.dry transformed
-        assert not np.array_equal(
-            result_batch["input"]["dry"].loudness, audio1.loudness
-        )
-        assert np.array_equal(result_batch["input"]["wet"].loudness, audio2.loudness)
-        assert np.array_equal(result_batch["target"].loudness, audio3.loudness)
+        assert not np.array_equal(result_batch["input"]["dry"].lufs, audio1.lufs)
+        assert np.array_equal(result_batch["input"]["wet"].lufs, audio2.lufs)
+        assert np.array_equal(result_batch["target"].lufs, audio3.lufs)
 
 
 class TestScopeWithOutputKey:
@@ -177,8 +175,8 @@ class TestScopeWithOutputKey:
             sample_rate=44100,
         )
 
-        audio1 = audio1.replace_loudness()
-        audio2 = audio2.replace_loudness()
+        audio1 = audio1.replace_lufs()
+        audio2 = audio2.replace_lufs()
 
         batch = {"src": audio1, "target": audio2}
 
@@ -200,11 +198,11 @@ class TestScopeWithOutputKey:
         assert "modified" in result_batch
 
         # Original should be unchanged
-        assert np.array_equal(result_batch["src"].loudness, audio1.loudness)
-        assert np.array_equal(result_batch["target"].loudness, audio2.loudness)
+        assert np.array_equal(result_batch["src"].lufs, audio1.lufs)
+        assert np.array_equal(result_batch["target"].lufs, audio2.lufs)
 
         # Modified should be transformed
-        assert not np.array_equal(result_batch["modified"].loudness, audio1.loudness)
+        assert not np.array_equal(result_batch["modified"].lufs, audio1.lufs)
 
 
 class TestScopeWithMapTransforms:
@@ -253,8 +251,8 @@ class TestCommonTrainingPipelinePattern:
             sample_rate=44100,
         )
 
-        dry_audio = dry_audio.replace_loudness()
-        wet_audio = wet_audio.replace_loudness()
+        dry_audio = dry_audio.replace_lufs()
+        wet_audio = wet_audio.replace_lufs()
 
         batch = {"dry": dry_audio, "wet": wet_audio}
 
@@ -296,8 +294,8 @@ class TestCommonTrainingPipelinePattern:
             sample_rate=44100,
         )
 
-        input_audio = input_audio.replace_loudness()
-        target_audio = target_audio.replace_loudness()
+        input_audio = input_audio.replace_lufs()
+        target_audio = target_audio.replace_lufs()
 
         batch = {"input": input_audio, "target": target_audio}
 
@@ -315,8 +313,8 @@ class TestCommonTrainingPipelinePattern:
         batch = transform2.random_map(batch, np.random.default_rng(43))
 
         # Both should be normalized
-        assert batch["input"].loudness is not None
-        assert batch["target"].loudness is not None
+        assert batch["input"].lufs is not None
+        assert batch["target"].lufs is not None
 
     def test_multi_key_batch(self):
         """Test batch with multiple audio keys (dry, wet, reference)."""
@@ -334,13 +332,13 @@ class TestCommonTrainingPipelinePattern:
             sample_rate=44100,
         )
 
-        dry = dry.replace_loudness()
-        wet = wet.replace_loudness()
-        reference = reference.replace_loudness()
+        dry = dry.replace_lufs()
+        wet = wet.replace_lufs()
+        reference = reference.replace_lufs()
 
         batch = {"dry": dry, "wet": wet, "reference": reference}
 
-        original_ref_loudness = reference.loudness.copy()
+        original_ref_loudness = reference.lufs.copy()
 
         # Normalize dry and wet, but not reference
         transform = volume_norm(
@@ -356,8 +354,8 @@ class TestCommonTrainingPipelinePattern:
         result = transform.random_map(batch, rng)
 
         # Verify dry and wet were transformed
-        assert not np.array_equal(result["dry"].loudness, dry.loudness)
-        assert not np.array_equal(result["wet"].loudness, wet.loudness)
+        assert not np.array_equal(result["dry"].lufs, dry.lufs)
+        assert not np.array_equal(result["wet"].lufs, wet.lufs)
 
         # Verify reference was not transformed
-        assert np.array_equal(result["reference"].loudness, original_ref_loudness)
+        assert np.array_equal(result["reference"].lufs, original_ref_loudness)

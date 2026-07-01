@@ -38,7 +38,7 @@ class TestRandomTransformDecorator:
             np.random.randn(4, 1, 44100).astype(np.float32) * 0.1,
             sample_rate=44100,
         )
-        audio_tree = audio_tree.replace_loudness()
+        audio_tree = audio_tree.replace_lufs()
 
         # Create transform with flat parameters
         transform = volume_norm(min_db=-20, max_db=-15)
@@ -48,9 +48,9 @@ class TestRandomTransformDecorator:
         result = transform.random_map(audio_tree, rng)
 
         # Verify loudness is in range
-        assert result.loudness is not None
-        assert np.all(result.loudness >= -20 - 1)
-        assert np.all(result.loudness <= -15 + 1)
+        assert result.lufs is not None
+        assert np.all(result.lufs >= -20 - 1)
+        assert np.all(result.lufs <= -15 + 1)
 
     def test_volume_norm_with_prob(self):
         """Test volume_norm with probability."""
@@ -58,7 +58,7 @@ class TestRandomTransformDecorator:
             np.random.randn(4, 1, 44100).astype(np.float32) * 0.1,
             sample_rate=44100,
         )
-        audio_tree = audio_tree.replace_loudness()
+        audio_tree = audio_tree.replace_lufs()
 
         # Create transform with prob
         transform = volume_norm(min_db=-20, max_db=-15, prob=0.5)
@@ -72,7 +72,7 @@ class TestRandomTransformDecorator:
 
         # Check that some were transformed and some weren't
         # (This is probabilistic but with 10 samples should be reliable)
-        loudness_values = [float(r.loudness[0]) for r in results]
+        loudness_values = [float(r.lufs[0]) for r in results]
         assert len(set(loudness_values)) > 1  # Should have different values
 
     def test_volume_change_basic(self):
@@ -209,7 +209,7 @@ class TestDatasetChaining:
 
             # Verify transforms were applied. trim runs last and changes the
             # audio length, so it invalidates the loudness set by volume_norm.
-            assert item.loudness is None
+            assert item.lufs is None
             assert item.waveform.shape[-1] == int(3.0 * 44100)
 
     def test_multiple_random_transforms(self):
@@ -236,7 +236,7 @@ class TestDatasetChaining:
             item = ds[0]
 
             # Verify all transforms were applied
-            assert item.loudness is not None
+            assert item.lufs is not None
 
 
 class TestArgBindIntegration:
@@ -251,7 +251,7 @@ class TestArgBindIntegration:
             np.random.randn(4, 1, 44100).astype(np.float32) * 0.1,
             sample_rate=44100,
         )
-        audio_tree = audio_tree.replace_loudness()
+        audio_tree = audio_tree.replace_lufs()
 
         # Set args
         args = {
@@ -267,7 +267,7 @@ class TestArgBindIntegration:
             result = transform.random_map(audio_tree, rng)
 
         # Verify parameters were used
-        assert result.loudness is not None
+        assert result.lufs is not None
 
     def test_bind_trim(self):
         """Test binding trim with argbind."""
@@ -328,7 +328,7 @@ class TestArgBindIntegration:
 
             # Verify transforms applied with correct parameters. trim runs last
             # and changes the audio length, invalidating volume_norm's loudness.
-            assert item.loudness is None
+            assert item.lufs is None
             assert item.waveform.shape[-1] == int(3.0 * 44100)
 
 
@@ -341,7 +341,7 @@ class TestDefaultParameters:
             np.random.randn(4, 1, 44100).astype(np.float32) * 0.1,
             sample_rate=44100,
         )
-        audio_tree = audio_tree.replace_loudness()
+        audio_tree = audio_tree.replace_lufs()
 
         # Create transform with defaults
         transform = volume_norm()
@@ -351,7 +351,7 @@ class TestDefaultParameters:
         result = transform.random_map(audio_tree, rng)
 
         # Should work but not change much (min=max=0)
-        assert result.loudness is not None
+        assert result.lufs is not None
 
     def test_trim_default(self):
         """Test trim with default parameters."""

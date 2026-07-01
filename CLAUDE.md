@@ -37,13 +37,13 @@ uv build
 The codebase is organized into three main components:
 
 1. **Core (`audiotree.core`)**: The `AudioTree` dataclass is the central data structure, representing audio as JAX arrays with shape (batch × channels × samples).
-It includes metadata like sample rate and provides methods for loading files, resampling, and computing loudness.
+It includes metadata like sample rate and provides methods for loading files, resampling, and computing loudness. `replace_lufs()` fills two fields: `lufs`, the gated BS.1770 integrated loudness (NumPy via the `loudness` library, JAX via a vmapped `jaxloudnorm` meter), and `lufs_windows`, the ungated per-window loudness-over-time curve with an optional `hop_duration_sec` for overlap (computed natively so it needs no unreleased `loudness` build — NumPy uses exact K-weighting IIR biquads via `scipy`, JAX uses `jaxloudnorm`'s FIR-approximated K-weighting; see `audiotree.loudness`).
 
 1. **Datasources (`audiotree.sources`)**: Provides integration with Google's Grain library for ML data pipelines.
 The key functions are `create_audio_dataset()` for simple loading and `create_balanced_audio_dataset()` for multi-group balanced sampling.
 Both use grain's `random_map` for proper RNG seeding.
 The `load_audio_with_saliency()` function handles saliency-based excerpt selection with infinite RNG variety even when files repeat.
-`create_windowed_audio_dataset()` (in `audiotree.sources.windowed`) instead makes the *window* the unit of sampling: each file is tiled into `round(n_windows ** alpha)` jittered slots, globally shuffled for even coverage, length-aware frequency (`alpha`), and batch diversity. Optional build-time loudness filtering reads a `build_window_loudness_cache()` bagz cache of ragged per-file windowed-LUFS arrays. It composes with `create_balanced_audio_dataset()` via `WindowParams`.
+`create_windowed_audio_dataset()` (in `audiotree.sources.windowed`) instead makes the *window* the unit of sampling: each file is tiled into `round(n_windows ** alpha)` jittered slots, globally shuffled for even coverage, length-aware frequency (`alpha`), and batch diversity. Optional build-time loudness filtering reads a `build_window_lufs_cache()` bagz cache of ragged per-file windowed-LUFS arrays. It composes with `create_balanced_audio_dataset()` via `WindowParams`.
 
 1. **Transforms (`audiotree.transforms`)**: Audio augmentations with dual backends: NumPy (`audiotree.transforms`) for CPU grain pipelines using `np.random.Generator`, and JAX (`audiotree.transforms.jax`) for GPU/JIT training using `jax.random.key`.
 

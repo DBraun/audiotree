@@ -148,7 +148,7 @@ Use ArgBind to configure transform chains from YAML:
 
             # Iterate over augmented data
             for item in ds.to_iter_dataset():
-                print(item.source, item.loudness)
+                print(item.source, item.lufs)
                 break
 
 **config.yml:**

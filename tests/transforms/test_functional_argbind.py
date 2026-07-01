@@ -70,14 +70,14 @@ with argbind.scope(args):
         np.random.randn(1, 1, 44100).astype(np.float32) * 0.1,
         sample_rate=44100,
     )
-    audio_tree = audio_tree.replace_loudness()
+    audio_tree = audio_tree.replace_lufs()
 
     rng = np.random.default_rng(42)
     result = transform.random_map(audio_tree, rng)
 
     # With min_db=max_db=-30, loudness should be exactly -30
-    print(f"Loudness: {float(result.loudness[0])}")
-    assert abs(float(result.loudness[0]) - (-30.0)) < 1.0
+    print(f"Loudness: {float(result.lufs[0])}")
+    assert abs(float(result.lufs[0]) - (-30.0)) < 1.0
     print("SUCCESS")
 """
 
@@ -119,16 +119,16 @@ with argbind.scope(args):
         np.random.randn(1, 1, 44100).astype(np.float32) * 0.1,
         sample_rate=44100,
     )
-    audio_tree = audio_tree.replace_loudness()
+    audio_tree = audio_tree.replace_lufs()
 
     # Apply multiple times - some should be unchanged with prob=0.5
-    original_loudness = float(audio_tree.loudness[0])
+    original_loudness = float(audio_tree.lufs[0])
     different_count = 0
 
     for i in range(20):
         rng = np.random.default_rng(i)
         result = transform.random_map(audio_tree, rng)
-        if abs(float(result.loudness[0]) - original_loudness) > 0.1:
+        if abs(float(result.lufs[0]) - original_loudness) > 0.1:
             different_count += 1
 
     # With prob=0.5, roughly half should be different
@@ -238,12 +238,12 @@ with argbind.scope(args):
         np.random.randn(1, 1, 44100).astype(np.float32) * 0.1,
         sample_rate=44100,
     )
-    audio_tree = audio_tree.replace_loudness()
+    audio_tree = audio_tree.replace_lufs()
 
     rng = np.random.default_rng(42)
     result = transform.random_map(audio_tree, rng)
 
-    loudness = float(result.loudness[0])
+    loudness = float(result.lufs[0])
     print(f"Loudness: {loudness}")
     assert -25 - 1 <= loudness <= -15 + 1, f"Loudness {loudness} not in range [-26, -14]"
     print("SUCCESS")
@@ -293,14 +293,14 @@ audio_tree = AudioTree(
     np.random.randn(1, 1, 44100).astype(np.float32) * 0.1,
     sample_rate=44100,
 )
-audio_tree = audio_tree.replace_loudness()
+audio_tree = audio_tree.replace_lufs()
 rng = np.random.default_rng(42)
 
 # Train scope
 with argbind.scope(args, "train"):
     transform = volume_norm()
     train_result = transform.random_map(audio_tree, rng)
-    train_loudness = float(train_result.loudness[0])
+    train_loudness = float(train_result.lufs[0])
     print(f"Train loudness: {train_loudness}")
 
 # Val scope - need a new rng to get different results
@@ -308,7 +308,7 @@ rng2 = np.random.default_rng(42)
 with argbind.scope(args, "val"):
     transform = volume_norm()
     val_result = transform.random_map(audio_tree, rng2)
-    val_loudness = float(val_result.loudness[0])
+    val_loudness = float(val_result.lufs[0])
     print(f"Val loudness: {val_loudness}")
 
 # They should be different because val has min_db=max_db=-20 (exact)

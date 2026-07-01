@@ -10,14 +10,14 @@ import soundfile as sf
 
 from audiotree import AudioTree
 from audiotree.sources import (
-    build_window_loudness_cache,
+    build_window_lufs_cache,
     create_balanced_audio_dataset,
     create_windowed_audio_dataset,
-    load_window_loudness,
-    precompute_window_loudness,
-    save_window_loudness,
+    load_window_lufs,
+    precompute_window_lufs,
+    save_window_lufs,
     scan_durations,
-    WindowLoudnessCache,
+    WindowLufsCache,
     WindowParams,
 )
 from audiotree.sources.windowed import _build_slot_index
@@ -63,9 +63,9 @@ def _index_counts(fps, durations, *, duration, hop, alpha):
         duration=duration,
         hop=hop,
         alpha=alpha,
-        loudness_per_file=None,
-        loudness_window_sec=1.0,
-        loudness_cutoff=-40.0,
+        lufs_per_file=None,
+        lufs_window_sec=1.0,
+        lufs_cutoff=-40.0,
     )
     return np.bincount(file_idx, minlength=len(fps))
 
@@ -110,9 +110,9 @@ def test_slot_offsets_stay_inside_file():
             duration=2.0,
             hop=2.0,
             alpha=1.0,
-            loudness_per_file=None,
-            loudness_window_sec=1.0,
-            loudness_cutoff=-40.0,
+            lufs_per_file=None,
+            lufs_window_sec=1.0,
+            lufs_cutoff=-40.0,
         )
         # nominal + full jitter (== stride) never exceeds max_offset (== dur - duration).
         assert np.all(offset + stride <= max_offset + 1e-4)
@@ -180,9 +180,9 @@ def test_global_shuffle_interleaves_files():
             duration=1.0,
             hop=1.0,
             alpha=1.0,
-            loudness_per_file=None,
-            loudness_window_sec=1.0,
-            loudness_cutoff=-40.0,
+            lufs_per_file=None,
+            lufs_window_sec=1.0,
+            lufs_cutoff=-40.0,
         )
         # Mirror the dataset's exact shuffle on an index-only pipeline.
         id_ds = (
@@ -232,10 +232,10 @@ def test_alpha_out_of_range_raises():
 # --------------------------------------------------------------------------- #
 
 
-def test_precompute_window_loudness_is_ragged_and_floors_silence():
+def test_precompute_window_lufs_is_ragged_and_floors_silence():
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 3.0, "b": 7.0}, sample_rate=8000)
-        lpf = precompute_window_loudness(fps, window_duration_sec=1.0)
+        lpf = precompute_window_lufs(fps, window_duration_sec=1.0)
         # Ragged: window counts scale with duration (3 and 7).
         assert lpf[fps[0]].shape == (3,)
         assert lpf[fps[1]].shape == (7,)
@@ -255,7 +255,7 @@ def test_loudness_filtering_keeps_only_loud_slots():
         sf.write(fp, audio, sr)
         fps = [fp]
 
-        lpf = precompute_window_loudness(fps, window_duration_sec=1.0)
+        lpf = precompute_window_lufs(fps, window_duration_sec=1.0)
         durations = scan_durations(fps)
 
         full = _build_slot_index(
@@ -264,9 +264,9 @@ def test_loudness_filtering_keeps_only_loud_slots():
             duration=1.0,
             hop=1.0,
             alpha=1.0,
-            loudness_per_file=None,
-            loudness_window_sec=1.0,
-            loudness_cutoff=-40.0,
+            lufs_per_file=None,
+            lufs_window_sec=1.0,
+            lufs_cutoff=-40.0,
         )[0]
         kept_idx, kept_off, *_ = _build_slot_index(
             filepaths=fps,
@@ -274,9 +274,9 @@ def test_loudness_filtering_keeps_only_loud_slots():
             duration=1.0,
             hop=1.0,
             alpha=1.0,
-            loudness_per_file=lpf,
-            loudness_window_sec=1.0,
-            loudness_cutoff=-40.0,
+            lufs_per_file=lpf,
+            lufs_window_sec=1.0,
+            lufs_cutoff=-40.0,
         )
         assert 0 < len(kept_idx) < len(full)
         # Every surviving slot sits in the loud second half of the file.
@@ -286,43 +286,43 @@ def test_loudness_filtering_keeps_only_loud_slots():
 def test_bagz_cache_round_trip():
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 3.0, "b": 6.0}, sample_rate=8000)
-        cache_dir = build_window_loudness_cache(
+        cache_dir = build_window_lufs_cache(
             fps,
             window_duration_sec=1.0,
             out_dir=Path(tmp) / "cache",
             sample_rate=8000,
             mono=True,
         )
-        cache = load_window_loudness(cache_dir)
-        assert isinstance(cache, WindowLoudnessCache)
+        cache = load_window_lufs(cache_dir)
+        assert isinstance(cache, WindowLufsCache)
         assert cache.window_duration_sec == 1.0
         assert cache.sample_rate == 8000
         assert cache.mono is True
         assert cache.durations[fps[1]] == pytest.approx(6.0, abs=0.01)
         # Ragged arrays survive the bagz round-trip exactly.
-        ref = precompute_window_loudness(fps, 1.0, sample_rate=8000)
+        ref = precompute_window_lufs(fps, 1.0, sample_rate=8000)
         for fp in fps:
-            np.testing.assert_array_equal(cache.loudness[fp], ref[fp])
+            np.testing.assert_array_equal(cache.lufs[fp], ref[fp])
 
 
-def test_save_window_loudness_handles_empty_arrays():
+def test_save_window_lufs_handles_empty_arrays():
     with tempfile.TemporaryDirectory() as tmp:
         lpf = {
             "x.wav": np.array([-14.0, -16.0], np.float32),
             "y.wav": np.zeros(0, np.float32),
         }
-        out = save_window_loudness(
+        out = save_window_lufs(
             Path(tmp) / "c", lpf, window_duration_sec=1.0, sample_rate=8000, mono=True
         )
-        cache = load_window_loudness(out)
-        np.testing.assert_array_equal(cache.loudness["x.wav"], lpf["x.wav"])
-        assert cache.loudness["y.wav"].shape == (0,)
+        cache = load_window_lufs(out)
+        np.testing.assert_array_equal(cache.lufs["x.wav"], lpf["x.wav"])
+        assert cache.lufs["y.wav"].shape == (0,)
 
 
-def test_loudness_cache_path_filters_dataset():
+def test_lufs_cache_path_filters_dataset():
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 6.0, "b": 6.0}, sample_rate=8000)
-        cache_dir = build_window_loudness_cache(
+        cache_dir = build_window_lufs_cache(
             fps,
             window_duration_sec=1.0,
             out_dir=Path(tmp) / "cache",
@@ -336,8 +336,8 @@ def test_loudness_cache_path_filters_dataset():
             alpha=1.0,
             sample_rate=8000,
             mono=True,
-            loudness_cache=cache_dir,
-            loudness_cutoff=-200.0,
+            lufs_cache=cache_dir,
+            lufs_cutoff=-200.0,
             shuffle=False,
             repeat=False,
         )
@@ -349,10 +349,10 @@ def test_loudness_cache_path_filters_dataset():
         )
 
 
-def test_loudness_cache_sample_rate_mismatch_raises():
+def test_lufs_cache_sample_rate_mismatch_raises():
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 4.0}, sample_rate=8000)
-        cache_dir = build_window_loudness_cache(
+        cache_dir = build_window_lufs_cache(
             fps,
             window_duration_sec=1.0,
             out_dir=Path(tmp) / "cache",
@@ -364,14 +364,14 @@ def test_loudness_cache_sample_rate_mismatch_raises():
                 filepaths=fps,
                 sample_rate=16000,
                 mono=True,
-                loudness_cache=cache_dir,
+                lufs_cache=cache_dir,
             )
 
 
-def test_loudness_cache_mono_mismatch_raises():
+def test_lufs_cache_mono_mismatch_raises():
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 4.0}, sample_rate=8000)
-        cache_dir = build_window_loudness_cache(
+        cache_dir = build_window_lufs_cache(
             fps,
             window_duration_sec=1.0,
             out_dir=Path(tmp) / "cache",
@@ -383,7 +383,7 @@ def test_loudness_cache_mono_mismatch_raises():
                 filepaths=fps,
                 sample_rate=8000,
                 mono=False,
-                loudness_cache=cache_dir,
+                lufs_cache=cache_dir,
             )
 
 
