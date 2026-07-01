@@ -19,6 +19,7 @@ from typing import (
 
 from absl import logging
 from flax import struct
+import jax
 from jax import numpy as jnp, tree_util
 import librosa
 import loudness
@@ -26,11 +27,11 @@ import numpy as np
 import soundfile
 
 from .loudness import (
-    jit_integrated_loudness,
-    jit_windowed_loudness,
-    numpy_windowed_lufs,
-    window_samples,
-    windowed_num_windows,
+    _jit_integrated_loudness,
+    _jit_windowed_loudness,
+    _numpy_windowed_lufs,
+    _window_samples,
+    _windowed_num_windows,
 )
 from .resample import resample
 
@@ -244,6 +245,8 @@ class AudioTree:
         self,
         window_duration_sec: float = 0.4,
         hop_duration_sec: float | None = None,
+        *,
+        backend: Optional[Literal["cpu", "gpu", "tpu"]] = None,
     ) -> Self:
         """Compute and set the integrated and per-window loudness (LUFS).
 
@@ -269,6 +272,19 @@ class AudioTree:
                 ``window_duration_sec`` (non-overlapping windows); a smaller value
                 overlaps them. The trailing partial window is dropped, so an
                 excerpt shorter than one window yields an empty ``lufs_windows``.
+            backend: XLA backend for the computation, mirroring ``jax.jit``'s
+                ``backend`` argument. ``None`` (default) uses the waveform's own
+                array library on its current device — the NumPy/CPU path (the
+                ``loudness`` C++ library + ``scipy``, no JAX) for NumPy waveforms,
+                and ``jaxloudnorm`` on the current device for JAX waveforms. A
+                string ``"cpu"`` / ``"gpu"`` / ``"tpu"`` instead forces the vmapped
+                ``jaxloudnorm`` kernel onto that XLA backend even for a NumPy
+                waveform — e.g. ``backend="gpu"`` is much faster for a large batch,
+                since the NumPy ``lufs`` path measures one item at a time. The
+                **returned** ``lufs`` / ``lufs_windows`` always match the waveform's
+                array type (a NumPy waveform yields NumPy loudness regardless of
+                ``backend``), so you never need a manual ``jax.device_put`` /
+                ``jax.device_get`` round-trip.
 
         Returns:
             AudioTree with ``lufs`` shaped ``(*batch,)`` and ``lufs_windows`` shaped
@@ -294,44 +310,80 @@ class AudioTree:
             raise ValueError(
                 f"hop_duration_sec must be positive, got {hop_duration_sec}."
             )
+        if backend is not None and backend not in ("cpu", "gpu", "tpu"):
+            raise ValueError(
+                f"backend must be None, 'cpu', 'gpu', or 'tpu', got {backend!r}."
+            )
         # Flatten any leading axes (e.g. after reshape_mini_batches) to a single
         # batch axis, then restore them on the computed loudness.
         leading_shape = self.waveform.shape[:-2]
         waveform = self.waveform.reshape(-1, *self.waveform.shape[-2:])
-        ws = window_samples(window_duration_sec, self.sample_rate)
-        hs = window_samples(hop_duration_sec, self.sample_rate)
-        num_windows = windowed_num_windows(waveform.shape[-1], ws, hs)
+        ws = _window_samples(window_duration_sec, self.sample_rate)
+        hs = _window_samples(hop_duration_sec, self.sample_rate)
+        num_windows = _windowed_num_windows(waveform.shape[-1], ws, hs)
 
-        if isinstance(waveform, np.ndarray):
-            lufs_array = _numpy_integrated_lufs(waveform, self.sample_rate)
-            if num_windows == 0:
-                lufs_windows_array = np.zeros((waveform.shape[0], 0), dtype=np.float32)
-            else:
-                lufs_windows_array = numpy_windowed_lufs(
-                    waveform, self.sample_rate, window_duration_sec, hop_duration_sec
-                )
-        else:
-            waveform = jnp.asarray(waveform)
-            lufs_array = jit_integrated_loudness(waveform, self.sample_rate, zeros=512)
+        # ``backend`` chooses the compute kernel/device; the output stays in the
+        # waveform's own array library so the tree does not go heterogeneous. A
+        # ``None`` backend follows the waveform's array type; an explicit XLA
+        # backend forces the ``jaxloudnorm`` kernel onto that device.
+        input_is_numpy = isinstance(waveform, np.ndarray)
+        use_jax = not input_is_numpy if backend is None else True
+        device = None if backend is None else jax.devices(backend)[0]
+
+        if use_jax:
+            compute_waveform = (
+                jnp.asarray(waveform)
+                if device is None
+                else jax.device_put(waveform, device)
+            )
+            lufs_array = _jit_integrated_loudness(
+                compute_waveform, self.sample_rate, zeros=512
+            )
             if num_windows == 0:
                 lufs_windows_array = jnp.zeros(
-                    (waveform.shape[0], 0), dtype=jnp.float32
+                    (compute_waveform.shape[0], 0), dtype=jnp.float32
                 )
             else:
-                lufs_windows_array = jit_windowed_loudness(
-                    waveform,
+                lufs_windows_array = _jit_windowed_loudness(
+                    compute_waveform,
                     self.sample_rate,
                     window_duration_sec,
                     hop_duration_sec,
                     zeros=512,
                 )
+        else:
+            compute_waveform = np.asarray(waveform)
+            lufs_array = _numpy_integrated_lufs(compute_waveform, self.sample_rate)
+            if num_windows == 0:
+                lufs_windows_array = np.zeros(
+                    (compute_waveform.shape[0], 0), dtype=np.float32
+                )
+            else:
+                lufs_windows_array = _numpy_windowed_lufs(
+                    compute_waveform,
+                    self.sample_rate,
+                    window_duration_sec,
+                    hop_duration_sec,
+                )
+
+        # Coerce results back to the waveform's array library (a no-op when the
+        # kernel already ran there; a device transfer when ``backend`` forced the
+        # other one).
+        out_np = np if input_is_numpy else jnp
+        lufs_array = out_np.asarray(lufs_array)
+        lufs_windows_array = out_np.asarray(lufs_windows_array)
 
         return self.replace(
             lufs=lufs_array.reshape(leading_shape),
             lufs_windows=lufs_windows_array.reshape(*leading_shape, num_windows),
         )
 
-    def normalize_lufs(self, target_lufs: float) -> Self:
+    def normalize_lufs(
+        self,
+        target_lufs: float,
+        *,
+        backend: Optional[Literal["cpu", "gpu", "tpu"]] = None,
+    ) -> Self:
         """Normalize audio to a target LUFS level.
 
         Computes the current loudness (if not already set), then scales the audio
@@ -341,6 +393,9 @@ class AudioTree:
 
         Args:
             target_lufs: Target loudness in LUFS (e.g., -18.0 for broadcast standard).
+            backend: XLA backend for computing the loudness when it is not already
+                set, forwarded to :meth:`replace_lufs` (see there). Ignored when
+                ``lufs`` is already populated.
 
         Returns:
             AudioTree with audio scaled to target LUFS and loudness updated.
@@ -354,7 +409,7 @@ class AudioTree:
         """
         # Ensure loudness is computed
         if self.lufs is None:
-            tree = self.replace_lufs()
+            tree = self.replace_lufs(backend=backend)
         else:
             tree = self
 

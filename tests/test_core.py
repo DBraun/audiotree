@@ -495,6 +495,41 @@ def test_replace_lufs_windows_hop_and_silence():
     assert np.all(np.isneginf(np.asarray(silent.lufs_windows[0])))
 
 
+def test_replace_lufs_backend_forces_jax_kernel_but_keeps_array_type():
+    """`backend="cpu"` runs the JAX kernel on XLA CPU yet returns NumPy loudness."""
+    import jax.numpy as jnp
+
+    sr = 44100
+    tone = _tone(sr, 2.0)
+    np_tree = AudioTree.create(tone, sr)
+    jx_tree = AudioTree.create(jnp.asarray(tone), sr)
+
+    # Default backend=None -> native NumPy/CPU kernel for a NumPy waveform.
+    assert isinstance(np_tree.replace_lufs().lufs, np.ndarray)
+
+    # backend="cpu" forces the vmapped jaxloudnorm kernel (on XLA CPU) even for a
+    # NumPy waveform, but loudness comes back as NumPy so the tree stays on one
+    # device -- no manual device_put/device_get needed.
+    forced = np_tree.replace_lufs(backend="cpu")
+    assert isinstance(forced.lufs, np.ndarray)
+    assert isinstance(forced.lufs_windows, np.ndarray)
+    # It ran the JAX kernel, so it matches the JAX path (not the exact-IIR NumPy
+    # path) to high precision.
+    jax_native = jx_tree.replace_lufs()
+    np.testing.assert_allclose(forced.lufs, np.asarray(jax_native.lufs), atol=1e-3)
+    np.testing.assert_allclose(
+        forced.lufs_windows, np.asarray(jax_native.lufs_windows), atol=1e-3
+    )
+
+    with pytest.raises(ValueError):
+        np_tree.replace_lufs(backend="jax")
+
+    # normalize_lufs forwards backend to replace_lufs and keeps NumPy output.
+    normalized = np_tree.normalize_lufs(-18.0, backend="cpu")
+    assert isinstance(normalized.lufs, np.ndarray)
+    np.testing.assert_allclose(float(normalized.lufs[0]), -18.0, atol=1e-4)
+
+
 def test_normalize_lufs_shifts_windows():
     """normalize_lufs retargets ``lufs`` and shifts ``lufs_windows`` by the same gain."""
     sr = 44100

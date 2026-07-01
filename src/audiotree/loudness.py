@@ -20,7 +20,7 @@ _CHANNEL_GAINS = (1.0, 1.0, 1.0, 1.41, 1.41)
 _ABSOLUTE_OFFSET = -0.691
 
 
-def window_samples(window_duration_sec: float, sample_rate: int) -> int:
+def _window_samples(window_duration_sec: float, sample_rate: int) -> int:
     """Number of samples spanned by a loudness window (or hop) of the given duration.
 
     Both the NumPy and JAX per-window loudness paths derive their window/hop spans
@@ -29,7 +29,7 @@ def window_samples(window_duration_sec: float, sample_rate: int) -> int:
     return int(round(window_duration_sec * sample_rate))
 
 
-def windowed_num_windows(samples: int, window_span: int, hop_span: int) -> int:
+def _windowed_num_windows(samples: int, window_span: int, hop_span: int) -> int:
     """Number of whole windows that fit, stepping ``hop_span`` samples at a time.
 
     The trailing partial window is dropped; ``0`` when the signal is shorter than
@@ -92,7 +92,7 @@ def _windowed_lufs_from_kweighted(filtered, window_span, hop_span, num_windows, 
 
 
 @jax.jit(static_argnames=("sample_rate", "zeros"))
-def jit_integrated_loudness(
+def _jit_integrated_loudness(
     data: jnp.ndarray,
     sample_rate: int,
     zeros: int = 512,
@@ -125,7 +125,7 @@ def jit_integrated_loudness(
 @jax.jit(
     static_argnames=("sample_rate", "window_duration_sec", "hop_duration_sec", "zeros")
 )
-def jit_windowed_loudness(
+def _jit_windowed_loudness(
     data: jnp.ndarray,
     sample_rate: int,
     window_duration_sec: float,
@@ -159,15 +159,15 @@ def jit_windowed_loudness(
 
     filtered = jax.vmap(_k_weight)(data)  # (batch, channels, samples)
 
-    window_span = window_samples(window_duration_sec, sample_rate)
-    hop_span = window_samples(hop_duration_sec, sample_rate)
-    num_windows = windowed_num_windows(data.shape[-1], window_span, hop_span)
+    window_span = _window_samples(window_duration_sec, sample_rate)
+    hop_span = _window_samples(hop_duration_sec, sample_rate)
+    num_windows = _windowed_num_windows(data.shape[-1], window_span, hop_span)
     return _windowed_lufs_from_kweighted(
         filtered, window_span, hop_span, num_windows, jnp
     )
 
 
-def numpy_windowed_lufs(
+def _numpy_windowed_lufs(
     waveform: np.ndarray,
     sample_rate: int,
     window_duration_sec: float,
@@ -175,7 +175,7 @@ def numpy_windowed_lufs(
 ) -> np.ndarray:
     """Ungated per-window loudness (LUFS) for a ``(batch, channels, samples)`` NumPy batch.
 
-    The CPU counterpart of :func:`jit_windowed_loudness`: K-weights the whole
+    The CPU counterpart of :func:`_jit_windowed_loudness`: K-weights the whole
     signal with exact IIR biquads (``scipy.signal.lfilter``), then reports the
     ungated K-weighted loudness of each window (stepping ``hop_duration_sec``).
     JAX-free so it is safe inside grain workers. Returns ``(batch, num_windows)``;
@@ -186,9 +186,9 @@ def numpy_windowed_lufs(
         b, a = _rbj_biquad(gain_db, q, fc, sample_rate, filter_type)
         filtered = lfilter(b, a, filtered, axis=-1)
 
-    window_span = window_samples(window_duration_sec, sample_rate)
-    hop_span = window_samples(hop_duration_sec, sample_rate)
-    num_windows = windowed_num_windows(waveform.shape[-1], window_span, hop_span)
+    window_span = _window_samples(window_duration_sec, sample_rate)
+    hop_span = _window_samples(hop_duration_sec, sample_rate)
+    num_windows = _windowed_num_windows(waveform.shape[-1], window_span, hop_span)
     with np.errstate(divide="ignore"):  # a fully silent window is -inf by definition
         lufs = _windowed_lufs_from_kweighted(
             filtered, window_span, hop_span, num_windows, np
