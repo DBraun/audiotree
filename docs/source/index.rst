@@ -10,10 +10,17 @@ AudioTree can be installed with pip:
 
    pip install audiotree
 
-The namesake class :class:`~audiotree.core.AudioTree` is a container for audio-related information with a batch-axis convention.
-Specifically, it's a `flax.struct.dataclass`_ with properties for the time-domain waveform,
-sample rate, on-demand data such as loudness, and optional data such as filepaths, MIDI pitch, velocity.
-An AudioTree can also store arrays for codebooks or latent embeddings.
+The namesake class :class:`~audiotree.core.AudioTree` is a `flax.struct.dataclass`_
+that holds a batch of audio under one shape convention: every array carries the
+batch as its leading axis, so items stay aligned as you index, slice, batch, and
+transform them.
+
+- ``waveform`` — the time-domain audio, ``(B, C, T)`` (batch, channels, samples)
+- ``sample_rate`` — a shared scalar ``int``; the one field that is *not* batched
+- ``lufs`` / ``lufs_windows`` — loudness, filled on demand, ``(B,)`` / ``(B, Windows)``
+- ``pitch``, ``velocity``, ``note_duration`` — optional per-item labels (MIDI pitch/velocity, note length), ``(B,)`` each
+- ``codes`` / ``latents`` — neural-codec tokens or latent embeddings, ``(B, ...)``
+- ``metadata`` — a dict of your own ``(B, ...)`` arrays (source paths land in ``metadata["filepath"]``)
 
 AudioTree integrates with `Grain`_ to provide complete data pipelines. Load audio from directories,
 apply balanced sampling across groups, and chain augmentations:
