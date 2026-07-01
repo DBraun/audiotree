@@ -276,7 +276,7 @@ class AudioTree:
                 and ``jaxloudnorm`` on the current device for JAX waveforms. A
                 string ``"cpu"`` / ``"gpu"`` / ``"tpu"`` instead forces the vmapped
                 ``jaxloudnorm`` kernel onto that XLA backend even for a NumPy
-                waveform — e.g. ``backend="gpu"`` is much faster for a large batch,
+                waveform — e.g., ``backend="gpu"`` is much faster for a large batch,
                 since the NumPy ``lufs`` path measures one item at a time. The
                 **returned** ``lufs`` / ``lufs_windows`` always match the waveform's
                 array type (a NumPy waveform yields NumPy loudness regardless of
@@ -539,7 +539,7 @@ class AudioTree:
         """Number of items in the batch (the leading axis).
 
         Together with ``__getitem__`` this makes an AudioTree iterable over
-        its batch items, e.g. ``for item in tree: ...`` — each ``item`` is a
+        its batch items, e.g., ``for item in tree: ...`` — each ``item`` is a
         batch-of-1 AudioTree.
         """
         return self.batch_size
@@ -581,7 +581,7 @@ class AudioTree:
         This makes AudioTree a proper ``collections.abc.Iterable`` (the
         sequence protocol via ``__getitem__`` already allowed ``for`` loops,
         but ``isinstance(tree, Iterable)`` was ``False`` without ``__iter__``).
-        Each yielded item keeps the leading batch axis, e.g. iterating a
+        Each yielded item keeps the leading batch axis, e.g., iterating a
         batch-16 tree yields 16 trees of ``batch_size == 1``.
         """
         for i in range(self.batch_size):
@@ -1055,7 +1055,7 @@ class AudioTree:
             filepath: Output path. The file format is inferred from the
                 extension (e.g. ``.wav``, ``.flac``, ``.ogg``) unless overridden
                 by ``format``.
-            subtype: soundfile subtype, e.g. ``"PCM_16"``, ``"PCM_24"``,
+            subtype: soundfile subtype, e.g., ``"PCM_16"``, ``"PCM_24"``,
                 ``"FLOAT"``. When ``None`` (default) soundfile picks the format
                 default (``PCM_16`` for WAV).
             format: Major format override (e.g. ``"WAV"``, ``"FLAC"``). When

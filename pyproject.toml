@@ -79,5 +79,5 @@ target-version = "py311"
 
 [tool.ruff.lint]
 # Keep Ruff's defaults (E, F) and additionally reject PEP 484 implicit `Optional`
-# (a `None` default on a non-`Optional`-typed parameter), e.g. `x: float = None`.
+# (a `None` default on a non-`Optional`-typed parameter), e.g., `x: float = None`.
 extend-select = ["RUF013"]

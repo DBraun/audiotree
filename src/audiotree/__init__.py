@@ -27,7 +27,7 @@ __all__ = [
 def __getattr__(name):
     # ``sources`` and ``transforms`` are the only modules that import grain;
     # load them lazily so that `import audiotree` (AudioTree, TreeWriter,
-    # AudioWriter) works in environments without grain — e.g. downstream
+    # AudioWriter) works in environments without grain — e.g., downstream
     # packages that depend on audiotree only for the AudioTree container.
     if name in ("sources", "transforms"):
         import importlib
