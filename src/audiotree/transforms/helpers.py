@@ -245,31 +245,28 @@ def _corrupt_phase_np(
 
     hop_length = int(frame_length * hop_factor)
 
-    # Process each batch/channel separately since librosa doesn't support batched input
-    result = np.zeros_like(waveform)
-    for b in range(B):
-        for c in range(C):
-            stft_data = librosa.stft(
-                waveform[b, c],
-                n_fft=frame_length,
-                hop_length=hop_length,
-                window=window,
-                center=True,
-            )
+    # librosa's stft/istft operate on the last axis and broadcast over any leading
+    # dims, so the whole (B, C, T) batch runs in a single call.
+    stft_data = librosa.stft(
+        waveform,
+        n_fft=frame_length,
+        hop_length=hop_length,
+        window=window,
+        center=True,
+    )  # (B, C, freq, frames)
 
-            amt = rng.uniform(
-                -np.pi * amount, np.pi * amount, size=stft_data.shape[:-1]
-            )
-            stft_data = stft_data * np.expand_dims(np.exp(1j * amt), axis=-1)
+    # One random phase offset per (batch, channel, frequency), broadcast over frames.
+    amt = rng.uniform(-np.pi * amount, np.pi * amount, size=stft_data.shape[:-1])
+    stft_data = stft_data * np.expand_dims(np.exp(1j * amt), axis=-1)
 
-            result[b, c] = librosa.istft(
-                stft_data,
-                n_fft=frame_length,
-                hop_length=hop_length,
-                window=window,
-                center=True,
-                length=length,
-            )
+    result = librosa.istft(
+        stft_data,
+        n_fft=frame_length,
+        hop_length=hop_length,
+        window=window,
+        center=True,
+        length=length,
+    ).astype(waveform.dtype)
 
     lufs = audio_tree.lufs if keep_lufs else None
     lufs_windows = audio_tree.lufs_windows if keep_lufs else None
@@ -338,30 +335,28 @@ def _shift_phase_np(
 
     hop_length = int(frame_length * hop_factor)
 
-    # Generate one phase shift per batch item
+    # One phase shift per batch item, broadcast over channels/frequencies/frames.
     amts = rng.uniform(-np.pi * amount, np.pi * amount, size=(B,))
 
-    result = np.zeros_like(waveform)
-    for b in range(B):
-        for c in range(C):
-            stft_data = librosa.stft(
-                waveform[b, c],
-                n_fft=frame_length,
-                hop_length=hop_length,
-                window=window,
-                center=True,
-            )
+    # librosa's stft/istft operate on the last axis and broadcast over any leading
+    # dims, so the whole (B, C, T) batch runs in a single call.
+    stft_data = librosa.stft(
+        waveform,
+        n_fft=frame_length,
+        hop_length=hop_length,
+        window=window,
+        center=True,
+    )  # (B, C, freq, frames)
+    stft_data = stft_data * np.exp(1j * amts)[:, None, None, None]
 
-            stft_data = stft_data * np.exp(1j * amts[b])
-
-            result[b, c] = librosa.istft(
-                stft_data,
-                n_fft=frame_length,
-                hop_length=hop_length,
-                window=window,
-                center=True,
-                length=length,
-            )
+    result = librosa.istft(
+        stft_data,
+        n_fft=frame_length,
+        hop_length=hop_length,
+        window=window,
+        center=True,
+        length=length,
+    ).astype(waveform.dtype)
 
     lufs = audio_tree.lufs if keep_lufs else None
     lufs_windows = audio_tree.lufs_windows if keep_lufs else None
