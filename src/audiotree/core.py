@@ -36,13 +36,10 @@ from .loudness import (
 from .resample import resample
 
 if TYPE_CHECKING:
-    import jax
-
-    # An array field that may hold either a NumPy or a JAX array. ``import jax``
-    # stays inside ``TYPE_CHECKING`` so type checkers see the full union while
-    # reading these annotations never forces a runtime JAX import — possible
-    # because ``from __future__ import annotations`` keeps every annotation a
-    # string until something explicitly resolves it.
+    # An array field that may hold either a NumPy or a JAX array. ``jax`` is
+    # already imported at module top (``replace_lufs(backend=...)`` needs
+    # ``jax.devices`` / ``jax.device_put``), so this annotation resolves against
+    # it without a duplicate import.
     ArrayLike = Union[np.ndarray, jax.Array]
 else:
     # Runtime fallback so the name still resolves (e.g. for

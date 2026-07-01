@@ -1,6 +1,6 @@
 """Base classes for transforms."""
 
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 import warnings
 
 from grain.transforms import Map as MapTransform, RandomMap as RandomMapTransform
@@ -12,12 +12,18 @@ import numpy as np
 
 from audiotree import AudioTree
 
-KeyLeafPairs = list[tuple[list[DictKey], Any]]
+# jax types its pytree key classes (DictKey, SequenceKey, ...) as ``Any``, so they
+# cannot appear directly in a type expression; ``KeyPath`` is the path of key
+# entries used in the annotations below. ``Sequence`` (covariant) lets the
+# tuple-based key paths that jax's ``tree_flatten_with_path`` returns satisfy
+# these annotations.
+KeyPath = Sequence[Any]
+KeyLeafPairs = Sequence[tuple[KeyPath, Any]]
 
 
 def _get_config_val(
     config: KeyLeafPairs,
-    lookup_path: list[DictKey],
+    lookup_path: KeyPath,
     lookup_key: str,
     default: Any,
 ) -> Any:
@@ -43,7 +49,7 @@ def _get_config_val(
 
 def _is_in_scope(
     scope: KeyLeafPairs,
-    lookup_path: list[DictKey],
+    lookup_path: KeyPath,
 ) -> bool:
     """
     Retrieve the configuration value for a given key and path.
@@ -82,6 +88,11 @@ def merge_pytree(tree1, tree2):
 
 
 class BaseTransformMixIn:
+    # Set in each concrete transform's ``__init__``; declared here so the shared
+    # ``_post_process`` can reference them.
+    scope: KeyLeafPairs
+    output_key: Optional[Callable[[List[str]], str]]
+
     @staticmethod
     def get_default_config() -> Dict[str, Any]:
         """
@@ -114,7 +125,9 @@ class BaseTransformMixIn:
         raise NotImplementedError("Must be implemented in subclass")
 
     def _post_process(self, old_tree, new_tree):
-        if self.output_key is None:
+        # Capture as a local so it stays narrowed to non-None inside the closure.
+        output_key = self.output_key
+        if output_key is None:
             return new_tree
 
         assert isinstance(old_tree, dict), (
@@ -130,10 +143,10 @@ class BaseTransformMixIn:
             return isinstance(values, AudioTree)
 
         # Use output_key to rename the nodes in the tree
-        def rename_node(path: list[DictKey], leaf):
+        def rename_node(path: KeyPath, leaf):
             full_path = [k.key for k in path]
             leaf = {
-                self.output_key(full_path + [k]): v
+                output_key(full_path + [k]): v
                 for k, v in leaf.items()
                 if _is_in_scope(self.scope, tuple(path) + (DictKey(k),))
             }
@@ -150,11 +163,11 @@ class BaseTransformMixIn:
 class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
     def __init__(
         self,
-        config: Dict[str, Any] = None,
+        config: Optional[Dict[str, Any]] = None,
         split_seed: bool = True,
         prob: float = 1.0,
-        scope: Dict[str, Any] = None,
-        output_key: Union[str, Callable[[List[str]], str]] = None,
+        scope: Optional[Dict[str, Any]] = None,
+        output_key: Optional[Union[str, Callable[[List[str]], str]]] = None,
     ):
         """
         Initialize the base transform with a configuration, a flag for seed splitting, a probability, a scope, and an
@@ -208,12 +221,12 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         def is_leaf(leaf):
             return isinstance(leaf, AudioTree)
 
-        def pre_transform_map_func(path: list[DictKey], leaf):
+        def pre_transform_map_func(path: KeyPath, leaf):
             if _is_in_scope(self.scope, path):
                 return self._pre_transform(leaf)
             return leaf
 
-        def map_func(path: list[DictKey], leaf, rng: jax.Array, *config):
+        def map_func(path: KeyPath, leaf, rng: jax.Array, *config):
             if not is_leaf(leaf):
                 return leaf
             if _is_in_scope(self.scope, path):
@@ -222,7 +235,7 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
                 return None
             return leaf
 
-        def map_use_default_config_val(path: list[DictKey], leaf):
+        def map_use_default_config_val(path: KeyPath, leaf):
             return {
                 k: _get_config_val(self.config, path, k, default)
                 for k, default in self.default_config.items()
@@ -256,12 +269,12 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         def is_leaf(leaf):
             return isinstance(leaf, AudioTree)
 
-        def pre_transform_map_func(path: list[DictKey], leaf):
+        def pre_transform_map_func(path: KeyPath, leaf):
             if _is_in_scope(self.scope, path):
                 return self._pre_transform(leaf)
             return leaf
 
-        def map_func(path: list[DictKey], leaf, leaf_rng: np.random.Generator, *config):
+        def map_func(path: KeyPath, leaf, leaf_rng: np.random.Generator, *config):
             if not is_leaf(leaf):
                 return leaf
             if _is_in_scope(self.scope, path):
@@ -270,7 +283,7 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
                 return None
             return leaf
 
-        def map_use_default_config_val(path: list[DictKey], leaf):
+        def map_use_default_config_val(path: KeyPath, leaf):
             return {
                 k: _get_config_val(self.config, path, k, default)
                 for k, default in self.default_config.items()
@@ -306,9 +319,9 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
 class BaseMapTransform(BaseTransformMixIn, MapTransform):
     def __init__(
         self,
-        config: Dict[str, Dict[str, Any]] = None,
-        scope: Dict[str, Dict[str, Any]] = None,
-        output_key: Union[str, Callable[[List[str]], str]] = None,
+        config: Optional[Dict[str, Dict[str, Any]]] = None,
+        scope: Optional[Dict[str, Dict[str, Any]]] = None,
+        output_key: Optional[Union[str, Callable[[List[str]], str]]] = None,
     ):
         """
         Initialize the base transform with a configuration, a flag for seed splitting, a probability, a scope, and an
@@ -343,14 +356,14 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
         def is_leaf(leaf):
             return isinstance(leaf, AudioTree)
 
-        def pre_transform_map_func(path: list[DictKey], leaf):
+        def pre_transform_map_func(path: KeyPath, leaf):
             if not is_leaf(leaf):
                 return leaf
             if _is_in_scope(self.scope, path):
                 return self._pre_transform(leaf)
             return leaf
 
-        def map_func(path: list[DictKey], leaf, *config):
+        def map_func(path: KeyPath, leaf, *config):
             if not is_leaf(leaf):
                 return leaf
             if _is_in_scope(self.scope, path):
@@ -359,7 +372,7 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
                 return None
             return leaf
 
-        def map_use_default_config_val(path: list[DictKey], leaf):
+        def map_use_default_config_val(path: KeyPath, leaf):
             return {
                 key: _get_config_val(self.config, path, key, default)
                 for key, default in self.default_config.items()

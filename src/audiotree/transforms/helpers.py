@@ -1,18 +1,15 @@
 """Helper functions for transforms with dual numpy/JAX implementations."""
 
-from typing import Any, Tuple
+from typing import Tuple
 
 import jax
 from jax import numpy as jnp
 from jax import random
-from jax.tree_util import DictKey
 import librosa
 import librosax
 import numpy as np
 
 from audiotree import AudioTree
-
-KeyLeafPairs = list[tuple[list[DictKey], Any]]
 
 
 # =============================================================================
