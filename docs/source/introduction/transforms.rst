@@ -343,6 +343,12 @@ Use decorators to create custom transforms:
     # my_augmentation.strength: 0.1
     # my_augmentation.prob: 0.8
 
+Next
+----
+
+The next chapter, :ref:`transform_chaining`, wires these transforms onto a Grain
+dataset so they run lazily as part of the data pipeline.
+
 See Also
 --------
 
@@ -354,7 +360,6 @@ For complete guides and examples:
 - :ref:`multiprocessing` - Parallel data loading
 - `argbind_augmentations examples <../../examples/argbind_augmentations/>`_ - Complete working examples
 - `tests/transforms/test_core.py <https://github.com/DBraun/audiotree/blob/main/tests/transforms/test_core.py>`_ - Test examples
-- `DAC-JAX`_ - Real-world usage in production
 
 .. _ArgBind: https://github.com/DBraun/argbind/
 .. _DAC-JAX: https://github.com/DBraun/DAC-JAX

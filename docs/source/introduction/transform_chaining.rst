@@ -535,6 +535,14 @@ Best Practices
 5. **Use ArgBind for configuration**: Keep transform parameters in YAML files
 6. **Consider pre-computing**: For expensive pipelines, pre-compute the data and export it with :class:`~audiotree.tree_writer.TreeWriter`
 
+Next
+----
+
+Once your pipeline produces the batches you want, the final Getting-started chapter,
+:ref:`writer`, shows how to write them back to disk — as playable audio with
+:class:`~audiotree.writer.AudioWriter` or as a fast memory-mapped dataset with
+:class:`~audiotree.tree_writer.TreeWriter`.
+
 See Also
 --------
 

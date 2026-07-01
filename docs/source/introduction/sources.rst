@@ -298,5 +298,12 @@ Add it as the final stage of the pipeline (after ``.batch()`` and
 ``.to_iter_dataset()``), in place of manually calling :func:`jax.device_put` on
 each batch inside the training loop.
 
+Next
+----
+
+You can now load AudioTrees from disk into batched, device-ready pipelines. The
+next chapter is the fun part — :ref:`transforms`, the augmentations you chain onto
+a dataset with ``.map()`` and ``.random_map()``.
+
 .. _Grain: https://github.com/google/grain
 .. _Orbax: https://orbax.readthedocs.io/en/latest/

@@ -572,3 +572,11 @@ Here's a complete example of creating a training dataset with AudioWriter:
         print(f"Created dataset with {writer.get_stats()['total_files']} files")
 
 This creates a fully tracked, augmented dataset ready for training machine learning models.
+
+Next
+----
+
+That completes the Getting-started path — you can load audio, augment it, and write
+prepared datasets back to disk. From here, the **Going further** guides dig into
+:ref:`balanced_datasets`, :ref:`windowed_datasets`, :ref:`dict_batches`, command-line
+configuration with :ref:`argbind_guide`, and :ref:`multiprocessing`.

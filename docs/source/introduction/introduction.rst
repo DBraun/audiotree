@@ -775,44 +775,9 @@ batch of 1, exactly what ``write`` requires):
 
 .. note::
    ``write`` operates on a single item by design. Calling it on a multi-item batch
-   raises an ``AssertionError`` — use :class:`~audiotree.writer.AudioWriter` below to
-   write a whole batch (with a manifest) in one call.
-
-Writing Batches with Manifests
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The :class:`~audiotree.writer.AudioWriter` class provides a convenient way to write AudioTree objects to disk with automatic manifest generation for tracking metadata.
-
-Basic Example
-~~~~~~~~~~~~~
-
-.. testcode::
-
-    from audiotree import AudioTree, AudioWriter
-    import numpy as np
-
-    # Create an AudioTree with 3 samples
-    audio_tree = AudioTree.create(
-        np.random.randn(3, 2, 44_100),  # 3 batches, stereo, 1 second
-        sample_rate=44_100,
-        lufs=np.array([-20.0, -15.0, -18.0])
-    )
-
-    # Write to disk with automatic manifest
-    with AudioWriter("output") as writer:
-        paths = writer.write(audio_tree, tags={"dataset": "train"})
-
-    print(len(paths))   # One file per batch item
-
-    # Read the data back
-    from audiotree.sources import ManifestDataSource
-    source = ManifestDataSource.from_writer_output("output")
-    print(source[0].lufs)   # Metadata is preserved
-
-.. testoutput::
-
-    3
-    [-20.]
+   raises an ``AssertionError``. To write a whole batch in one call — with a manifest
+   of per-item metadata — reach for :class:`~audiotree.writer.AudioWriter`, covered in
+   the :ref:`writer` chapter.
 
 Next Steps
 ----------
