@@ -733,7 +733,7 @@ class AudioTree:
         cls,
         manifest_path: Union[str, Path],
         audio_dir: Optional[Union[str, Path]] = None,
-        filter_fn: Optional[callable] = None,
+        filter_fn: Optional[Callable[[Any], bool]] = None,
     ) -> Self:
         """Create an AudioTree by loading all items from a manifest file.
 

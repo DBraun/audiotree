@@ -1,7 +1,7 @@
 """DataSource for reading AudioWriter outputs with manifest support."""
 
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, SupportsIndex, Union
+from typing import Callable, Dict, List, Literal, Optional, SupportsIndex, Union
 
 import numpy as np
 from grain import python as grain
@@ -77,7 +77,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         mono: bool = False,
         duration: Optional[float] = None,
         pad_mode: Literal["constant", "wrap"] = "constant",
-        filter_fn: Optional[callable] = None,
+        filter_fn: Optional[Callable[[Dict], bool]] = None,
     ):
         self.manifest_path = Path(manifest_path)
 
@@ -103,7 +103,9 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         if self._length == 0:
             raise ValueError(f"No valid entries found in manifest: {manifest_path}")
 
-    def _load_manifest(self, filter_fn: Optional[callable] = None) -> List[Dict]:
+    def _load_manifest(
+        self, filter_fn: Optional[Callable[[Dict], bool]] = None
+    ) -> List[Dict]:
         """Load manifest file and optionally filter entries.
 
         Args:
