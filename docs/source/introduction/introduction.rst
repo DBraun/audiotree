@@ -51,7 +51,7 @@ You can create an AudioTree directly from NumPy or JAX NumPy arrays:
 
     # Create from 3D array (B, C, T)
     sample_rate = 44_100
-    waveform = np.zeros((4, 2, 44_100))  # 4 batches, 2 channels, 1 second
+    waveform = np.zeros((4, 2, 88_200))  # 4 batches, 2 channels, 2 seconds
     audio_tree = AudioTree(waveform, sample_rate)
 
     print(audio_tree.waveform.shape)
@@ -59,7 +59,7 @@ You can create an AudioTree directly from NumPy or JAX NumPy arrays:
 
 .. testoutput::
 
-    (4, 2, 44100)
+    (4, 2, 88200)
     44100
 
 Automatic Dimensionality Handling
@@ -91,8 +91,6 @@ AudioTree provides convenient methods for loading audio files:
 
 .. testcode::
 
-    from pathlib import Path
-
     # Load an audio file
     audio_tree = AudioTree.from_file("audio.wav", sample_rate=44_100)
 
@@ -110,13 +108,13 @@ AudioTree provides convenient methods for loading audio files:
         "audio.wav",
         sample_rate=44_100,
         metadata={
-            "params": np.zeros((1, 4,)),  # intentionally give batch axis of 1
+            "features_4d": np.zeros((1, 4,)),  # intentionally give batch axis of 1
         }
     )
 
     # The filepath is automatically stored in metadata
     print(audio_tree.filepath)
-    print(audio_tree.metadata["params"])
+    print(audio_tree.metadata["features_4d"])
 
 .. testoutput::
 
@@ -147,10 +145,6 @@ AudioTree objects have several key properties:
     (2, 2, 44100)
     44100
     {}
-
-Loudness lives in the ``lufs`` field, which starts out ``None`` and is filled in
-by :meth:`~audiotree.core.AudioTree.replace_lufs` — see `Computing Loudness`_
-below.
 
 Creating Modified Copies
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -192,6 +186,17 @@ AudioTree can compute loudness in LUFS (Loudness Units Full Scale) for each item
     (4,)
     [-43.25 -43.25 -43.25 -43.25]
 
+.. note::
+   **Channel Limitations for Loudness Computation**
+
+   The loudness calculation supports up to 5 channels, following the ITU-R BS.1770-4 standard:
+
+   - **Mono (1 channel)**: Single channel
+   - **Stereo (2 channels)**: [Left, Right]
+   - **5.0/5.1 Surround (5 channels)**: [Left, Right, Center, Left Surround, Right Surround]
+
+   AudioTree objects with more than 5 channels will raise an error during loudness computation.
+
 Choosing a compute backend
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -221,17 +226,6 @@ kernel across the whole batch at once, which is much faster:
 
 :meth:`~audiotree.core.AudioTree.normalize_lufs` computes loudness internally, so
 it accepts the same ``backend`` argument.
-
-.. note::
-   **Channel Limitations for Loudness Computation**
-
-   The loudness calculation supports up to 5 channels, following the ITU-R BS.1770-4 standard:
-
-   - **Mono (1 channel)**: Single channel
-   - **Stereo (2 channels)**: [Left, Right]
-   - **5.0/5.1 Surround (5 channels)**: [Left, Right, Center, Left Surround, Right Surround]
-
-   AudioTree objects with more than 5 channels will raise an error during loudness computation.
 
 Resampling Audio
 ~~~~~~~~~~~~~~~~
