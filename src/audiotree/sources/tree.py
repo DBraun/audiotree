@@ -75,15 +75,14 @@ class TreeDataSource(RandomAccessDataSource):
     into RAM. Data is read from memory-mapped binary files and reconstructed
     into the original pytree structure (AudioTree, dict, etc.).
 
-    Memmaps are opened lazily on first access and cached for the lifetime of
-    the process. This avoids per-item mmap syscall overhead while remaining
-    pickle-safe for grain's multiprocessing DataLoader.
+    Array memmaps are reopened on each access so the OS can reclaim pages
+    between reads (keeping the page cache bounded during random access), while
+    the source stays pickle-safe for grain's multiprocessing DataLoader. Pass
+    ``load_into_memory=True`` to instead load every leaf into RAM up front.
 
     Args:
         directory: Path to the directory containing manifest.json and
             memory-mapped data files.
-        raw: If True, return a flat Dict[str, np.ndarray] keyed by leaf path
-            strings instead of reconstructing the pytree. Default False.
         exclude_prefixes: List of dot-separated leaf name prefixes to skip
             loading. For example, ``["wet.waveform"]`` skips the
             ``wet.waveform`` memmap, and ``["dry"]`` skips all leaves
@@ -96,13 +95,6 @@ class TreeDataSource(RandomAccessDataSource):
             I/O. With fork-based multiprocessing (default on Linux), the
             parent's data is shared with workers via copy-on-write.
             Default False.
-        cache_memmaps: If True, memmap file handles are opened once and
-            cached for the lifetime of the process. If False (default),
-            memmaps are reopened on every ``__getitem__`` call, allowing
-            the OS to reclaim pages between accesses and preventing page
-            cache from growing unboundedly. The False setting trades a
-            small CPU overhead (mmap syscalls) for controlled memory.
-            Ignored when ``load_into_memory=True``.
 
     Example:
         First, pre-render a small dataset with
@@ -147,19 +139,15 @@ class TreeDataSource(RandomAccessDataSource):
     def __init__(
         self,
         directory: Union[str, Path],
-        raw: bool = False,
         exclude_prefixes: Optional[List[str]] = None,
         load_into_memory: bool = False,
-        cache_memmaps: bool = False,
     ):
         self.data_dir = Path(directory)
         self.manifest_path = self.data_dir / "manifest.json"
         if not self.manifest_path.exists():
             raise FileNotFoundError(f"Manifest not found: {self.manifest_path}")
-        self.raw = raw
         self.exclude_prefixes: List[str] = exclude_prefixes or []
         self.load_into_memory = load_into_memory
-        self.cache_memmaps = cache_memmaps
 
         with open(self.manifest_path) as f:
             self.manifest = json.load(f)
@@ -185,7 +173,6 @@ class TreeDataSource(RandomAccessDataSource):
 
         # Lazily initialized per-process; not set here so the object stays
         # picklable for grain worker processes.
-        self._memmaps: List[np.memmap] = []
         self._leaf_names: List[str] = []
         self._bagz_readers: Dict = {}
         self._data_files_opened: bool = False
@@ -218,26 +205,16 @@ class TreeDataSource(RandomAccessDataSource):
         self._data_files_opened = True
 
     def _open_data_files(self):
-        """Open memmap and bagz files, skipping excluded leaves.
+        """Collect leaf names and open bagz readers, skipping excluded leaves.
 
-        When ``cache_memmaps=False``, only leaf names are collected (memmaps
-        are reopened per-access in ``__getitem__`` instead).
+        Array memmaps are reopened per access in ``__getitem__`` (so the OS can
+        reclaim pages between reads); only the leaf names are gathered here.
         """
         self._leaf_names = []
         for name in self._leaf_info:
             if _is_excluded(name, self.exclude_prefixes):
                 continue
             self._leaf_names.append(name)
-            if self.cache_memmaps:
-                info = self._leaf_info[name]
-                full_shape = tuple([self._num_samples] + info["shape_per_sample"])
-                mm = np.memmap(
-                    self.data_dir / info["file"],
-                    dtype=np.dtype(info["dtype"]),
-                    mode="r",
-                    shape=full_shape,
-                )
-                self._memmaps.append(mm)
 
         if self._string_leaf_info:
             for name, info in self._string_leaf_info.items():
@@ -257,7 +234,6 @@ class TreeDataSource(RandomAccessDataSource):
         data via copy-on-write.
         """
         state = self.__dict__.copy()
-        state["_memmaps"] = []
         state["_leaf_names"] = []
         state["_bagz_readers"] = {}
         # If data is in memory, workers don't need to reopen files.
@@ -275,9 +251,8 @@ class TreeDataSource(RandomAccessDataSource):
             record_key: Index of the record to load
 
         Returns:
-            Reconstructed pytree with batch dimension added to each leaf,
-            or Dict[str, np.ndarray] if raw=True. Excluded leaves are
-            omitted from the result.
+            Reconstructed pytree with a batch dimension added to each leaf.
+            Excluded leaves are omitted from the result.
 
         Raises:
             IndexError: If index is out of range
@@ -297,15 +272,9 @@ class TreeDataSource(RandomAccessDataSource):
                 leaf_values[name] = arr[idx][np.newaxis, ...]
             for name, strings in self._in_memory_strings.items():
                 leaf_values[name] = strings[idx]
-        elif self.cache_memmaps:
-            # Cached path: read from long-lived memmaps.
-            for name, mm in zip(self._leaf_names, self._memmaps):
-                leaf_values[name] = np.array(mm[idx])[np.newaxis, ...]
-            for name, reader in self._bagz_readers.items():
-                leaf_values[name] = reader[idx].decode("utf-8")
         else:
-            # Uncached path: reopen memmaps per access to let the OS
-            # reclaim pages, preventing page cache from growing.
+            # Reopen memmaps per access to let the OS reclaim pages, preventing
+            # the page cache from growing unboundedly.
             # See: https://github.com/karpathy/nanoGPT/blob/3adf61e/train.py#L117-L118
             for name in self._leaf_names:
                 info = self._leaf_info[name]
@@ -320,9 +289,6 @@ class TreeDataSource(RandomAccessDataSource):
                 del mm
             for name, reader in self._bagz_readers.items():
                 leaf_values[name] = reader[idx].decode("utf-8")
-
-        if self.raw:
-            return leaf_values
 
         return _reconstruct(self._structure, leaf_values)
 

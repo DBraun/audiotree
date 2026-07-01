@@ -170,33 +170,6 @@ def test_round_trip_multiple_writes():
             )
 
 
-# === Raw mode ===
-
-
-def test_raw_mode():
-    """raw=True returns flat dict with leaf path keys."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        output_dir = Path(tmpdir)
-        tree = AudioTree(
-            waveform=np.zeros((3, 2, 100), dtype=np.float32),
-            sample_rate=44100,
-            lufs=np.zeros(3, dtype=np.float32),
-            metadata={"mel": np.zeros((3, 16), dtype=np.float32)},
-        )
-
-        with TreeWriter(output_dir, expected_samples=3) as w:
-            w.write(tree)
-
-        source = TreeDataSource(output_dir, raw=True)
-        sample = source[0]
-
-        assert isinstance(sample, dict)
-        assert "waveform" in sample
-        assert "lufs" in sample
-        assert "metadata.mel" in sample
-        assert sample["waveform"].shape == (1, 2, 100)
-
-
 # === Missing manifest ===
 
 
@@ -448,25 +421,6 @@ def test_round_trip_strings_multiple_writes():
         assert source[2]["s"] == "c"
         assert source[3]["s"] == "d"
         assert source[4]["s"] == "e"
-
-
-def test_raw_mode_with_strings():
-    """raw=True includes decoded string values."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        output_dir = Path(tmpdir)
-        with TreeWriter(output_dir, expected_samples=2) as w:
-            w.write(
-                {
-                    "label": ["cat", "dog"],
-                    "x": np.zeros((2, 3), dtype=np.float32),
-                }
-            )
-
-        source = TreeDataSource(output_dir, raw=True)
-        sample = source[0]
-        assert isinstance(sample, dict)
-        assert sample["label"] == "cat"
-        assert isinstance(sample["x"], np.ndarray)
 
 
 def test_batch_with_strings():
@@ -782,30 +736,3 @@ def test_load_into_memory_pickle_roundtrip():
 
         sample = restored[0]
         np.testing.assert_array_almost_equal(sample.waveform[0], audio[0], decimal=5)
-
-
-# === cache_memmaps ===
-
-
-def test_cache_memmaps_false_matches_default():
-    """cache_memmaps=False returns identical results to cached memmaps."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        output_dir = Path(tmpdir)
-        audio = np.random.randn(5, 2, 100).astype(np.float32)
-        mel = np.random.randn(5, 16).astype(np.float32)
-        tree = AudioTree(waveform=audio, sample_rate=44100, metadata={"mel": mel})
-
-        with TreeWriter(output_dir, expected_samples=5) as w:
-            w.write(tree)
-
-        cached = TreeDataSource(output_dir, cache_memmaps=True)
-        uncached = TreeDataSource(output_dir, cache_memmaps=False)
-
-        for i in range(5):
-            s1 = cached[i]
-            s2 = uncached[i]
-            np.testing.assert_array_equal(s1.waveform, s2.waveform)
-            np.testing.assert_array_equal(s1.metadata["mel"], s2.metadata["mel"])
-
-        # Uncached source should not hold any memmaps
-        assert uncached._memmaps == []
