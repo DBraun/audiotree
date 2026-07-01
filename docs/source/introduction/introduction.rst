@@ -384,7 +384,7 @@ and :meth:`~audiotree.core.AudioTree.flatten_mini_batches` removes it again:
    :meth:`~audiotree.core.AudioTree.to_mono`, :meth:`~audiotree.core.AudioTree.to_stereo`,
    and :meth:`~audiotree.core.AudioTree.resample` treat *all* leading axes as batch
    axes, so you can call them on a ``(num_mini_batches, mini_batch_size, C, T)`` tree
-   without flattening first. Per-item results follow the leading shape — e.g.
+   without flattening first. Per-item results follow the leading shape — e.g.,
    ``lufs`` comes back shaped ``(num_mini_batches, mini_batch_size)``.
 
 Splitting into Multiple Trees
@@ -498,7 +498,8 @@ the memory requirement.
 Working with JAX PyTrees
 ------------------------
 
-AudioTree is a JAX pytree, which means it works seamlessly with JAX's tree operations.
+AudioTree is a JAX Pytree, which means it works seamlessly with JAX's
+`tree <https://docs.jax.dev/en/latest/jax.tree.html>`_ operations.
 
 Concatenating Trees with jax.tree.map
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -708,12 +709,8 @@ Metadata should contain array-like data with a batch dimension:
         }
     )
 
-    # Concatenate trees - metadata gets concatenated too
-    import jax
-    combined = jax.tree.map(
-        lambda *xs: np.concatenate(xs, axis=0),
-        tree1, tree2
-    )
+    # Batch the two trees together - metadata is concatenated too
+    combined = AudioTree.batch([tree1, tree2])
 
     print(combined.waveform.shape)                  # Batched from 2+2
     print(combined.metadata["energy"].shape)        # Metadata was concatenated
@@ -780,6 +777,6 @@ With the AudioTree object in hand, the next chapter builds data loaders that str
 AudioTrees straight from your audio files:
 
 - :ref:`sources` - Load audio from directories into Grain data pipelines
-- :ref:`transforms` - Augment audio with composable transforms
+- :ref:`transform_chaining` - Chain augmentations onto a data pipeline
 - :ref:`writer` - Write prepared AudioTrees back to disk
 - :class:`~audiotree.core.AudioTree` - Full API reference

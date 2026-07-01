@@ -42,17 +42,19 @@ AudioTree provides two writers for different use cases:
      - Yes (playable audio files)
      - No (raw binary)
    * - **Best for**
-     - Exporting audio for sharing, inspection, or external tools
-     - Fast random-access datasets for ML training
+     - Saving a trained model's audio outputs to listen to or share
+     - Pre-computing a dataset to train a model on
 
-**Use AudioWriter** when you need playable audio files on disk — for listening, sharing with collaborators,
-or feeding into non-Python tools. It writes standard WAV files and tracks per-sample metadata (loudness, tags, etc.)
-in an NPZ manifest that supports filtering.
+**Use AudioWriter** to save the outputs of a trained model — the generated or
+reconstructed audio you want to listen to, share with collaborators, or feed into
+non-Python tools. It writes standard WAV files and tracks per-sample data (loudness,
+latents, etc.) in an NPZ manifest that supports filtering.
 
-**Use TreeWriter** when you need a fast pre-rendered dataset for training. It stores the entire pytree
-(AudioTree, dicts of AudioTrees, nested structures) as memory-mapped arrays — one ``.bin`` file per leaf.
-Reading is a memmap slice with no decoding overhead. Use :class:`~audiotree.sources.tree.TreeDataSource`
-to read it back as a Grain ``RandomAccessDataSource``.
+**Use TreeWriter** to pre-compute data for training a model — render an augmented or
+feature-extracted dataset once, then read it back with no per-item decoding cost. It
+stores the entire pytree (AudioTree, dicts of AudioTrees, nested structures) as
+memory-mapped arrays — one ``.bin`` file per leaf, read as a zero-copy slice via
+:class:`~audiotree.sources.tree.TreeDataSource` (a Grain ``RandomAccessDataSource``).
 
 .. code-block:: python
 
@@ -266,27 +268,6 @@ Timestamps are useful for:
 - Debugging data pipeline issues
 - Audit trails for data processing
 
-Resampling During Write
-~~~~~~~~~~~~~~~~~~~~~~~
-
-AudioWriter can automatically resample audio to a target sample rate:
-
-.. testcode::
-
-    # Original at 44.1 kHz
-    resample_tree = AudioTree.create(np.zeros((1, 2, 44_100)), 44_100)
-
-    # Resample to 16 kHz when writing
-    with AudioWriter("output_16k", sample_rate=16_000) as writer:
-        writer.write(resample_tree)
-    # Written files will be at 16 kHz
-
-This is useful when:
-
-- Standardizing datasets to a common sample rate
-- Reducing file sizes for storage-constrained applications
-- Preparing data for models that require specific sample rates
-
 Sequential Writing
 ~~~~~~~~~~~~~~~~~~
 
@@ -423,28 +404,6 @@ Use :class:`~audiotree.sources.manifest.ManifestDataSource` to read AudioWriter 
     44100
     [-20.]
 
-Integration with Data Pipelines
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-AudioWriter integrates seamlessly with data processing pipelines:
-
-.. code-block:: python
-
-    from audiotree.transforms import volume_norm
-
-    # Process and write data
-    with AudioWriter("processed_output") as writer:
-        for batch in data_loader:
-            # Apply transformations
-            transform = volume_norm(min_db=-20, max_db=-20)
-            normalized = transform.random_map(batch, rng=np.random.default_rng(42))
-
-            # Write processed batch
-            writer.write(normalized, tags={"processing": "normalized"})
-
-    # Later, load the processed data
-    source = ManifestDataSource.from_writer_output("processed_output")
-
 Metadata Flow Example
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -499,51 +458,27 @@ for a string field):
 
     ['guitar']
 
-Best Practices
-~~~~~~~~~~~~~~
-
-1. **Use NPZ for large datasets**: The compression benefits become significant with 100+ files
-2. **Include relevant metadata**: Track processing parameters, data sources, and versions
-3. **Attach metadata early**: Use the `metadata` parameter in `from_file` to attach metadata at load time
-4. **Use consistent patterns**: Maintain clear file naming conventions across projects
-5. **Leverage context managers**: Ensures manifests are saved even if errors occur
-6. **Consider sample rates**: Resample during writing to avoid repeated resampling later
-
 Example: Creating a Training Dataset
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Here's a complete example of creating a training dataset with AudioWriter:
+Here's a complete example of creating a training dataset with TreeWriter:
 
 .. code-block:: python
 
-    from audiotree import AudioWriter
-    from audiotree.sources import create_audio_dataset
-    from audiotree.transforms import volume_change, shift_phase, choose
     from tqdm import tqdm
+    from audiotree import TreeWriter
+    from audiotree.sources import create_audio_dataset, TreeDataSource
+    from audiotree.transforms import volume_change, shift_phase
 
-    def create_training_dataset(
-        source_directory,
-        output_dir="precomputed_data",
-        augmentations_per_file: int = 3,
-    ):
-        """Turn one dataset into another with augmentations."""
+    def precompute_training_dataset(source_directory, num_samples, output_dir="precomputed_data"):
+        """Render an augmented dataset once so training never recomputes it."""
 
-        # First, get the number of source files
-        base_ds = create_audio_dataset(
-            sources=source_directory,
-            sample_rate=16_000,
-            duration=3.0,
-            shuffle=False,
-            repeat=False,
-        )
-        num_files = len(base_ds)
-        total_records = num_files * augmentations_per_file
-
-        # Create dataset with repeat to generate multiple augmentations per file
+        # An infinite, shuffled stream of 3-second mono excerpts.
         ds = create_audio_dataset(
             sources=source_directory,
             sample_rate=16_000,
             duration=3.0,
+            mono=True,
             shuffle=True,
             repeat=True,
         )
@@ -552,26 +487,27 @@ Here's a complete example of creating a training dataset with AudioWriter:
         # augmentation differs.
         ds = ds.seed(42)
         ds = ds.random_map(volume_change(min_db=-6, max_db=6))
-        ds = ds.random_map(choose(shift_phase(), prob=0.5))
+        ds = ds.random_map(shift_phase())
 
-        pbar = tqdm(total=total_records, desc="Creating dataset")
+        # Take num_samples items from the infinite stream and write each one.
+        # TreeWriter pre-allocates expected_samples rows up front.
+        it = iter(ds.to_iter_dataset())
+        pbar = tqdm(total=num_samples, desc="Precomputing")
+        with TreeWriter(output_dir, expected_samples=num_samples, pbar=pbar, close_pbar=True) as writer:
+            for _ in range(num_samples):
+                writer.write(next(it))
 
-        with AudioWriter(
-            output_dir,
-            pattern="train_{index:06d}.wav",
-            sample_rate=16_000,
-            compress_manifest=True,
-            pbar=pbar,
-            close_pbar=True
-        ) as writer:
+        return output_dir
 
-            for audio_tree in ds:
-                augmented = audio_tree.replace_lufs()
-                writer.write(augmented)
+    # Build the dataset once...
+    precompute_training_dataset("/data/audio", num_samples=10_000)
 
-        print(f"Created dataset with {writer.get_stats()['total_files']} files")
+    # ...then train from it with no augmentation or decoding cost.
+    train_ds = TreeDataSource("precomputed_data")
 
-This creates a fully tracked, augmented dataset ready for training machine learning models.
+To pre-compute **input/target pairs** — say an augmented ``"input"`` beside the clean
+``"target"`` — augment a ``{"input": ..., "target": ...}`` dict and restrict each
+transform to one key with the ``scope`` parameter; see :ref:`dict_batches`.
 
 Next
 ----

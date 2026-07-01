@@ -46,9 +46,9 @@ Audio effect modeling often uses dry (original) and wet (processed) pairs:
 
 .. code-block:: python
 
+    import numpy as np
     from audiotree import AudioTree
     from audiotree.transforms import volume_norm, volume_change
-    import jax
 
     # Create dry and wet signals
     dry_audio = AudioTree(...)
@@ -61,7 +61,7 @@ Audio effect modeling often uses dry (original) and wet (processed) pairs:
 
     # Normalize both to same range
     transform1 = volume_norm(min_db=-20, max_db=-15)
-    batch = transform1.random_map(batch, jax.random.key(42))
+    batch = transform1.random_map(batch, np.random.default_rng(42))
 
     # Add variation only to wet signal
     transform2 = volume_change(
@@ -69,7 +69,7 @@ Audio effect modeling often uses dry (original) and wet (processed) pairs:
         max_db=6,
         scope={'wet': {'scope': True}},  # Only transform 'wet'
     )
-    batch = transform2.random_map(batch, jax.random.key(43))
+    batch = transform2.random_map(batch, np.random.default_rng(43))
 
 **Pattern 2: Input/Target for Supervised Learning**
 
@@ -79,7 +79,7 @@ Audio effect modeling often uses dry (original) and wet (processed) pairs:
 
     # Normalize both
     transform1 = volume_norm(min_db=-20, max_db=-15)
-    batch = transform1.random_map(batch, jax.random.key(42))
+    batch = transform1.random_map(batch, np.random.default_rng(42))
 
     # Add noise/augmentation only to input
     transform2 = volume_change(
@@ -88,7 +88,7 @@ Audio effect modeling often uses dry (original) and wet (processed) pairs:
         prob=0.9,
         scope={'input': {'scope': True}},
     )
-    batch = transform2.random_map(batch, jax.random.key(43))
+    batch = transform2.random_map(batch, np.random.default_rng(43))
 
 **Pattern 3: Multi-Channel Processing**
 
@@ -109,7 +109,7 @@ Audio effect modeling often uses dry (original) and wet (processed) pairs:
             'wet': {'scope': True},
         },
     )
-    batch = transform.random_map(batch, jax.random.key(42))
+    batch = transform.random_map(batch, np.random.default_rng(42))
 
 Using Scope
 -----------
@@ -425,8 +425,8 @@ Scope with ArgBind
         transform1 = volume_norm()
         transform2 = volume_change()
 
-        batch = transform1.random_map(batch, jax.random.key(42))
-        batch = transform2.random_map(batch, jax.random.key(43))
+        batch = transform1.random_map(batch, np.random.default_rng(42))
+        batch = transform2.random_map(batch, np.random.default_rng(43))
 
 Scoped Configurations
 ---------------------
@@ -514,12 +514,12 @@ Common Use Cases
     batch = volume_change(
         min_db=-12, max_db=12,
         scope={'anchor': {'scope': True}},
-    ).random_map(batch, jax.random.key(42))
+    ).random_map(batch, np.random.default_rng(42))
 
     batch = volume_change(
         min_db=-12, max_db=12,
         scope={'positive': {'scope': True}},
-    ).random_map(batch, jax.random.key(999))  # Different seed!
+    ).random_map(batch, np.random.default_rng(999))  # Different seed!
 
 Complete Example
 ----------------
@@ -635,10 +635,10 @@ Configure different pipelines for train vs validation:
             transform1 = volume_norm()
             batch = transform1.random_map(batch, rng)
 
-            # Augment dry (if enabled for this scope)
-            rng, subkey = jax.random.split(rng)
+            # Augment dry (if enabled for this scope). A NumPy Generator is
+            # stateful, so reusing ``rng`` draws fresh randomness — no split needed.
             transform2 = volume_change()
-            batch = transform2.random_map(batch, subkey)
+            batch = transform2.random_map(batch, rng)
 
         return batch
 

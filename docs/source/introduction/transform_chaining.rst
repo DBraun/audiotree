@@ -9,7 +9,17 @@
 Chaining Transforms with Datasets
 ==================================
 
-AudioTree transforms integrate seamlessly with Grain's dataset chaining API, allowing you to build augmentation pipelines declaratively.
+**Transforms** are AudioTree augmentations — volume normalization, gain changes,
+phase inversion, trimming, resampling, and more (the full catalog is in the
+:mod:`audiotree.transforms` API reference). Each ships in two backends that share
+the same names: the NumPy backend used here for CPU Grain pipelines, and a JAX
+backend (:ref:`transforms`) for augmenting inside a jitted training step.
+
+This chapter uses the NumPy backend. Transforms integrate seamlessly with
+`Grain's dataset chaining API
+<https://google-grain.readthedocs.io/en/latest/data_loader/transformations.html>`_,
+so you build augmentation pipelines declaratively with ``.map()`` and
+``.random_map()``.
 
 Basic Transform Chaining
 -------------------------
@@ -103,144 +113,13 @@ Build complex augmentation pipelines:
         print(item.waveform.shape)  # (1, 1, 132300) for 3s mono at 44.1kHz
         break
 
-With ArgBind
-------------
+Configuring from YAML
+---------------------
 
-Use ArgBind to configure transform chains from YAML:
-
-**pipeline.py:**
-
-.. code-block:: python
-
-    import argbind
-    from audiotree.sources import create_balanced_audio_dataset
-    from audiotree import transforms
-
-    # Bind transforms
-    volume_norm = argbind.bind(transforms.volume_norm)
-    volume_change = argbind.bind(transforms.volume_change)
-    invert_phase = argbind.bind(transforms.invert_phase)
-    trim = argbind.bind(transforms.trim)
-
-    def create_pipeline():
-        # Create dataset
-        ds = create_balanced_audio_dataset(
-            sources={
-                "speech": ["/data/speech"],
-                "music": ["/data/music"],
-            },
-            shuffle=True,
-            repeat=True,
-            sample_rate=44100,
-            duration=5.0,
-        )
-
-        # Seed the dataset once; each random_map derives its own distinct seed.
-        ds = ds.seed(42)
-
-        # Chain transforms (configured via ArgBind)
-        ds = ds.random_map(volume_norm())
-        ds = ds.random_map(volume_change())
-        ds = ds.random_map(invert_phase())
-        ds = ds.map(trim())
-
-        return ds
-
-    if __name__ == "__main__":
-        args = argbind.parse_args()
-        with argbind.scope(args):
-            ds = create_pipeline()
-
-            # Iterate over augmented data
-            for item in ds.to_iter_dataset():
-                print(item.source, item.lufs)
-                break
-
-**config.yml:**
-
-.. code-block:: yaml
-
-    volume_norm.min_db: -25
-    volume_norm.max_db: -15
-
-    volume_change.min_db: -6
-    volume_change.max_db: 6
-    volume_change.prob: 0.9
-
-    invert_phase.prob: 0.5
-
-    trim.length: 3.0
-
-**Run:**
-
-.. code-block:: bash
-
-    python pipeline.py --args.load=config.yml
-
-Conditional Transforms with Scopes
------------------------------------
-
-Apply different transforms for training vs validation:
-
-.. code-block:: python
-
-    import argbind
-    from audiotree.sources import create_audio_dataset
-    from audiotree import transforms
-
-    volume_norm = argbind.bind(transforms.volume_norm, "train", "val")
-    volume_change = argbind.bind(transforms.volume_change, "train", "val")
-
-    def create_train_pipeline():
-        ds = create_audio_dataset(
-            sources="/data/train",
-            shuffle=True,
-            repeat=True,
-            sample_rate=44100,
-            duration=3.0,
-        )
-
-        ds = ds.seed(42)
-
-        # Aggressive augmentation for training
-        with argbind.scope(args, "train"):
-            ds = ds.random_map(volume_norm())
-            ds = ds.random_map(volume_change())
-
-        return ds
-
-    def create_val_pipeline():
-        ds = create_audio_dataset(
-            sources="/data/val",
-            shuffle=False,
-            repeat=False,
-            sample_rate=44100,
-            duration=3.0,
-        )
-
-        ds = ds.seed(42)
-
-        # Light augmentation for validation
-        with argbind.scope(args, "val"):
-            ds = ds.random_map(volume_norm())
-
-        return ds
-
-**config.yml:**
-
-.. code-block:: yaml
-
-    # Training: aggressive augmentation
-    train/volume_norm.min_db: -30
-    train/volume_norm.max_db: -10
-
-    train/volume_change.min_db: -12
-    train/volume_change.max_db: 12
-    train/volume_change.prob: 0.9
-
-    # Validation: deterministic normalization
-    val/volume_norm.min_db: -20
-    val/volume_norm.max_db: -20
+Rather than hard-coding transform parameters, you can set them from a YAML file or
+the command line with ArgBind, which keeps experiments reproducible. That has its
+own chapter: :ref:`argbind_guide` shows how to configure both single transforms and
+a whole dataset pipeline like the ones here.
 
 Transform Order Matters
 -----------------------
@@ -395,7 +274,7 @@ with no re-augmentation or decoding cost:
     # Later, read the pre-augmented data back — Grain-compatible, no re-augmenting.
     augmented_ds = TreeDataSource("/data/augmented")
 
-To shrink the cache further — e.g. when storing pre-computed spectrograms or other
+To shrink the cache further — e.g., when storing pre-computed spectrograms or other
 float features — quantize them to ``int16`` before writing and dequantize in the
 loader. See :ref:`quantized-features` for a complete round-trip example.
 
@@ -513,35 +392,22 @@ Common Patterns
     ds = ds.random_map(invert_phase(prob=0.5))  # 50% chance
     ds = ds.random_map(volume_change(min_db=-6, max_db=6, prob=0.8))  # 80% chance
 
-**Pattern 4: Scoped Pipelines**
-
-.. code-block:: python
-
-    ds = ds.seed(42)
-
-    with argbind.scope(args, "train"):
-        train_ds = ds.random_map(volume_norm())
-
-    with argbind.scope(args, "val"):
-        val_ds = ds.random_map(volume_norm())
-
 Best Practices
 --------------
 
-1. **Apply volume_norm early**: Compute loudness before trimming or other operations
+1. **Apply volume_norm early**: Compute lufs before trimming or other operations
 2. **Seed once**: Call ``ds.seed(n)`` before your ``.random_map()`` calls instead of passing a ``seed=`` to each — every map derives its own distinct, reproducible seed from it
 3. **Chain before batching**: Apply item-level transforms before batching
 4. **Add multiprocessing last**: Convert to IterDataset and add mp_prefetch at the end
-5. **Use ArgBind for configuration**: Keep transform parameters in YAML files
+5. **Configure from YAML**: Keep transform parameters in config files with ArgBind (see :ref:`argbind_guide`)
 6. **Consider pre-computing**: For expensive pipelines, pre-compute the data and export it with :class:`~audiotree.tree_writer.TreeWriter`
 
 Next
 ----
 
-Once your pipeline produces the batches you want, the final Getting-started chapter,
-:ref:`writer`, shows how to write them back to disk — as playable audio with
-:class:`~audiotree.writer.AudioWriter` or as a fast memory-mapped dataset with
-:class:`~audiotree.tree_writer.TreeWriter`.
+The pipelines here run augmentations on the CPU in data-loader workers. The next
+chapter, :ref:`transforms`, shows the JAX backend — the same augmentations applied
+on the accelerator inside a ``@jax.jit`` training step.
 
 See Also
 --------

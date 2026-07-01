@@ -167,7 +167,7 @@ Each loaded :class:`~audiotree.core.AudioTree` has a ``source`` property indicat
 
     item = ds[0]
     print(item.source)  # which group this item came from
-    # item.filepath holds the absolute path(s), e.g. ['/data/speech/.../audio_001.wav']
+    # item.filepath holds the absolute path(s), e.g., ['/data/speech/.../audio_001.wav']
 
 .. testoutput::
 
@@ -227,11 +227,14 @@ Use saliency to randomly select louder sections of audio:
 
 .. code-block:: python
 
+    from audiotree import AudioTree
+    from audiotree.sources import create_balanced_audio_dataset
     from audiotree.core import SaliencyParams
 
+    loudness_cutoff = -40  # Only select sections above -40 LUFS
     saliency_params = SaliencyParams(
         enabled=True,
-        loudness_cutoff=-40,  # Only select sections above -40 LUFS
+        loudness_cutoff=loudness_cutoff,
         num_tries=10,  # Try up to 10 random positions
     )
 
@@ -241,6 +244,13 @@ Use saliency to randomly select louder sections of audio:
         sample_rate=44100,
         duration=3.0,
     )
+
+    # Saliency is best-effort: after num_tries it returns the loudest excerpt it
+    # found, even if still below the cutoff. Filter to *guarantee* the floor,
+    # dropping files that never clear it. (Saliency populates .lufs on each excerpt.)
+    ds = ds.filter(lambda audio_tree: audio_tree.lufs[0] > loudness_cutoff)
+    ds = ds.to_iter_dataset()
+    ds = ds.batch(32, batch_fn=AudioTree.batch)
 
 This is particularly useful for training on long audio files where you want to avoid silent sections.
 

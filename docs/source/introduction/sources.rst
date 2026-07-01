@@ -14,7 +14,7 @@ Data Sources
 .. ---------------------------
 
 Data Sources in ``audiotree.sources`` are `Grain`_ `data sources <https://github.com/google/grain/blob/main/docs/data_sources.md>`_
-that are specially designed for audio. Grain is a new library for dataset operations in JAX with no TensorFlow dependency.
+that are specially designed for audio.
 
 The main functions are :func:`~audiotree.sources.create_audio_dataset` for simple loading and
 :func:`~audiotree.sources.create_balanced_audio_dataset` for balanced multi-group sampling.
@@ -92,6 +92,10 @@ Use saliency to select louder sections of audio:
         sample_rate=44100,
         duration=3.0,
     )
+
+Saliency is best-effort — after ``num_tries`` it returns the loudest excerpt it
+found, even if still below ``loudness_cutoff``. To *guarantee* the floor (dropping
+files that never clear it), filter on ``lufs`` afterward; see :ref:`balanced_datasets`.
 
 **File Extensions**
 
@@ -248,10 +252,8 @@ dataset iterator to ``grain.checkpoint.CheckpointSave`` / ``CheckpointRestore``:
     it = iter(ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch))
     mngr.restore(mngr.latest_step(), args=grain.checkpoint.CheckpointRestore(it))
 
-``orbax-checkpoint`` ships transitively with the JAX stack, so no extra
-dependency is required. To checkpoint your model in the same step, combine the
-data iterator with your model state using Orbax's ``Composite`` args. For the
-full reference, see Grain's `checkpointing tutorial
+To checkpoint your model in the same step, combine the data iterator with your model state
+using Orbax's ``Composite`` args. For the full reference, see Grain's `checkpointing tutorial
 <https://github.com/google/grain/blob/main/docs/tutorials/dataset_advanced_tutorial.md>`_.
 
 .. _streaming-device-put:
@@ -263,7 +265,7 @@ Iterating a batched pipeline yields host (NumPy-backed) AudioTrees. To feed the
 model batches that already live on the GPU/TPU — and to overlap that transfer with
 the training step — wrap the ``IterDataset`` with
 :func:`grain.experimental.device_put`. It double-buffers: while the current batch
-trains, the next is staged on the device. Because an AudioTree is a pytree, every
+trains, the next is staged on the device. Because an AudioTree is a Pytree, every
 array leaf (``waveform`` and each ``metadata`` array) arrives on-device as a
 ``jax.Array``:
 
@@ -281,7 +283,7 @@ array leaf (``waveform`` and each ``metadata`` array) arrives on-device as a
     # cpu_buffer_size / device_buffer_size set how many batches are staged in host
     # and device memory.
     device_ds = grain.experimental.device_put(
-        iter_ds, None, cpu_buffer_size=4, device_buffer_size=2
+        iter_ds, device=None, cpu_buffer_size=4, device_buffer_size=2
     )
 
     for batch in device_ds:
@@ -302,8 +304,8 @@ Next
 ----
 
 You can now load AudioTrees from disk into batched, device-ready pipelines. The
-next chapter is the fun part — :ref:`transforms`, the augmentations you chain onto
-a dataset with ``.map()`` and ``.random_map()``.
+next chapter, :ref:`transform_chaining`, adds augmentations — the transforms you
+chain onto a dataset with ``.map()`` and ``.random_map()``.
 
 .. _Grain: https://github.com/google/grain
 .. _Orbax: https://orbax.readthedocs.io/en/latest/

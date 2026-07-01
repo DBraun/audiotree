@@ -134,7 +134,6 @@ Bind an entire module at once using ``bind_module``:
     from audiotree import transforms as transforms_lib
     import argbind
     import grain
-    from jax import random
 
     # Filter to only bind transform functions (excludes Batch class)
     def filter_fn(fn):
@@ -151,8 +150,9 @@ Bind an entire module at once using ``bind_module``:
         for transform_name in transforms or []:
             transform = getattr(transforms_lib, transform_name)()
             if isinstance(transform, grain.transforms.RandomMap):
-                rng, subkey = random.split(rng)
-                batch = transform.random_map(batch, subkey)
+                # A NumPy Generator is stateful, so reusing ``rng`` gives each
+                # transform fresh randomness — no key splitting needed.
+                batch = transform.random_map(batch, rng)
             elif isinstance(transform, grain.transforms.Map):
                 batch = transform.map(batch)
         return batch
@@ -177,6 +177,75 @@ Bind an entire module at once using ``bind_module``:
     val/augment_batch.transforms:
       - volume_norm
       - trim
+
+Configuring a Dataset Pipeline
+------------------------------
+
+The same binding works when transforms drive a Grain dataset pipeline rather than a
+single tree: bind the module, then call the bound transforms inside
+``ds.random_map()`` / ``ds.map()``.
+
+**pipeline.py:**
+
+.. code-block:: python
+
+    import argbind
+    from audiotree.sources import create_balanced_audio_dataset
+    from audiotree import transforms as transforms_lib
+
+    # Bind the whole module at once, instead of one argbind.bind() per function.
+    transforms = argbind.bind_module(transforms_lib)
+
+    def create_pipeline():
+        ds = create_balanced_audio_dataset(
+            sources={"speech": ["/data/speech"], "music": ["/data/music"]},
+            shuffle=True,
+            repeat=True,
+            sample_rate=44100,
+            duration=5.0,
+        )
+        ds = ds.seed(42)  # seed once; each random_map derives its own seed
+
+        # Parameters come from the config (see config.yml below).
+        ds = ds.random_map(transforms.volume_norm())
+        ds = ds.random_map(transforms.volume_change())
+        ds = ds.random_map(transforms.invert_phase())
+        ds = ds.map(transforms.trim())
+        return ds
+
+    if __name__ == "__main__":
+        args = argbind.parse_args()
+        with argbind.scope(args):
+            ds = create_pipeline()
+            for item in ds.to_iter_dataset():
+                print(item.source, item.lufs)
+                break
+
+**config.yml:**
+
+.. code-block:: yaml
+
+    volume_norm.min_db: -25
+    volume_norm.max_db: -15
+
+    volume_change.min_db: -6
+    volume_change.max_db: 6
+    volume_change.prob: 0.9
+
+    invert_phase.prob: 0.5
+
+    trim.length: 3.0
+
+**Run:**
+
+.. code-block:: bash
+
+    python pipeline.py --args.load=config.yml
+
+For different train/validation augmentation, bind with scopes
+(``argbind.bind_module(transforms_lib, "train", "val")``) and build each pipeline
+under its ``with argbind.scope(args, "train")`` / ``"val"`` block — see
+`Scoped Configurations`_ above.
 
 Saving and Loading Configs
 ---------------------------

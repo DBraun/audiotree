@@ -99,8 +99,8 @@ Content
 
    introduction/introduction
    introduction/sources
-   introduction/transforms
    introduction/transform_chaining
+   introduction/transforms
    introduction/writer
 
 .. toctree::
