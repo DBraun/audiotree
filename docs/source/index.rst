@@ -70,32 +70,41 @@ apply balanced sampling across groups, and chain augmentations:
     (32, 2, 441000)
     ['speech', 'speech', 'speech']
 
-Transforms work on any `Pytree`_ of AudioTrees, including dictionaries and lists.
-This means transforms can receive and send patterns like ``{"dry": audio_tree, "wet": audio_tree}`` where you selectively augment
-specific keys using the ``scope`` parameter (see :ref:`dict_batches`).
-
-When used with `ArgBind`_, transforms are configurable from the command-line and YAML (see :ref:`argbind_guide`):
+These transforms compose over any `Pytree`_ of AudioTrees — a single tree, a list,
+or a dict — so they drop straight into pipelines like the one above. With `ArgBind`_
+they are also configurable from the command line and YAML:
 
 .. code-block:: bash
 
     python train.py --volume_norm.min_db=-25 --volume_norm.max_db=-15
 
+The guides are meant to be read in order. **Getting started** walks the main path —
+the :class:`~audiotree.core.AudioTree` object, loading audio, augmenting it, and
+writing datasets back to disk — and **Going further** collects the deeper topics
+(balanced and windowed sampling, dict batches, command-line configuration, and
+multiprocessing).
+
 Content
 --------------------------
 .. toctree::
    :maxdepth: 1
-   :caption: Introduction
+   :caption: Getting started
 
    introduction/introduction
    introduction/sources
-   introduction/balanced_datasets
-   introduction/windowed_datasets
    introduction/transforms
    introduction/transform_chaining
+   introduction/writer
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Going further
+
+   introduction/balanced_datasets
+   introduction/windowed_datasets
    introduction/dict_batches
    introduction/argbind_guide
    introduction/multiprocessing
-   introduction/writer
 
 .. toctree::
    :maxdepth: 1

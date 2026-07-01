@@ -817,9 +817,10 @@ Basic Example
 Next Steps
 ----------
 
-Now that you understand the basics of AudioTree, explore:
+With the AudioTree object in hand, the next chapter builds data loaders that stream
+AudioTrees straight from your audio files:
 
-- :ref:`writer` - Learn how to write AudioTree objects to disk with manifests
-- :ref:`sources` - Learn how to create data loaders for ML pipelines
-- :ref:`transforms` - Discover audio augmentations and transformations
-- :class:`~audiotree.core.AudioTree` API reference for detailed documentation
+- :ref:`sources` - Load audio from directories into Grain data pipelines
+- :ref:`transforms` - Augment audio with composable transforms
+- :ref:`writer` - Write prepared AudioTrees back to disk
+- :class:`~audiotree.core.AudioTree` - Full API reference
