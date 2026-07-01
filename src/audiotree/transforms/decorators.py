@@ -2,7 +2,7 @@
 
 import inspect
 from functools import wraps
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 from audiotree.transforms.base import BaseRandomTransform, BaseMapTransform
 
@@ -51,7 +51,7 @@ def random_transform(fn: Callable) -> Callable:
     def wrapper(
         prob: float = 1.0,
         split_seed: bool = True,
-        scope: Dict[str, Any] = None,
+        scope: Optional[Dict[str, Any]] = None,
         output_key=None,
         **transform_params,
     ):
@@ -135,7 +135,9 @@ def map_transform(fn: Callable) -> Callable:
             param_defaults[name] = param.default
 
     @wraps(fn)
-    def wrapper(scope: Dict[str, Any] = None, output_key=None, **transform_params):
+    def wrapper(
+        scope: Optional[Dict[str, Any]] = None, output_key=None, **transform_params
+    ):
         """Create a transform instance with given parameters."""
 
         config = {**param_defaults, **transform_params}

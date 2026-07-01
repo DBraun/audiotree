@@ -20,7 +20,7 @@ Key Concepts:
     - JIT: JAX JIT compilation works seamlessly with argbind scopes
 """
 
-from typing import Dict
+from typing import Dict, Optional
 
 import argbind
 import grain
@@ -56,7 +56,7 @@ transforms_lib = argbind.bind_module(
 def augment_batch(
     rng: jax.Array,
     batch: Dict[str, AudioTree],
-    transforms: list[str] = None,
+    transforms: Optional[list[str]] = None,
 ) -> Dict[str, AudioTree]:
     """Apply a sequence of transforms to a batch.
 

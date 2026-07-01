@@ -882,8 +882,8 @@ class AudioTree:
         audio_path: str,
         rng: np.random.Generator,
         offset: float = 0.0,
-        duration: float = None,
-        search_function: Callable = None,
+        duration: Optional[float] = None,
+        search_function: Optional[Callable] = None,
         **kwargs,
     ) -> Self:
         """Create an AudioTree from a random section of audio from a file path.
@@ -1084,7 +1084,7 @@ class AudioTree:
         sample_rate: int,
         zeros: int = 24,
         rolloff: float = 0.945,
-        output_length: int = None,
+        output_length: Optional[int] = None,
         full: bool = False,
     ) -> Self:
         """

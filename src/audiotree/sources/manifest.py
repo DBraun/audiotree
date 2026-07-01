@@ -346,7 +346,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         )
 
     def filter_by_lufs(
-        self, min_lufs: float = None, max_lufs: float = None
+        self, min_lufs: Optional[float] = None, max_lufs: Optional[float] = None
     ) -> "ManifestDataSource":
         """Create a new ManifestDataSource filtered by loudness range.
 
