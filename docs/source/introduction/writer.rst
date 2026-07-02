@@ -147,6 +147,64 @@ The round-trip is lossy only to ``int16`` precision (about ``1 / 32767``), which
 negligible for most spectrogram and embedding features while cutting storage in
 half versus ``float32``.
 
+.. _feature-only-trees:
+
+Feature-only trees and selective loading
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On a large pre-rendered corpus the raw waveform often dwarfs the features you
+actually train on. Two knobs keep such datasets cheap:
+
+- **Drop the waveform at write time.** ``AudioTree.replace(waveform=None)`` yields
+  a *feature-only* tree — ``codes``, ``latents``, or a ``metadata`` feature with no
+  audio. :class:`~audiotree.tree_writer.TreeWriter` simply omits the missing leaf,
+  and it reads back as ``None``.
+- **Skip leaves at read time.** :class:`~audiotree.sources.TreeDataSource` accepts
+  ``exclude_prefixes`` (dot-separated leaf-name prefixes) to avoid ever reading a
+  memmap you don't need — e.g. loading only mels for one training run and only
+  audio for another, from the same directory.
+
+.. testcode::
+
+    import jax.numpy as jnp
+    import numpy as np
+    from audiotree import AudioTree, TreeWriter
+    from audiotree.sources import TreeDataSource
+
+    n = 8
+    # A {dry, wet} dataset: dry keeps its audio; wet keeps only a mel feature and
+    # drops its waveform to save disk.
+    dry = AudioTree.create(jnp.zeros((n, 1, 16_000)), 16_000)
+    wet = AudioTree.create(
+        jnp.zeros((n, 1, 16_000)),
+        16_000,
+        metadata={"mel": np.zeros((n, 80, 32), np.float32)},
+    ).replace(waveform=None)              # feature-only: no audio is written
+
+    with TreeWriter("prerendered", expected_samples=n) as writer:
+        writer.write({"dry": dry, "wet": wet})
+
+    # Full read: wet.waveform was never written, so it comes back None.
+    item = TreeDataSource("prerendered")[0]
+    print(item["wet"].waveform is None, item["wet"].metadata["mel"].shape)
+
+    # Lean read: also skip the dry audio memmap (huge on a real corpus).
+    lean = TreeDataSource("prerendered", exclude_prefixes=["dry.waveform"])[0]
+    print(lean["dry"].waveform is None)
+
+.. testoutput::
+
+    True (1, 80, 32)
+    True
+
+.. tip::
+   Pass ``load_into_memory=True`` to :class:`~audiotree.sources.TreeDataSource` to
+   read every (non-excluded) leaf into RAM once at construction. With fork-based
+   multiprocessing (the default on Linux) Grain workers then inherit that data via
+   copy-on-write instead of each re-opening the memmaps — trading memory for zero
+   per-worker I/O. Combine it with ``exclude_prefixes`` so only the leaves you
+   train on are held in memory.
+
 ----
 
 AudioWriter
@@ -403,6 +461,78 @@ Use :class:`~audiotree.sources.manifest.ManifestDataSource` to read AudioWriter 
 
     44100
     [-20.]
+
+Manifest-Only: Saving Embeddings (No Audio)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Sometimes the payload you want to save is not audio but a per-item array a model
+produced — an embedding, a projection, a set of predicted parameters. Pass
+``write_audio=False`` to write **only** the NPZ manifest, with your arrays carried
+in ``metadata``. No WAV files are written, so a large evaluation set of embeddings
+costs almost nothing on disk:
+
+.. testcode::
+
+    import os
+    import numpy as np
+    from audiotree import AudioTree, AudioWriter
+
+    # A batch of clips, each with an embedding a model produced. Carry the
+    # embeddings (and any ids you need) in metadata — an active pytree node.
+    rng = np.random.default_rng(0)
+    n_items = 100
+    batch = AudioTree.create(
+        rng.standard_normal((n_items, 1, 16_000)).astype(np.float32),
+        16_000,
+        metadata={
+            "embedding": rng.standard_normal((n_items, 128)).astype(np.float32),
+            "label": np.arange(n_items),
+        },
+    )
+
+    # write_audio=False writes manifest.npz only (no per-item WAVs).
+    with AudioWriter("embeddings", write_audio=False) as writer:
+        writer.write(batch)
+
+    print(sorted(os.listdir("embeddings")))
+
+.. testoutput::
+
+    ['manifest.npz']
+
+To read the set back for analysis, :meth:`~audiotree.core.AudioTree.from_manifest`
+loads the **entire** manifest into a single batched AudioTree — so every item's
+embedding lands in one array rather than a stream. An optional ``filter_fn``
+predicate (evaluated per manifest entry) selects a subset at load time:
+
+.. testcode::
+
+    # The whole manifest as one tree; metadata arrays round-trip exactly.
+    tree = AudioTree.from_manifest("embeddings/manifest.npz")
+    print(tree.metadata["embedding"].shape)
+
+    # filter_fn sees each entry's columns as ``metadata_<key>``; keep labels < 10.
+    subset = AudioTree.from_manifest(
+        "embeddings/manifest.npz",
+        filter_fn=lambda entry: entry["metadata_label"] < 10,
+    )
+    print(subset.metadata["embedding"].shape)
+
+.. testoutput::
+
+    (100, 128)
+    (10, 128)
+
+.. note::
+   **Two readers, two shapes.** :meth:`~audiotree.core.AudioTree.from_manifest`
+   returns *one* batched AudioTree with the whole manifest stacked along the batch
+   axis — ideal for a one-shot analysis pass over saved embeddings.
+   :class:`~audiotree.sources.ManifestDataSource` (above) is instead a Grain
+   ``RandomAccessDataSource`` that yields one item at a time in manifest order, for
+   feeding a pipeline. ``from_manifest`` restores the ``metadata_*`` arrays and the
+   label fields (``lufs``, ``pitch``, ``codes``, …); it does **not** restore the
+   ``filepath`` column, so keep any per-item id you need in ``metadata`` (as
+   ``label`` is here).
 
 Metadata Flow Example
 ~~~~~~~~~~~~~~~~~~~~~

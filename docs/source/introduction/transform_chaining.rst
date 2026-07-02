@@ -152,6 +152,57 @@ The order of transforms affects the result:
 
 **Best practice**: Apply volume_norm early in the pipeline before trimming.
 
+Normalizing Loudness Safely
+---------------------------
+
+Two practical points once ``volume_norm`` is in a pipeline.
+
+**Deterministic target.** ``volume_norm`` normalizes each item to a *random* LUFS
+in ``[min_db, max_db]``. Set ``min_db == max_db`` to make it deterministic —
+normalize every item to exactly that loudness (useful for a validation set, or to
+match the LUFS a model was trained at):
+
+.. code-block:: python
+
+    from audiotree.transforms import volume_norm
+
+    # Every item ends up at exactly -18 LUFS, regardless of the RNG.
+    ds = ds.random_map(volume_norm(min_db=-18, max_db=-18))
+
+**Guard against clipping.** Normalizing a quiet excerpt *up* to a loud target
+multiplies it by a large gain, which can push samples past ``[-1, 1]``. Left
+unchecked that clips when written to 16-bit PCM and can turn into NaNs downstream.
+Follow the normalization with ``rescale_audio()``, which peak-limits anything
+outside ``[-1, 1]`` back into range:
+
+.. testcode::
+
+    import numpy as np
+    from audiotree import AudioTree
+    from audiotree.transforms import volume_norm, rescale_audio
+
+    # A quiet signal normalized up to -6 LUFS overshoots 1.0...
+    quiet = AudioTree(
+        (0.05 * np.random.default_rng(0).standard_normal((4, 1, 16_000))).astype(np.float32),
+        16_000,
+    ).replace_lufs()
+    loud = volume_norm(min_db=-6, max_db=-6).random_map(quiet, np.random.default_rng(1))
+    print(bool(np.abs(loud.waveform).max() > 1.0))
+
+    # ...rescale_audio() peak-limits it back into [-1, 1].
+    safe = rescale_audio().map(loud)
+    print(bool(np.abs(safe.waveform).max() <= 1.0))
+
+.. testoutput::
+
+    True
+    True
+
+Unlike :func:`~audiotree.transforms.peak_norm` (which always scales the peak to
+exactly ``1.0``), ``rescale_audio`` only scales *down* items that exceed the range
+and leaves quieter items untouched — so it corrects overshoot without otherwise
+changing the loudness you just set.
+
 Batching in the Pipeline
 -------------------------
 

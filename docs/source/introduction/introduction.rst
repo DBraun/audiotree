@@ -227,6 +227,39 @@ kernel across the whole batch at once, which is much faster:
 :meth:`~audiotree.core.AudioTree.normalize_lufs` computes loudness internally, so
 it accepts the same ``backend`` argument.
 
+Keeping cached loudness in sync
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Once ``lufs`` (and ``lufs_windows``) are filled they are cached on the tree, so a
+bare :meth:`~audiotree.core.AudioTree.replace` that swaps in a new ``waveform``
+leaves the *old* loudness in place — it no longer matches the audio. Invalidate
+the cache in the same call (set the fields to ``None``) so the next
+:meth:`~audiotree.core.AudioTree.replace_lufs` recomputes it:
+
+.. testcode::
+
+    tree = AudioTree(np.ones((2, 1, 16_000), np.float32) * 0.1, 16_000).replace_lufs()
+
+    # WRONG: lufs still describes the original signal after halving the audio.
+    stale = tree.replace(waveform=tree.waveform * 0.5)
+    print(np.allclose(stale.lufs, tree.lufs))            # True -> stale
+
+    # RIGHT: clear the cache, then recompute for the new, quieter audio.
+    fixed = tree.replace(waveform=tree.waveform * 0.5, lufs=None, lufs_windows=None)
+    fixed = fixed.replace_lufs()
+    print(bool(fixed.lufs[0] < tree.lufs[0] - 5.0))      # ~6 dB quieter
+
+.. testoutput::
+
+    True
+    True
+
+The built-in transforms handle this for you:
+:func:`~audiotree.transforms.volume_norm` /
+:func:`~audiotree.transforms.volume_change` shift the cached loudness by the gain
+they apply, phase transforms preserve it under ``keep_lufs=True``, and length- or
+channel-changing transforms invalidate it.
+
 Resampling Audio
 ~~~~~~~~~~~~~~~~
 

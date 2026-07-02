@@ -97,6 +97,28 @@ Saliency is best-effort — after ``num_tries`` it returns the loudest excerpt i
 found, even if still below ``loudness_cutoff``. To *guarantee* the floor (dropping
 files that never clear it), filter on ``lufs`` afterward; see :ref:`balanced_datasets`.
 
+The same saliency search is available as a classmethod,
+:meth:`~audiotree.core.AudioTree.salient_excerpt`, for pulling a single loud
+excerpt straight from a file path without building a dataset:
+
+.. code-block:: python
+
+    import numpy as np
+    from audiotree import AudioTree
+    from audiotree.core import SaliencyParams
+
+    tree = AudioTree.salient_excerpt(
+        "/data/song.wav",
+        rng=np.random.default_rng(0),
+        saliency_params=SaliencyParams(enabled=True, loudness_cutoff=-40, num_tries=10),
+        sample_rate=44100,
+        duration=3.0,          # required
+    )
+
+It takes the same :class:`~audiotree.core.SaliencyParams` as the dataset loaders and
+forwards ``sample_rate`` / ``duration`` / ``mono`` to
+:meth:`~audiotree.core.AudioTree.from_file`.
+
 **File Extensions**
 
 Customize which file types to load:
