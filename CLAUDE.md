@@ -16,7 +16,9 @@ This project uses [uv](https://docs.astral.sh/uv/). Dev dependencies live in the
 # Install for development (project + the `dev` dependency group)
 uv sync
 
-# Run tests (doctests in src/ + the tests/ suite)
+# Run tests: unit suite + src/ docstring examples (via --doctest-modules).
+# NOTE: this does NOT run the docs/source/*.rst examples — see the doctest
+# command below.
 uv run pytest
 
 # Run tests with coverage
@@ -25,7 +27,12 @@ uv run pytest --cov
 # Run a single test file
 uv run pytest tests/test_resample.py
 
-# Build documentation
+# Run the docs/source/*.rst examples (.. testcode:: / .. testoutput::).
+# pytest does not collect these; the Sphinx doctest builder does. This is the
+# exact command CI runs in its build_docs job.
+uv run make -C docs doctest
+
+# Build documentation (HTML)
 uv run make -C docs html
 
 # Build package
@@ -49,6 +56,36 @@ The `load_audio_with_saliency()` function handles saliency-based excerpt selecti
 
 1. **Writer (`audiotree.writer`)**: The `AudioWriter` class provides sequential writing of AudioTree batches to disk as individual audio files plus an NPZ manifest that tracks per-item metadata (loudness, pitch, source `filepath`, custom tags). `write_audio=False` writes the manifest alone (e.g. embeddings/features in `metadata`). Its output is read back with `audiotree.sources.ManifestDataSource` (a Grain `RandomAccessDataSource`) or `AudioTree.from_manifest()` (the whole manifest as one batched AudioTree, with an optional `filter_fn`); both restore the recorded metadata arrays and the source `filepath`.
 The `TreeWriter` class (`audiotree.tree_writer`) writes arbitrary pytrees — AudioTrees, dicts of AudioTrees, or nested structures — to memory-mapped binary files (with `bagz` for string leaves), enabling zero-copy random access via `audiotree.sources.TreeDataSource` as a Grain `RandomAccessDataSource`.
+
+## Documentation & learning the library
+
+`docs/source/` is the library's teaching material — narrative guides with **runnable**
+examples (published at <https://dirt.design/audiotree>). Reading them in order is the
+fastest way to onboard, and they are the reference to reach for when a change touches
+a subsystem:
+
+- `introduction/introduction.rst` — the `AudioTree` container: construction, batching,
+  loudness, indexing, and pytree operations.
+- `introduction/sources.rst` — loading audio into Grain pipelines; saliency; time-aligned
+  annotations; resumable and accelerator-prefetched training.
+- `introduction/transform_chaining.rst` + `introduction/transforms.rst` — augmentations,
+  and the NumPy (CPU data-loader) vs JAX (jitted, on-device) transform backends.
+- `introduction/writer.rst` — writing datasets: `AudioWriter`/`ManifestDataSource` (audio
+  files + NPZ manifest) vs `TreeWriter`/`TreeDataSource` (memmapped pytrees).
+- `introduction/{balanced_datasets,windowed_datasets,dict_batches,argbind_guide,multiprocessing}.rst`
+  — deeper topics.
+- `audiotree_api/` — autodoc API reference generated from the docstrings.
+
+**Examples are tested in two places; keep both green.** `src/` docstring examples
+(`>>> ...`) run under `uv run pytest` (`--doctest-modules`), but the `docs/source/*.rst`
+`.. testcode::` / `.. testoutput::` blocks run **only** under the Sphinx doctest builder
+(`uv run make -C docs doctest`) — `pytest` does not collect them. CI enforces both (the
+`build_docs` job runs `make -C docs doctest`), so a broken `.rst` example fails CI even
+though it passes `pytest` locally; run the doctest builder yourself before pushing. When
+you change public behavior, update the relevant guide and its example and run both
+surfaces so a stale example can't slip through. Prefer executable `testcode`/`testoutput`
+over inert `code-block` for anything that can run, and keep examples device-agnostic (no
+GPU required — pass `backend="cpu"` where a device is implied).
 
 ## Changelog
 
