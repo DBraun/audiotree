@@ -47,8 +47,7 @@ The `load_audio_with_saliency()` function handles saliency-based excerpt selecti
 
 1. **Transforms (`audiotree.transforms`)**: Audio augmentations with dual backends: NumPy (`audiotree.transforms`) for CPU grain pipelines using `np.random.Generator`, and JAX (`audiotree.transforms.jax`) for GPU/JIT training using `jax.random.key`.
 
-1. **Writer (`audiotree.writer`)**: The `AudioWriter` class provides sequential writing of AudioTree batches to disk with automatic manifest generation.
-Manifests can be saved as NPZ (default, best for large datasets), JSON, or CSV formats, tracking metadata like loudness, pitch, and file paths.
+1. **Writer (`audiotree.writer`)**: The `AudioWriter` class provides sequential writing of AudioTree batches to disk as individual audio files plus an NPZ manifest that tracks per-item metadata (loudness, pitch, source `filepath`, custom tags). `write_audio=False` writes the manifest alone (e.g. embeddings/features in `metadata`). Its output is read back with `audiotree.sources.ManifestDataSource` (a Grain `RandomAccessDataSource`) or `AudioTree.from_manifest()` (the whole manifest as one batched AudioTree, with an optional `filter_fn`); both restore the recorded metadata arrays and the source `filepath`.
 The `TreeWriter` class (`audiotree.tree_writer`) writes arbitrary pytrees — AudioTrees, dicts of AudioTrees, or nested structures — to memory-mapped binary files (with `bagz` for string leaves), enabling zero-copy random access via `audiotree.sources.TreeDataSource` as a Grain `RandomAccessDataSource`.
 
 ## Changelog
