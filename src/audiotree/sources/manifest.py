@@ -247,6 +247,13 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         # Check if audio files were actually written
         files_written = entry.get("files_written", True)
 
+        # The original source path is stored as a top-level ``filepath`` column
+        # (a decoded string), distinct from the on-disk output ``filename``.
+        # Restore it so ``.filepath`` reports where the item came from, matching
+        # AudioTree.from_manifest. When the tree was written without a source
+        # path the column is absent and ``.filepath`` stays unset.
+        source_filepath = entry.get("filepath")
+
         if files_written:
             # Audio files exist - load from disk
             filename = entry["filename"]
@@ -263,6 +270,10 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                 "pad_mode": self.pad_mode if self.duration else None,
                 "metadata": metadata,
             }
+
+            # Prefer the recorded source path over the output audio path.
+            if source_filepath is not None:
+                tree_kwargs["filepaths"] = source_filepath
 
             # Add AudioTree fields dynamically from manifest
             for field_name in _AUDIOTREE_FIELDS:
@@ -285,6 +296,10 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                 "sample_rate": sample_rate,
                 "metadata": metadata,
             }
+
+            # Restore the recorded source path (there is no audio file here).
+            if source_filepath is not None:
+                tree_kwargs["filepaths"] = source_filepath
 
             # Add AudioTree fields dynamically from manifest
             for field_name in _AUDIOTREE_FIELDS:

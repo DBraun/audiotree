@@ -162,6 +162,54 @@ def test_from_writer_output():
         assert source[0].waveform.shape == (1, 1, 8000)
 
 
+def test_restores_source_filepath():
+    """ManifestDataSource exposes the original source path via .filepath.
+
+    The source path is stored as a top-level ``filepath`` manifest column,
+    distinct from the on-disk output filename. It is restored for both
+    manifest-only and real-audio manifests, matching AudioTree.from_manifest.
+    """
+    paths = ["src_0.wav", "src_1.wav", "src_2.wav"]
+
+    # Manifest-only (no audio files written).
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree = AudioTree.create(
+            np.zeros((3, 1, 8000), dtype=np.float32), 8000, filepaths=paths
+        )
+        with AudioWriter(output_dir, write_audio=False) as writer:
+            writer.write(tree)
+
+        source = ManifestDataSource.from_writer_output(output_dir)
+        assert [source[i].filepath[0] for i in range(len(source))] == paths
+
+    # Real audio written: .filepath is the source path, not the output WAV.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree = AudioTree.create(
+            (0.1 * np.random.randn(3, 1, 8000)).astype(np.float32),
+            8000,
+            filepaths=paths,
+        )
+        with AudioWriter(output_dir) as writer:
+            writer.write(tree)
+
+        source = ManifestDataSource.from_writer_output(output_dir)
+        assert [source[i].filepath[0] for i in range(len(source))] == paths
+
+    # No source paths: real-audio items fall back to the output path.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree = AudioTree.create(
+            (0.1 * np.random.randn(2, 1, 8000)).astype(np.float32), 8000
+        )
+        with AudioWriter(output_dir) as writer:
+            writer.write(tree)
+
+        source = ManifestDataSource.from_writer_output(output_dir)
+        assert source[0].filepath[0].endswith("audio_0000.wav")
+
+
 def test_num_records_limit():
     """Test limiting number of records."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -461,6 +509,7 @@ if __name__ == "__main__":
     test_filter_by_tag()
     test_filter_by_lufs()
     test_from_writer_output()
+    test_restores_source_filepath()
     test_num_records_limit()
     test_resampling()
     test_mono_conversion()
