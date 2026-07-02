@@ -529,10 +529,9 @@ predicate (evaluated per manifest entry) selects a subset at load time:
    axis — ideal for a one-shot analysis pass over saved embeddings.
    :class:`~audiotree.sources.ManifestDataSource` (above) is instead a Grain
    ``RandomAccessDataSource`` that yields one item at a time in manifest order, for
-   feeding a pipeline. ``from_manifest`` restores the ``metadata_*`` arrays and the
-   label fields (``lufs``, ``pitch``, ``codes``, …); it does **not** restore the
-   ``filepath`` column, so keep any per-item id you need in ``metadata`` (as
-   ``label`` is here).
+   feeding a pipeline. ``from_manifest`` restores the ``metadata_*`` arrays, the
+   label fields (``lufs``, ``pitch``, ``codes``, …), and the source ``filepath``
+   column — so ``loaded.filepath`` matches the paths you wrote.
 
 Metadata Flow Example
 ~~~~~~~~~~~~~~~~~~~~~

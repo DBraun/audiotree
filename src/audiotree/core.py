@@ -867,6 +867,15 @@ class AudioTree:
             "metadata": metadata,
         }
 
+        # Restore the source filepaths. AudioWriter stores them as a top-level
+        # ``filepath`` column of decoded strings (not under a ``metadata_``
+        # prefix), so passing them back through ``filepaths=`` re-encodes them
+        # into ``metadata['filepath']`` and makes the ``.filepath`` property work.
+        if "filepath" in manifest_data:
+            tree_kwargs["filepaths"] = [
+                str(p) for p in manifest_data["filepath"][indices]
+            ]
+
         # Add AudioTree fields from manifest
         from audiotree.writer import _AUDIOTREE_FIELDS
 

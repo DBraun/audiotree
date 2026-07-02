@@ -962,6 +962,63 @@ def test_audiotree_from_manifest_with_filter():
         assert np.allclose(filtered.lufs, [-18.0, -15.0])
 
 
+def test_audiotree_from_manifest_restores_filepaths():
+    """from_manifest restores the source filepaths so .filepath works.
+
+    AudioWriter stores filepaths as a top-level ``filepath`` manifest column
+    (not under a ``metadata_`` prefix). from_manifest must round-trip that
+    column back into ``metadata['filepath']``; otherwise ``.filepath`` is
+    silently empty on the loaded tree.
+    """
+    paths = ["clip_0.wav", "clip_1.wav", "clip_2.wav", "clip_3.wav"]
+
+    # Manifest-only (no audio files written).
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree = AudioTree.create(
+            np.zeros((4, 1, 8000), dtype=np.float32),
+            sample_rate=8000,
+            filepaths=paths,
+            metadata={"label": np.arange(4)},
+        )
+        with AudioWriter(output_dir, write_audio=False) as writer:
+            writer.write(tree)
+
+        loaded = AudioTree.from_manifest(output_dir / "manifest.npz")
+        assert loaded.filepath == paths
+
+        # A filter keeps filepaths aligned with the selected rows.
+        subset = AudioTree.from_manifest(
+            output_dir / "manifest.npz",
+            filter_fn=lambda entry: entry["metadata_label"] % 2 == 0,
+        )
+        assert subset.filepath == ["clip_0.wav", "clip_2.wav"]
+
+    # With real audio files written, filepaths still round-trip.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree = AudioTree.create(
+            np.zeros((4, 1, 8000), dtype=np.float32),
+            sample_rate=8000,
+            filepaths=paths,
+        )
+        with AudioWriter(output_dir) as writer:
+            writer.write(tree)
+
+        loaded = AudioTree.from_manifest(output_dir / "manifest.npz")
+        assert loaded.filepath == paths
+
+    # A tree written without filepaths still loads; .filepath stays empty.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree = AudioTree.create(np.zeros((2, 1, 8000), dtype=np.float32), 8000)
+        with AudioWriter(output_dir, write_audio=False) as writer:
+            writer.write(tree)
+
+        loaded = AudioTree.from_manifest(output_dir / "manifest.npz")
+        assert loaded.filepath == []
+
+
 def test_manifest_datasource_without_audio_files():
     """Test that ManifestDataSource works with manifest-only (no audio files)."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1227,6 +1284,7 @@ if __name__ == "__main__":
     test_audiotree_from_manifest()
     test_audiotree_from_manifest_without_audio_files()
     test_audiotree_from_manifest_with_filter()
+    test_audiotree_from_manifest_restores_filepaths()
     test_manifest_datasource_without_audio_files()
     test_write_empty_audiotree()
     test_write_empty_audiotree_first()
