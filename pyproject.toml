@@ -29,7 +29,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "bagz>=0.2.0",
+    # bagz ships no macOS wheels; the reader is Linux-only.
+    "bagz>=0.2.0; sys_platform == 'linux'",
     "einops>=0.8.1",
     "grain>=0.2.15",
     "jaxloudnorm>=0.3.1",
