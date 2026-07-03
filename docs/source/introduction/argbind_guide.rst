@@ -25,7 +25,10 @@ ArgBind enables:
 Basic Example
 -------------
 
-Given this Python code:
+The core workflow: wrap each transform with ``argbind.bind`` so its parameters
+are read from a YAML file (or the command line) at run time instead of being
+hard-coded. Below, ``volume_norm`` and ``trim`` are bound, then configured
+entirely from ``config.yml``:
 
 .. code-block:: python
 
@@ -69,27 +72,13 @@ Run with:
 
     python script.py --args.load=config.yml
 
-Transform Config Structure
----------------------------
-
-AudioTree transform parameters are set as flat keys in YAML:
-
-.. code-block:: yaml
-
-    volume_norm.min_db: -20
-    volume_norm.max_db: -15
-
-    volume_change.min_db: -12
-    volume_change.max_db: 3
-
-    trim.length: 2.0
-
-**Note**: Use YAML files for configuration. Command-line overrides also work (e.g., ``--volume_norm.min_db=-25``).
-
 Scoped Configurations
 ---------------------
 
-Use scopes to configure the same transform differently for train vs validation:
+Scopes let one transform hold several configurations — e.g. aggressive
+augmentation for ``train`` but a deterministic setting for ``val`` — chosen at
+call time by the ``with argbind.scope(args, ...)`` block that wraps it. Prefix a
+YAML key with ``train/`` or ``val/`` to target a scope:
 
 **config.yml:**
 
@@ -127,15 +116,23 @@ Use scopes to configure the same transform differently for train vs validation:
 Binding Multiple Transforms
 ----------------------------
 
-Bind an entire module at once using ``bind_module``:
+``bind_module`` binds an entire transforms module in one call, instead of one
+``argbind.bind`` per transform. This is the pattern for a name-driven,
+per-scope augmentation pipeline: which ``transforms`` a run applies — and each
+one's parameters — come from the (scoped) config, so ``train`` and ``val`` can
+augment differently with no code change.
 
 .. code-block:: python
 
-    from audiotree import transforms as transforms_lib
+    import numpy as np
     import argbind
     import grain
+    from audiotree import AudioTree, transforms as transforms_lib
 
-    # Filter to only bind transform functions (excludes Batch class)
+    # bind_module binds every function/class in the module. filter_fn is
+    # optional — here it drops the two non-augmentation helpers (the ``Batch``
+    # and ``choose`` classes); omit it and they bind too, but they are simply
+    # never named in a transforms list.
     def filter_fn(fn):
         return callable(fn) and not isinstance(fn, type)
 
@@ -157,26 +154,38 @@ Bind an entire module at once using ``bind_module``:
                 batch = transform.map(batch)
         return batch
 
+
+    if __name__ == "__main__":
+        args = argbind.parse_args()
+
+        rng = np.random.default_rng(0)
+        batch = AudioTree(np.random.randn(8, 1, 16_000), 16_000).replace_lufs()
+
+        # Training applies train/augment_batch.transforms with train-scoped params.
+        with argbind.scope(args, "train"):
+            train_batch = augment_batch(rng, batch)
+
+        # Validation applies val/augment_batch.transforms — here just identity.
+        with argbind.scope(args, "val"):
+            val_batch = augment_batch(rng, batch)
+
 **config.yml:**
 
 .. code-block:: yaml
 
+    # Training: normalize to a random loudness, then trim.
     train/volume_norm.min_db: -25
     train/volume_norm.max_db: -15
-
-    val/volume_norm.min_db: -20
-    val/volume_norm.max_db: -20
-
     trim.length: 1.0
 
-    # List of transforms to apply (use function names)
+    # Which transforms each scope applies (by function name).
     train/augment_batch.transforms:
       - volume_norm
       - trim
 
+    # Validation: no augmentation.
     val/augment_batch.transforms:
-      - volume_norm
-      - trim
+      - identity
 
 Configuring a Dataset Pipeline
 ------------------------------
@@ -250,7 +259,9 @@ under its ``with argbind.scope(args, "train")`` / ``"val"`` block — see
 Saving and Loading Configs
 ---------------------------
 
-Save the configuration used in a run:
+``--args.save`` writes the fully-resolved configuration of a run — every
+parameter, including the ones left at their defaults — so the experiment can be
+reproduced or replayed exactly. Save it:
 
 .. code-block:: bash
 
@@ -267,7 +278,9 @@ Load and override:
 Debug Mode
 ----------
 
-See exactly how each function is called:
+When a parameter doesn't seem to take effect, ``--args.debug=1`` prints every
+bound function with the exact argument values ArgBind resolved for it — the
+quickest way to confirm the config actually reached the code:
 
 .. code-block:: bash
 
@@ -290,7 +303,8 @@ Output:
 Available Transform Parameters
 -------------------------------
 
-Most transforms support these parameters (via ``config``):
+Every transform's parameters are set as flat ``transform_name.param`` keys in
+YAML. A quick reference of the most common transforms and their knobs:
 
 **volume_norm** - Normalize loudness to random LUFS value:
 
@@ -375,7 +389,9 @@ Run the examples:
 JAX JIT Compatibility
 ----------------------
 
-ArgBind works seamlessly with JAX JIT compilation:
+Because ``argbind.scope`` only rewrites a plain dict, it composes with
+``jax.jit``: enter the scope *inside* the jitted step so the resolved parameters
+are baked into the trace alongside the model.
 
 .. code-block:: python
 
@@ -423,4 +439,4 @@ See Also
 .. _ArgBind: https://github.com/DBraun/argbind/
 .. _ArgBind Documentation: https://github.com/DBraun/argbind/blob/main/README.md
 .. _ArgBind Examples: https://github.com/DBraun/argbind/tree/main/examples
-.. _argbind_augmentations examples: ../../examples/argbind_augmentations/
+.. _argbind_augmentations examples: https://github.com/DBraun/audiotree/tree/main/examples/argbind_augmentations
