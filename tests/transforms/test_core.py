@@ -23,6 +23,7 @@ from audiotree.transforms import (
     invert_phase,
     swap_stereo,
     encode_latents,
+    encode_with_codec,
     trim,
     roll,
 )
@@ -324,12 +325,49 @@ def test_transforms():
     identity().map(audio_tree)
 
 
+class _FakeCodec:
+    """Minimal AudioCodec-protocol stand-in for tests."""
+
+    def __init__(
+        self, num_codebooks: int = 4, frame_rate: int = 100, scale: bool = False
+    ):
+        self.num_codebooks = num_codebooks
+        self.frame_rate = frame_rate
+        self.scale = scale
+
+    def encode(self, audio_tree: AudioTree):
+        B = audio_tree.waveform.shape[0]
+        frames = (
+            audio_tree.waveform.shape[-1] * self.frame_rate // audio_tree.sample_rate
+        )
+        codes = jnp.zeros((B, self.num_codebooks, frames), dtype=jnp.int32)
+        scale = jnp.ones((B, 1)) if self.scale else None
+        return codes, scale
+
+    def encode_to_latent(self, audio_tree: AudioTree):
+        B = audio_tree.waveform.shape[0]
+        return jnp.zeros((B, 8))
+
+
+def test_encode_with_codec_stores_codes_and_scale():
+    B = 2
+    audio_tree = AudioTree(waveform=jnp.zeros((B, 1, 44100)), sample_rate=44100)
+
+    out = encode_with_codec(_FakeCodec()).map(audio_tree)
+    assert out.codes is not None
+    assert out.codes.shape == (B, 4, 100)
+    assert "codec_scale" not in out.metadata  # codec returned scale=None
+
+    out = encode_with_codec(_FakeCodec(scale=True)).map(audio_tree)
+    assert out.metadata["codec_scale"].shape == (B, 1)
+
+    # Idempotent: an AudioTree that already has codes passes through unchanged.
+    again = encode_with_codec(_FakeCodec(num_codebooks=9)).map(out)
+    assert again.codes.shape == (B, 4, 100)
+
+
 def test_only_apply_to_audiotree():
     """Only `src` can have its `latents` set because `src` is an AudioTree while `other` is a simple array."""
-
-    def encoder_fn(audio_tree: AudioTree) -> jnp.ndarray:
-        B = audio_tree.waveform.shape[0]
-        return jnp.zeros((B,))
 
     B = 2
 
@@ -338,13 +376,11 @@ def test_only_apply_to_audiotree():
         "other": jnp.zeros((B,)),
     }
 
-    # encode_latents returns a transform that can optionally have scope
-    # Since encode_latents is a factory function, we need to handle scope differently
-    # For now, test without scope since the function doesn't expose it directly
-    transform = encode_latents(encoder_fn)
+    transform = encode_latents(_FakeCodec())
     out = transform.map(waveform)
     # Both src and other get processed, but only src has latents since it's an AudioTree
     assert out["src"].latents is not None
+    assert out["src"].latents.shape == (B, 8)
 
 
 def test_trim_shorten():

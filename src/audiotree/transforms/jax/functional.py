@@ -22,11 +22,7 @@ Example:
         return batch
 """
 
-from typing import Callable
-
-from einops import rearrange
 import jax
-from jax import numpy as jnp
 
 from audiotree import AudioTree
 from audiotree.transforms.decorators import random_transform, map_transform
@@ -260,54 +256,3 @@ def roll(
         AudioTree with rolled audio
     """
     return _roll_jax(audio_tree, rng, min_seconds, max_seconds, mode)
-
-
-def encode_with_codec(
-    encoder_fn: Callable[[AudioTree], jnp.ndarray],
-    num_codebooks: int,
-):
-    """Create a transform that encodes audio using a neural codec.
-
-    Args:
-        encoder_fn: Function that takes AudioTree and returns tokens
-        num_codebooks: Number of codebooks in the codec
-
-    Returns:
-        Transform function that can be used with .map()
-    """
-
-    @map_transform
-    def _encode_with_codec_transform(audio_tree: AudioTree) -> AudioTree:
-        if audio_tree.codes is None:
-            B, C, T = audio_tree.waveform.shape
-            codes = encoder_fn(audio_tree)
-            codes = rearrange(
-                codes,
-                "(B C) K S -> B (K C) S",
-                B=B,
-                C=C,
-            )
-            audio_tree = audio_tree.replace(codes=codes)
-        return audio_tree
-
-    return _encode_with_codec_transform()
-
-
-def encode_latents(encoder_fn: Callable[[AudioTree], jnp.ndarray]):
-    """Create a transform that encodes audio using a neural network.
-
-    Args:
-        encoder_fn: Function that takes AudioTree and returns latent sequence
-
-    Returns:
-        Transform function that can be used with .map()
-    """
-
-    @map_transform
-    def _encode_latents_transform(audio_tree: AudioTree) -> AudioTree:
-        if audio_tree.latents is None:
-            latents = encoder_fn(audio_tree)
-            audio_tree = audio_tree.replace(latents=latents)
-        return audio_tree
-
-    return _encode_latents_transform()

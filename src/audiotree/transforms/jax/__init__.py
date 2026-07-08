@@ -53,11 +53,12 @@ from .functional import (
     corrupt_phase,
     shift_phase,
     roll,
-    encode_with_codec,
-    encode_latents,
 )
 
+from audiotree.transforms.codec import AudioCodec, encode_latents, encode_with_codec
+
 __all__ = [
+    "AudioCodec",
     "volume_norm",
     "volume_change",
     "invert_phase",

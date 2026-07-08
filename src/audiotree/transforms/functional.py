@@ -20,11 +20,7 @@ Example:
         ds = ds.random_map(transform, seed=42)
 """
 
-from typing import Callable
-
-from einops import rearrange
 import grain
-from jax import numpy as jnp
 import numpy as np
 
 from audiotree import AudioTree
@@ -400,84 +396,6 @@ def roll(
         ds = ds.random_map(transform, seed=42)
     """
     return _roll_np(audio_tree, rng, min_seconds, max_seconds, mode)
-
-
-def encode_with_codec(
-    encoder_fn: Callable[[AudioTree], jnp.ndarray],
-    num_codebooks: int,
-):
-    """Create a transform that encodes audio using a neural codec.
-
-    Use a neural audio codec such as DAC or EnCodec to encode audio into tokens.
-
-    Note: This transform uses JAX operations as it's intended for GPU inference.
-    For CPU grain pipelines, consider running inference separately.
-
-    Args:
-        encoder_fn: Function that takes AudioTree and returns tokens
-            shaped ((B*C), K, S) where K is codebooks, S is sequence length
-        num_codebooks: Number of codebooks in the codec
-
-    Returns:
-        Transform function that can be used with .map()
-
-    Example:
-        def my_encoder(audio_tree):
-            # Your codec encoder here
-            return tokens  # Shape: ((B*C), K, S)
-
-        transform = encode_with_codec(my_encoder, num_codebooks=9)
-        ds = ds.map(transform)
-    """
-
-    @map_transform
-    def _encode_with_codec_transform(audio_tree: AudioTree) -> AudioTree:
-        if audio_tree.codes is None:
-            B, C, T = audio_tree.waveform.shape
-            codes = encoder_fn(audio_tree)
-            codes = rearrange(
-                codes,
-                "(B C) K S -> B (K C) S",
-                B=B,
-                C=C,
-            )
-            audio_tree = audio_tree.replace(codes=codes)
-        return audio_tree
-
-    return _encode_with_codec_transform()
-
-
-def encode_latents(encoder_fn: Callable[[AudioTree], jnp.ndarray]):
-    """Create a transform that encodes audio using a neural network.
-
-    Use a neural network to set the latents of the AudioTree.
-
-    Note: This transform uses JAX operations as it's intended for GPU inference.
-    For CPU grain pipelines, consider running inference separately.
-
-    Args:
-        encoder_fn: Function that takes AudioTree and returns latent sequence
-
-    Returns:
-        Transform function that can be used with .map()
-
-    Example:
-        def my_encoder(audio_tree):
-            # Your encoder here
-            return latents  # Shape: (B, D, S)
-
-        transform = encode_latents(my_encoder)
-        ds = ds.map(transform)
-    """
-
-    @map_transform
-    def _encode_latents_transform(audio_tree: AudioTree) -> AudioTree:
-        if audio_tree.latents is None:
-            latents = encoder_fn(audio_tree)
-            audio_tree = audio_tree.replace(latents=latents)
-        return audio_tree
-
-    return _encode_latents_transform()
 
 
 class choose(grain.transforms.RandomMap):

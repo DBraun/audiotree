@@ -39,6 +39,9 @@ See also:
     - :mod:`audiotree.transforms.jax` for GPU transforms
 """
 
+from .codec import AudioCodec
+from .codec import encode_latents
+from .codec import encode_with_codec
 from .functional import identity
 from .functional import mono
 from .functional import stereo
@@ -53,14 +56,13 @@ from .functional import corrupt_phase
 from .functional import shift_phase
 from .functional import roll
 from .functional import choose
-from .functional import encode_with_codec
-from .functional import encode_latents
 from .functional import trim
 
 # Batch is special - it's a grain BatchOperation, not a regular transform
 from .core import Batch
 
 __all__ = [
+    "AudioCodec",
     "identity",
     "mono",
     "stereo",
