@@ -1,5 +1,6 @@
 """Tests for TreeDataSource."""
 
+import importlib.util
 import tempfile
 from pathlib import Path
 
@@ -7,11 +8,16 @@ import numpy as np
 import pytest
 
 from audiotree import AudioTree
-from audiotree.tree_writer import TreeWriter
 from audiotree.sources.tree import TreeDataSource
-
+from audiotree.tree_writer import TreeWriter
 
 # === Round-trip tests ===
+
+
+requires_bagz = pytest.mark.skipif(
+    importlib.util.find_spec("bagz") is None,
+    reason="bagz not installed (Linux-only wheels)",
+)
 
 
 def test_round_trip_audiotree():
@@ -287,6 +293,7 @@ def test_none_fields_default():
 # === String leaf round-trip tests ===
 
 
+@requires_bagz
 def test_round_trip_string_list_with_audiotree():
     """List[str] + AudioTree round-trips correctly."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -315,6 +322,7 @@ def test_round_trip_string_list_with_audiotree():
             )
 
 
+@requires_bagz
 def test_round_trip_multiple_string_leaves():
     """Multiple string leaves round-trip."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -338,6 +346,7 @@ def test_round_trip_multiple_string_leaves():
         assert s1["sources"] == "val"
 
 
+@requires_bagz
 def test_round_trip_single_string():
     """A single str leaf (batch size 1) round-trips."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -355,6 +364,7 @@ def test_round_trip_single_string():
         assert sample["label"] == "cat"
 
 
+@requires_bagz
 def test_round_trip_long_strings():
     """Strings longer than 256 chars survive round-trip (no truncation)."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -367,6 +377,7 @@ def test_round_trip_long_strings():
         assert source[0]["s"] == long_str
 
 
+@requires_bagz
 def test_round_trip_empty_string():
     """Empty strings survive round-trip."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -384,6 +395,7 @@ def test_round_trip_empty_string():
         assert source[1]["s"] == "hello"
 
 
+@requires_bagz
 def test_round_trip_unicode_strings():
     """Unicode strings survive round-trip."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -397,6 +409,7 @@ def test_round_trip_unicode_strings():
             assert source[i]["s"] == expected
 
 
+@requires_bagz
 def test_round_trip_strings_multiple_writes():
     """String leaves written across multiple batches read correctly."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -423,6 +436,7 @@ def test_round_trip_strings_multiple_writes():
         assert source[4]["s"] == "e"
 
 
+@requires_bagz
 def test_batch_with_strings():
     """AudioTree.batch correctly batches string leaves into List[str]."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -559,6 +573,7 @@ def test_exclude_metadata_field():
         )
 
 
+@requires_bagz
 def test_exclude_string_leaf():
     """Excluding a string leaf removes it from the output dict."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -701,6 +716,7 @@ def test_load_into_memory_with_exclude():
         )
 
 
+@requires_bagz
 def test_load_into_memory_with_strings():
     """load_into_memory loads string leaves into a list."""
     with tempfile.TemporaryDirectory() as tmpdir:

@@ -1,5 +1,6 @@
 """Tests for TreeWriter."""
 
+import importlib.util
 import json
 import tempfile
 from pathlib import Path
@@ -9,6 +10,11 @@ import pytest
 
 from audiotree import AudioTree
 from audiotree.tree_writer import TreeWriter
+
+requires_bagz = pytest.mark.skipif(
+    importlib.util.find_spec("bagz") is None,
+    reason="bagz not installed (Linux-only wheels)",
+)
 
 
 def test_basic_write_audiotree():
@@ -392,6 +398,7 @@ def test_writer_not_open_error():
 # === String leaf tests ===
 
 
+@requires_bagz
 def test_write_string_list_with_audiotree():
     """Write a dict with List[str] and AudioTree leaves."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -417,6 +424,7 @@ def test_write_string_list_with_audiotree():
         assert manifest["num_samples"] == 3
 
 
+@requires_bagz
 def test_write_multiple_string_leaves():
     """Multiple string leaves each get their own bagz file."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -439,6 +447,7 @@ def test_write_multiple_string_leaves():
         assert "source" in manifest["string_leaves"]
 
 
+@requires_bagz
 def test_write_string_batch_size_mismatch():
     """String leaf with wrong batch size raises ValueError."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -453,6 +462,7 @@ def test_write_string_batch_size_mismatch():
                 w.write(pytree)
 
 
+@requires_bagz
 def test_get_stats_with_strings():
     """get_stats includes string leaf names."""
     with tempfile.TemporaryDirectory() as tmpdir:

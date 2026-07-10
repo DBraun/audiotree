@@ -1,5 +1,6 @@
 """Tests for length-aware windowed audio sampling (audiotree.sources.windowed)."""
 
+import importlib.util
 import tempfile
 from pathlib import Path
 
@@ -10,6 +11,8 @@ import soundfile as sf
 
 from audiotree import AudioTree
 from audiotree.sources import (
+    WindowLufsCache,
+    WindowParams,
     build_window_lufs_cache,
     create_balanced_audio_dataset,
     create_windowed_audio_dataset,
@@ -17,10 +20,13 @@ from audiotree.sources import (
     precompute_window_lufs,
     save_window_lufs,
     scan_durations,
-    WindowLufsCache,
-    WindowParams,
 )
 from audiotree.sources.windowed import _build_slot_index
+
+requires_bagz = pytest.mark.skipif(
+    importlib.util.find_spec("bagz") is None,
+    reason="bagz not installed (Linux-only wheels)",
+)
 
 
 def _write_file(path, duration_sec, sample_rate=8000, channels=1, level=0.1, seed=0):
@@ -283,6 +289,7 @@ def test_loudness_filtering_keeps_only_loud_slots():
         assert np.all(kept_off >= 4.0)
 
 
+@requires_bagz
 def test_bagz_cache_round_trip():
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 3.0, "b": 6.0}, sample_rate=8000)
@@ -305,6 +312,7 @@ def test_bagz_cache_round_trip():
             np.testing.assert_array_equal(cache.lufs[fp], ref[fp])
 
 
+@requires_bagz
 def test_save_window_lufs_handles_empty_arrays():
     with tempfile.TemporaryDirectory() as tmp:
         lpf = {
@@ -319,6 +327,7 @@ def test_save_window_lufs_handles_empty_arrays():
         assert cache.lufs["y.wav"].shape == (0,)
 
 
+@requires_bagz
 def test_lufs_cache_path_filters_dataset():
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 6.0, "b": 6.0}, sample_rate=8000)
@@ -349,6 +358,7 @@ def test_lufs_cache_path_filters_dataset():
         )
 
 
+@requires_bagz
 def test_lufs_cache_sample_rate_mismatch_raises():
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 4.0}, sample_rate=8000)
@@ -368,6 +378,7 @@ def test_lufs_cache_sample_rate_mismatch_raises():
             )
 
 
+@requires_bagz
 def test_lufs_cache_mono_mismatch_raises():
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 4.0}, sample_rate=8000)

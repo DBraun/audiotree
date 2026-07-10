@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, SupportsIndex, Union
 
-import bagz
 import numpy as np
 from grain.sources import RandomAccessDataSource
 
+from audiotree._bagz import require_bagz
 from audiotree.core import AudioTree
 
 # Sentinel for excluded leaves (distinct from None, which is a valid value).
@@ -193,6 +193,7 @@ class TreeDataSource(RandomAccessDataSource):
             del mm
 
         if self._string_leaf_info:
+            bagz = require_bagz("reading string leaves in TreeDataSource")
             for name, info in self._string_leaf_info.items():
                 if _is_excluded(name, self.exclude_prefixes):
                     continue
@@ -217,6 +218,7 @@ class TreeDataSource(RandomAccessDataSource):
             self._leaf_names.append(name)
 
         if self._string_leaf_info:
+            bagz = require_bagz("reading string leaves in TreeDataSource")
             for name, info in self._string_leaf_info.items():
                 if _is_excluded(name, self.exclude_prefixes):
                     continue

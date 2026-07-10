@@ -28,13 +28,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Literal, Mapping, Optional
 
-import bagz
 import grain
 import librosa
 import numpy as np
 import soundfile
 
 from audiotree import AudioTree
+from audiotree._bagz import require_bagz
 
 from .core import _default_extensions, find_audio_files
 
@@ -249,7 +249,9 @@ def save_window_lufs(
     out_dir.mkdir(parents=True, exist_ok=True)
     filepaths = list(lufs_per_file.keys())
 
-    writer = bagz.Writer(str(out_dir / _LUFS_BAGZ))
+    writer = require_bagz("writing windowed-LUFS caches").Writer(
+        str(out_dir / _LUFS_BAGZ)
+    )
     for fp in filepaths:
         writer.write(np.asarray(lufs_per_file[fp], dtype=np.float32).tobytes())
     writer.close()
@@ -287,7 +289,9 @@ def load_window_lufs(cache_dir: str | Path) -> WindowLufsCache:
         manifest = json.load(f)
 
     filepaths = manifest["filepaths"]
-    reader = bagz.Reader(str(cache_dir / manifest["bagz_file"]))
+    reader = require_bagz("reading windowed-LUFS caches").Reader(
+        str(cache_dir / manifest["bagz_file"])
+    )
     if len(reader) != len(filepaths):
         raise RuntimeError(
             f"Cache corruption: {len(reader)} bagz records for "
@@ -478,8 +482,9 @@ def create_windowed_audio_dataset(
     excerpt_seed: int | None = None,
     sample_rate: int = 44_100,
     mono: bool = True,
-    pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"]
-    | None = "constant",
+    pad_mode: (
+        Literal["constant", "edge", "reflect", "symmetric", "wrap"] | None
+    ) = "constant",
     extensions: Optional[List[str]] = None,
     source: str | None = None,
 ) -> grain.MapDataset:

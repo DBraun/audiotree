@@ -7,11 +7,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import bagz
 import jax
 import jax.tree_util
 import numpy as np
 
+from audiotree._bagz import require_bagz
 from audiotree.core import AudioTree
 
 # AudioTree pytree field names in declaration order (matching Flax flatten order).
@@ -276,6 +276,7 @@ class TreeWriter:
 
         # Create bagz writers for string leaves
         if self._string_leaf_names:
+            bagz = require_bagz("storing string leaves in TreeWriter")
             for name in self._string_leaf_names:
                 filename = f"{name}.bagz"
                 self._string_leaf_info[name] = {"file": filename}
