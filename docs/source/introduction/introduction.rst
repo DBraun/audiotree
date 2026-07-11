@@ -757,6 +757,32 @@ Metadata should contain array-like data with a batch dimension:
     (4, 2)
     44100
 
+Adding Metadata to an Existing Tree
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``AudioTree`` is immutable, so you can't assign into ``metadata`` in place. Use
+:meth:`~audiotree.core.AudioTree.replace_metadata` to merge new entries — it's
+syntactic sugar for ``tree.replace(metadata={**tree.metadata, **kwargs})``. Keys
+you pass overwrite same-named existing keys, everything else is kept, and the
+original tree is untouched:
+
+.. testcode::
+
+    tree = AudioTree.create(
+        np.zeros((2, 1, 44_100)),
+        44_100,
+        metadata={"energy": np.array([0.8, 0.9])},
+    )
+    tagged = tree.replace_metadata(onsets=np.array([[0.1], [0.2]]))
+
+    print(sorted(tagged.metadata.keys()))
+    print(sorted(tree.metadata.keys()))  # the original is unchanged
+
+.. testoutput::
+
+    ['energy', 'onsets']
+    ['energy']
+
 Writing Audio to Disk
 ---------------------
 

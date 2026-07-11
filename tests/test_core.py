@@ -240,6 +240,36 @@ def test_audiotree_create_metadata_handling():
     assert tree2.filepath == ["test2.wav"]
 
 
+def test_replace_metadata():
+    """replace_metadata merges kwargs into metadata without mutating the original."""
+    tree = AudioTree.create(
+        np.zeros((2, 1, 100)),
+        44100,
+        metadata={"energy": np.array([0.8, 0.9]), "tag": np.array([1, 2])},
+    )
+
+    tagged = tree.replace_metadata(
+        onsets=np.array([[0.1], [0.2]]), tag=np.array([3, 4])
+    )
+
+    # New key added, colliding key overwritten, other keys preserved
+    np.testing.assert_array_equal(tagged.metadata["onsets"], [[0.1], [0.2]])
+    np.testing.assert_array_equal(tagged.metadata["tag"], [3, 4])
+    np.testing.assert_array_equal(tagged.metadata["energy"], [0.8, 0.9])
+
+    # Everything else carries over untouched
+    assert tagged.sample_rate == tree.sample_rate
+    np.testing.assert_array_equal(tagged.waveform, tree.waveform)
+
+    # The original tree and its metadata dict are not mutated
+    assert set(tree.metadata) == {"energy", "tag"}
+    np.testing.assert_array_equal(tree.metadata["tag"], [1, 2])
+
+    # No kwargs is a no-op copy
+    same = tree.replace_metadata()
+    assert set(same.metadata) == {"energy", "tag"}
+
+
 def test_split_by_batch():
     x = AudioTree(np.zeros((4, 1, 44100)), 44100)
     trees = [x, x, x]

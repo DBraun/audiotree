@@ -238,6 +238,30 @@ class AudioTree:
             metadata=metadata,
         )
 
+    def replace_metadata(self, **kwargs) -> Self:
+        """Return a new ``AudioTree`` with ``kwargs`` merged into ``metadata``.
+
+        Syntactic sugar for ``self.replace(metadata={**self.metadata, **kwargs})``.
+        Keys in ``kwargs`` overwrite existing ``metadata`` keys with the same name;
+        all other keys are kept. Neither the original tree nor its ``metadata``
+        dict is mutated. For a key that isn't a valid Python identifier, use the
+        ``self.replace(metadata=...)`` form directly.
+
+        Args:
+            **kwargs: Entries to merge into ``metadata``. Values should be arrays
+                (or pytrees of arrays) so the result stays batchable and jittable.
+
+        Returns:
+            AudioTree: A new ``AudioTree`` with the merged ``metadata``.
+
+        Example:
+            >>> audio = AudioTree.create(jnp.zeros((44100,)), 44100)
+            >>> audio = audio.replace_metadata(tempo=np.array([120.0]))
+            >>> audio.metadata["tempo"]
+            array([120.])
+        """
+        return self.replace(metadata=self.metadata | kwargs)
+
     def replace_lufs(
         self,
         window_duration_sec: float = 0.4,
