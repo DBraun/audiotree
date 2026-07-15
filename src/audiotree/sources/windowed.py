@@ -498,8 +498,10 @@ def create_windowed_audio_dataset(
     batches diverse because grain scatters any one file's slots across the epoch.
 
     Args:
-        sources: A directory path or list of paths. Mutually exclusive with
-            ``filepaths`` -- provide exactly one.
+        sources: A directory path, file path, or glob pattern (e.g.
+            ``"/data/*/mixture.wav"``), or a list of them. See
+            :func:`find_audio_files` for how each entry is resolved. Mutually
+            exclusive with ``filepaths`` -- provide exactly one.
         filepaths: An explicit list of audio file paths. Mutually exclusive with
             ``sources``.
         duration: Length in seconds of each excerpt.

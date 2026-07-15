@@ -284,6 +284,50 @@ def test_find_audio_files_sorted_recursive_and_filtered():
         assert [Path(p).name for p in only_flac] == ["a.flac"]
 
 
+def test_find_audio_files_glob_patterns():
+    """find_audio_files expands glob patterns for files and directories."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        sr = 16000
+        wav = np.zeros(sr, dtype=np.float32)
+
+        # A musdb18hq-style layout: one directory per track, each with stems.
+        for track in ("song_a", "song_b"):
+            (root / "train" / track).mkdir(parents=True)
+            sf.write(str(root / "train" / track / "mixture.wav"), wav, sr)
+            sf.write(str(root / "train" / track / "vocals.wav"), wav, sr)
+
+        # A glob that names a specific file within each track directory.
+        mixtures = find_audio_files(str(root / "train" / "*" / "mixture.wav"))
+        assert [Path(p).name for p in mixtures] == ["mixture.wav", "mixture.wav"]
+        assert [Path(p).parent.name for p in mixtures] == ["song_a", "song_b"]
+
+        # A recursive "**" glob finds every stem under train/.
+        all_stems = find_audio_files(str(root / "train" / "**" / "*.wav"))
+        assert [Path(p).name for p in all_stems] == [
+            "mixture.wav",
+            "vocals.wav",
+            "mixture.wav",
+            "vocals.wav",
+        ]
+
+        # A glob that matches directories recurses into each match.
+        via_dirs = find_audio_files(str(root / "train" / "*"))
+        assert via_dirs == all_stems
+
+        # The extension filter still applies to glob matches.
+        assert (
+            find_audio_files(str(root / "train" / "*" / "*"), extensions=[".flac"])
+            == []
+        )
+
+        # Mixing a glob and a plain directory de-duplicates overlapping matches.
+        combined = find_audio_files(
+            [str(root / "train" / "*" / "mixture.wav"), str(root / "train")]
+        )
+        assert combined == all_stems
+
+
 if __name__ == "__main__":
     import pytest
 

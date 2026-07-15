@@ -1,4 +1,5 @@
 import functools
+import glob
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Literal, Mapping, Optional
@@ -19,40 +20,61 @@ def find_audio_files(
     sources: str | List[str],
     extensions: Optional[List[str]] = None,
 ) -> List[str]:
-    """Recursively find audio files under one or more directories.
+    """Find audio files under one or more directories or glob patterns.
+
+    Each entry in ``sources`` may be a directory, an individual file, or a glob
+    pattern (any entry containing ``*``, ``?``, or ``[...]``). A directory is
+    searched recursively; a glob is expanded, with each match then treated as a
+    directory (searched recursively) or a file. ``**`` is supported for
+    recursive glob matching, e.g. ``"/data/**/mixture.wav"``.
 
     Hidden files and directories (names starting with ``.``, such as ``.git``)
-    are skipped without descending into them. The returned paths are **sorted**,
-    so the order is deterministic across machines and filesystems — important for
-    reproducible shuffling.
+    are skipped when recursing into directories; glob patterns follow the usual
+    shell rule that ``*`` does not match a leading ``.``. In every case a file is
+    only kept if its extension is in ``extensions``. The returned paths are
+    **sorted** and de-duplicated, so the order is deterministic across machines
+    and filesystems — important for reproducible shuffling.
 
     Args:
-        sources: A directory path, or a list of directory paths, to search.
+        sources: A path or glob pattern, or a list of them. Each may be a
+            directory (searched recursively), a file, or a glob pattern such as
+            ``"/mnt/d/musdb18hq/train/*/mixture.wav"``.
         extensions: File extensions to match (e.g. ``[".wav", ".flac"]``).
             Defaults to ``[".wav", ".flac"]``.
 
     Returns:
-        A sorted list of matching file paths.
+        A sorted, de-duplicated list of matching file paths.
     """
     if isinstance(sources, str):
         sources = [sources]
     if extensions is None:
         extensions = _default_extensions
     extensions_lower = {ext.lstrip(".").lower() for ext in extensions}
+
+    def _has_audio_extension(filename: str) -> bool:
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        return ext in extensions_lower
+
     filepaths = []
-    for folder in sources:
-        folder_path = Path(folder).expanduser()
-        folder_path = Path(os.path.expandvars(folder_path))
-        for root, dirs, files in os.walk(folder_path):
-            # Prune hidden directories in-place (prevents descent into .git, etc.)
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
-            for filename in files:
-                if filename.startswith("."):
-                    continue
-                ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-                if ext in extensions_lower:
-                    filepaths.append(os.path.join(root, filename))
-    return sorted(filepaths)
+    for source in sources:
+        source = os.path.expandvars(str(Path(source).expanduser()))
+        # A glob pattern is expanded to its matches; a plain path matches itself.
+        matches = (
+            glob.glob(source, recursive=True) if glob.has_magic(source) else [source]
+        )
+        for match in matches:
+            if os.path.isdir(match):
+                for root, dirs, files in os.walk(match):
+                    # Prune hidden dirs in-place (prevents descent into .git, etc.)
+                    dirs[:] = [d for d in dirs if not d.startswith(".")]
+                    for filename in files:
+                        if filename.startswith("."):
+                            continue
+                        if _has_audio_extension(filename):
+                            filepaths.append(os.path.join(root, filename))
+            elif os.path.isfile(match) and _has_audio_extension(match):
+                filepaths.append(match)
+    return sorted(set(filepaths))
 
 
 def _load_audio_with_saliency(
@@ -149,7 +171,9 @@ def create_audio_dataset(
     without balancing across groups.
 
     Args:
-        sources: A directory path or list of directory paths containing audio files.
+        sources: A directory path, file path, or glob pattern (e.g.
+            ``"/data/*/mixture.wav"``), or a list of them, containing audio files.
+            See :func:`find_audio_files` for how each entry is resolved.
             Mutually exclusive with ``filepaths`` — provide exactly one.
         filepaths: An explicit list of audio file paths to use instead of searching
             ``sources``. Mutually exclusive with ``sources`` — provide exactly one.
