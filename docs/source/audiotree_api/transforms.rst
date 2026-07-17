@@ -19,3 +19,4 @@ audiotree.transforms.jax
 .. automodule:: audiotree.transforms.jax
    :members:
    :imported-members:
+   :exclude-members: AudioCodec
