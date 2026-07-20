@@ -175,11 +175,12 @@ class AudioTree:
         latents: ArrayLike | None = None,
         metadata: dict | None = None,
         filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
+        source: Union[str, List[str]] | None = None,
     ) -> Self:
         """Create an ``AudioTree``, normalizing the waveform to ``(Batch, Channels, Samples)``.
 
         A bare ``(Samples,)`` or ``(Channels, Samples)`` waveform gains the missing leading axes, so
-        you don't have to reshape by hand. ``filepaths`` are encoded into ``metadata``.
+        you don't have to reshape by hand. ``filepaths`` and ``source`` are encoded into ``metadata``.
 
         Args:
             waveform: Audio of shape ``(Samples)``, ``(Channels, Samples)``, or
@@ -197,6 +198,10 @@ class AudioTree:
             latents: Optional latent representations.
             metadata: Optional extra metadata dict (copied, not mutated).
             filepaths: Optional path(s) for the batch; encoded into ``metadata["filepath"]``.
+            source: Optional source-group name(s) (e.g. ``"music"``), encoded into
+                ``metadata["source"]`` and read back via the :attr:`source` property. Pass a
+                single string to tag the whole batch, or a list with one name per batch item
+                (unlike :meth:`from_file`, which only accepts a single string).
 
         Returns:
             AudioTree: A new ``AudioTree`` whose waveform is ``(Batch, Channels, Samples)``.
@@ -224,6 +229,9 @@ class AudioTree:
 
         if filepaths is not None:
             metadata["filepath"] = cls._encode_filepaths(filepaths)
+
+        if source is not None:
+            metadata["source"] = cls._encode_filepaths(source)
 
         return cls(
             waveform=waveform,

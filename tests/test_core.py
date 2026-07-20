@@ -50,6 +50,25 @@ def test_audiotree_create_with_filepaths():
     assert "filepath" not in tree4.metadata
 
 
+def test_audiotree_create_with_source():
+    """AudioTree.create accepts a source group name (single or per-batch-item)."""
+    # Single string tags the whole tree; read back via the .source property.
+    audio_1d = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+    tree1 = AudioTree.create(audio_1d, 44100, source="music")
+    assert tree1.source == ["music"]
+    assert "source" in tree1.metadata
+
+    # A list gives one source name per batch item (unlike from_file).
+    audio_batch = np.zeros((3, 1, 4))  # (batch=3, channels, samples)
+    tree2 = AudioTree.create(audio_batch, 44100, source=["drums", "vocal", "impulse"])
+    assert tree2.source == ["drums", "vocal", "impulse"]
+
+    # No source -> no metadata key, empty list (unchanged behavior).
+    tree3 = AudioTree.create(audio_1d, 44100)
+    assert tree3.source == []
+    assert "source" not in tree3.metadata
+
+
 def test_filepath_too_long_raises():
     """Filepaths longer than the metadata limit raise instead of truncating."""
     from audiotree.core import _str_max_length
