@@ -425,7 +425,7 @@ Complete example with batching and all optimizations:
     # Saliency for loud sections
     saliency = SaliencyParams(
         enabled=True,
-        loudness_cutoff=-40,
+        lufs_cutoff=-40,
         num_tries=5,
     )
 

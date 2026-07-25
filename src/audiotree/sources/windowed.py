@@ -97,7 +97,7 @@ def scan_durations(filepaths: List[str]) -> dict[str, float]:
 
 def _file_windows(
     fp: str,
-    window_duration_sec: float,
+    lufs_window_sec: float,
     sample_rate: int | None,
     mono: bool,
 ) -> tuple[np.ndarray, int]:
@@ -116,7 +116,7 @@ def _file_windows(
         audio = librosa.resample(audio, orig_sr=sr, target_sr=sample_rate)
         sr = sample_rate
 
-    window_samples = int(window_duration_sec * sr)
+    window_samples = int(lufs_window_sec * sr)
     channels = audio.shape[0]
     num_windows = audio.shape[1] // window_samples if window_samples > 0 else 0
     if num_windows == 0:
@@ -130,7 +130,7 @@ def _file_windows(
 
 def precompute_window_lufs(
     filepaths: List[str],
-    window_duration_sec: float,
+    lufs_window_sec: float,
     *,
     sample_rate: int | None = 44_100,
     mono: bool = True,
@@ -138,7 +138,7 @@ def precompute_window_lufs(
     """Compute a per-file windowed-LUFS array for build-time saliency filtering.
 
     Each value is the integrated loudness (LUFS, ITU-R BS.1770) of one
-    non-overlapping ``window_duration_sec`` window, measured on the **CPU** with
+    non-overlapping ``lufs_window_sec`` window, measured on the **CPU** with
     the upstream ``loudness`` library (``loudness.integrated_loudness``, the same
     kernel :meth:`AudioTree.replace_lufs` uses for NumPy waveforms). This is a
     one-time offline pass that runs entirely on the CPU -- it performs no
@@ -164,7 +164,7 @@ def precompute_window_lufs(
 
     Args:
         filepaths: Audio file paths to analyze.
-        window_duration_sec: Analysis window length in seconds (independent of
+        lufs_window_sec: Analysis window length in seconds (independent of
             the training ``duration``). Should be at least 0.4s for a valid LUFS
             measurement.
         sample_rate: Resample every file to this rate before analysis, or None to
@@ -178,7 +178,7 @@ def precompute_window_lufs(
 
     out: dict[str, np.ndarray] = {}
     for fp in filepaths:
-        windows, sr = _file_windows(fp, window_duration_sec, sample_rate, mono)
+        windows, sr = _file_windows(fp, lufs_window_sec, sample_rate, mono)
         if windows.shape[0] == 0:
             # Too short for even one analysis window; no saliency info.
             out[fp] = np.zeros((0,), dtype=np.float32)
@@ -202,7 +202,7 @@ class WindowLufsCache:
         lufs: Mapping from filepath to its 1-D per-window LUFS array.
         durations: Mapping from filepath to duration in seconds, or ``None`` if
             durations were not stored.
-        window_duration_sec: The analysis window length the cache was built with.
+        lufs_window_sec: The analysis window length the cache was built with.
         sample_rate: The sample rate the loudness was measured at (``None`` if
             native rates were used).
         mono: Whether channels were averaged to mono before measuring.
@@ -210,7 +210,7 @@ class WindowLufsCache:
 
     lufs: dict[str, np.ndarray]
     durations: Optional[dict[str, float]]
-    window_duration_sec: float
+    lufs_window_sec: float
     sample_rate: Optional[int]
     mono: bool
 
@@ -219,7 +219,7 @@ def save_window_lufs(
     out_dir: str | Path,
     lufs_per_file: Mapping[str, np.ndarray],
     *,
-    window_duration_sec: float,
+    lufs_window_sec: float,
     durations: Optional[Mapping[str, float]] = None,
     sample_rate: Optional[int] = None,
     mono: bool = True,
@@ -236,7 +236,7 @@ def save_window_lufs(
     Args:
         out_dir: Directory to write the cache into (created if missing).
         lufs_per_file: Mapping from filepath to its per-window LUFS array.
-        window_duration_sec: Analysis window length the arrays were computed with.
+        lufs_window_sec: Analysis window length the arrays were computed with.
         durations: Optional mapping from filepath to duration in seconds; stored
             so the cache can also supply ``durations=`` to the dataset.
         sample_rate: The sample rate the loudness was measured at (``None`` if
@@ -259,7 +259,7 @@ def save_window_lufs(
 
     manifest = {
         **_format.header(_format.LUFS_WINDOWS_CACHE),
-        "window_duration_sec": float(window_duration_sec),
+        "lufs_window_sec": float(lufs_window_sec),
         "sample_rate": int(sample_rate) if sample_rate is not None else None,
         "mono": bool(mono),
         "filepaths": filepaths,
@@ -312,7 +312,7 @@ def load_window_lufs(cache_dir: str | Path) -> WindowLufsCache:
     return WindowLufsCache(
         lufs=lufs_per_file,
         durations=durations,
-        window_duration_sec=manifest["window_duration_sec"],
+        lufs_window_sec=manifest["lufs_window_sec"],
         sample_rate=manifest.get("sample_rate"),
         mono=manifest.get("mono", True),
     )
@@ -320,7 +320,7 @@ def load_window_lufs(cache_dir: str | Path) -> WindowLufsCache:
 
 def build_window_lufs_cache(
     filepaths: List[str],
-    window_duration_sec: float,
+    lufs_window_sec: float,
     out_dir: str | Path,
     *,
     sample_rate: int | None = 44_100,
@@ -337,7 +337,7 @@ def build_window_lufs_cache(
 
     Args:
         filepaths: Audio file paths to analyze.
-        window_duration_sec: Analysis window length in seconds.
+        lufs_window_sec: Analysis window length in seconds.
         out_dir: Directory to write the cache into.
         sample_rate: If given, resample every file to this rate before analysis.
         mono: If True, average channels to mono before analysis.
@@ -348,7 +348,7 @@ def build_window_lufs_cache(
     """
     lufs_per_file = precompute_window_lufs(
         filepaths,
-        window_duration_sec,
+        lufs_window_sec,
         sample_rate=sample_rate,
         mono=mono,
     )
@@ -357,7 +357,7 @@ def build_window_lufs_cache(
     return save_window_lufs(
         out_dir,
         lufs_per_file,
-        window_duration_sec=window_duration_sec,
+        lufs_window_sec=lufs_window_sec,
         durations=durations,
         sample_rate=sample_rate,
         mono=mono,
@@ -593,7 +593,7 @@ def create_windowed_audio_dataset(
         if lufs_per_file is None:
             lufs_per_file = cache.lufs
         if lufs_window_sec is None:
-            lufs_window_sec = cache.window_duration_sec
+            lufs_window_sec = cache.lufs_window_sec
         if durations is None:
             durations = cache.durations
 

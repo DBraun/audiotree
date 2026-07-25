@@ -103,7 +103,9 @@ def test_public_methods_are_documented(cls):
         and getattr(member, "__doc__", None) in (None, "")
         and getattr(member, "__module__", "").startswith("audiotree")
     ]
-    assert not undocumented, f"{cls.__name__} has undocumented public methods: {undocumented}"
+    assert not undocumented, (
+        f"{cls.__name__} has undocumented public methods: {undocumented}"
+    )
 
 
 def test_transform_constructors_reject_unknown_parameters():

@@ -46,7 +46,7 @@ def test_load_audio_with_saliency_basic():
 
     # Test with saliency enabled but no loudness cutoff
     rng = np.random.default_rng(42)
-    saliency_params = SaliencyParams(enabled=True, loudness_cutoff=None)
+    saliency_params = SaliencyParams(enabled=True, lufs_cutoff=None)
     result = _load_audio_with_saliency(
         str(TEST_AUDIO_MONO),
         rng,
@@ -73,7 +73,7 @@ def test_saliency_variety_with_repetition():
             sample_rate=sample_rate,
             duration=1.0,
             mono=True,
-            saliency_params=SaliencyParams(enabled=True, loudness_cutoff=None),
+            saliency_params=SaliencyParams(enabled=True, lufs_cutoff=None),
         ),
         seed=42,
     )
@@ -110,7 +110,7 @@ def test_saliency_determinism():
                 sample_rate=sample_rate,
                 duration=1.0,
                 mono=True,
-                saliency_params=SaliencyParams(enabled=True, loudness_cutoff=None),
+                saliency_params=SaliencyParams(enabled=True, lufs_cutoff=None),
             ),
             seed=seed,
         )
@@ -141,7 +141,7 @@ def test_create_balanced_audio_dataset_with_saliency():
             shutil.copy(TEST_AUDIO_MONO, target)
 
         sample_rate = 44_100
-        saliency_params = SaliencyParams(enabled=True, loudness_cutoff=None)
+        saliency_params = SaliencyParams(enabled=True, lufs_cutoff=None)
         ds = create_balanced_audio_dataset(
             sources={"test": [str(output_dir)]},
             sample_rate=sample_rate,
@@ -216,7 +216,7 @@ def test_repeated_dataset_variety():
 
         # Create dataset with many more records than files, forcing repetition
         sample_rate = 16_000
-        saliency_params = SaliencyParams(enabled=True, loudness_cutoff=None)
+        saliency_params = SaliencyParams(enabled=True, lufs_cutoff=None)
         ds = create_balanced_audio_dataset(
             sources={"test": [str(output_dir)]},
             sample_rate=sample_rate,

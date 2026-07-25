@@ -104,8 +104,8 @@ def _load_audio_with_saliency(
             "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
         saliency_params: Optional saliency parameters for excerpt selection.
             If None or disabled: loads from beginning (deterministic)
-            If enabled without loudness_cutoff: random excerpt using RNG
-            If enabled with loudness_cutoff: multi-try saliency search for loud sections
+            If enabled without lufs_cutoff: random excerpt using RNG
+            If enabled with lufs_cutoff: multi-try saliency search for loud sections
         source: Optional source group name (e.g., "music", "speech") to store in metadata.
 
     Returns:
@@ -124,7 +124,7 @@ def _load_audio_with_saliency(
         )
 
     # Multi-try saliency search: find loud sections using multiple random samples
-    if saliency_params.loudness_cutoff is not None:
+    if saliency_params.lufs_cutoff is not None:
         return AudioTree.salient_excerpt(
             file_path,
             rng,

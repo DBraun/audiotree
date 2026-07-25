@@ -58,13 +58,13 @@ def safe_gain_db(lufs, target_lufs, max_gain_db=None, *, xp=np):
     return gain_db
 
 
-def _window_samples(window_duration_sec: float, sample_rate: int) -> int:
+def _window_samples(lufs_window_sec: float, sample_rate: int) -> int:
     """Number of samples spanned by a loudness window (or hop) of the given duration.
 
     Both the NumPy and JAX per-window loudness paths derive their window/hop spans
     from this, so they tile a waveform the same way.
     """
-    return int(round(window_duration_sec * sample_rate))
+    return int(round(lufs_window_sec * sample_rate))
 
 
 def _windowed_num_windows(samples: int, window_span: int, hop_span: int) -> int:
@@ -160,22 +160,20 @@ def _jit_integrated_loudness(
     return jax.vmap(meter.integrated_loudness)(data)
 
 
-@jax.jit(
-    static_argnames=("sample_rate", "window_duration_sec", "hop_duration_sec", "zeros")
-)
+@jax.jit(static_argnames=("sample_rate", "lufs_window_sec", "lufs_hop_sec", "zeros"))
 def _jit_windowed_loudness(
     data: jnp.ndarray,
     sample_rate: int,
-    window_duration_sec: float,
-    hop_duration_sec: float,
+    lufs_window_sec: float,
+    lufs_hop_sec: float,
     zeros: int = 512,
 ):
     """Ungated per-window loudness (LUFS) for a batch of waveforms on GPU.
 
     K-weights the whole signal once with :mod:`jaxloudnorm`'s filters (as a
     hardware loudness meter would run continuously), then reports the ungated
-    K-weighted loudness of each ``window_duration_sec`` window, stepping
-    ``hop_duration_sec`` between window starts. With ``hop == window`` the windows
+    K-weighted loudness of each ``lufs_window_sec`` window, stepping
+    ``lufs_hop_sec`` between window starts. With ``hop == window`` the windows
     tile the audio without overlap; a smaller hop overlaps them. The trailing
     partial window is dropped and silent windows are ``-inf``. Every value is
     ungated, so windows are directly comparable (matching the upstream
@@ -197,8 +195,8 @@ def _jit_windowed_loudness(
 
     filtered = jax.vmap(_k_weight)(data)  # (batch, channels, samples)
 
-    window_span = _window_samples(window_duration_sec, sample_rate)
-    hop_span = _window_samples(hop_duration_sec, sample_rate)
+    window_span = _window_samples(lufs_window_sec, sample_rate)
+    hop_span = _window_samples(lufs_hop_sec, sample_rate)
     num_windows = _windowed_num_windows(data.shape[-1], window_span, hop_span)
     return _windowed_lufs_from_kweighted(
         filtered, window_span, hop_span, num_windows, jnp
@@ -208,14 +206,14 @@ def _jit_windowed_loudness(
 def _numpy_windowed_lufs(
     waveform: np.ndarray,
     sample_rate: int,
-    window_duration_sec: float,
-    hop_duration_sec: float,
+    lufs_window_sec: float,
+    lufs_hop_sec: float,
 ) -> np.ndarray:
     """Ungated per-window loudness (LUFS) for a ``(batch, channels, samples)`` NumPy batch.
 
     The CPU counterpart of :func:`_jit_windowed_loudness`: K-weights the whole
     signal with exact IIR biquads (``scipy.signal.lfilter``), then reports the
-    ungated K-weighted loudness of each window (stepping ``hop_duration_sec``).
+    ungated K-weighted loudness of each window (stepping ``lufs_hop_sec``).
     JAX-free so it is safe inside grain workers. Returns ``(batch, num_windows)``;
     fully silent windows are ``-inf``.
     """
@@ -224,8 +222,8 @@ def _numpy_windowed_lufs(
         b, a = _rbj_biquad(gain_db, q, fc, sample_rate, filter_type)
         filtered = lfilter(b, a, filtered, axis=-1)
 
-    window_span = _window_samples(window_duration_sec, sample_rate)
-    hop_span = _window_samples(hop_duration_sec, sample_rate)
+    window_span = _window_samples(lufs_window_sec, sample_rate)
+    hop_span = _window_samples(lufs_hop_sec, sample_rate)
     num_windows = _windowed_num_windows(waveform.shape[-1], window_span, hop_span)
     with np.errstate(divide="ignore"):  # a fully silent window is -inf by definition
         lufs = _windowed_lufs_from_kweighted(

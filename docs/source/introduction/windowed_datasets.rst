@@ -139,7 +139,7 @@ so no loudness search happens during training:
     # One-time offline pass. Ragged per-file LUFS arrays are stored as bagz.
     build_window_lufs_cache(
         filepaths,
-        window_duration_sec=1.0,
+        lufs_window_sec=1.0,
         out_dir="lufs_cache/",
         sample_rate=44100,   # match the dataset so LUFS reflects the loaded audio
         mono=True,

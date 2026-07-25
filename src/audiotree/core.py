@@ -56,16 +56,16 @@ class SaliencyParams:
     """
     The parameters for saliency detection.
 
-    When enabled, this controls how audio excerpts are selected from files. If loudness_cutoff is None
+    When enabled, this controls how audio excerpts are selected from files. If lufs_cutoff is None
     or enabled is False, a random offset is used without loudness-based filtering.
 
     Args:
         enabled (bool): Whether to enable saliency detection. Defaults to True. If False, loads from
-            offset=0 (deterministic). If True without loudness_cutoff, uses a random offset.
+            offset=0 (deterministic). If True without lufs_cutoff, uses a random offset.
         num_tries (int): Maximum number of attempts to find a salient section of audio (default 8).
-            Only used when loudness_cutoff is not None.
-        loudness_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
-            If loudness_cutoff is None but SaliencyParams is enabled, uses a random offset without loudness filtering.
+            Only used when lufs_cutoff is not None.
+        lufs_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
+            If lufs_cutoff is None but SaliencyParams is enabled, uses a random offset without loudness filtering.
         search_function (str): Which search function determines the random offset, given as a
             registered name: ``"uniform"`` (the default) draws uniformly over the file, and
             ``"bias_early"`` gradually searches earlier in the file as more attempts are made.
@@ -76,7 +76,7 @@ class SaliencyParams:
 
     enabled: bool = field(default=True)
     num_tries: int = 8
-    loudness_cutoff: float = -40.0
+    lufs_cutoff: float = -40.0
 
     # Annotated ``str`` rather than ``Union[Callable, str]`` because argbind binds
     # this from YAML and does not handle the union well; a callable is still
@@ -343,8 +343,8 @@ class AudioTree:
 
     def replace_lufs(
         self,
-        window_duration_sec: float = 0.4,
-        hop_duration_sec: float | None = None,
+        lufs_window_sec: float = 0.4,
+        lufs_hop_sec: float | None = None,
         *,
         backend: Optional[Literal["cpu", "gpu", "tpu"]] = None,
     ) -> Self:
@@ -366,10 +366,10 @@ class AudioTree:
         The two backends are not bit-identical.
 
         Args:
-            window_duration_sec: Length in seconds of each ``lufs_windows`` window.
+            lufs_window_sec: Length in seconds of each ``lufs_windows`` window.
                 Must be at least 0.4s (the EBU momentary integration time).
-            hop_duration_sec: Step in seconds between window starts. Defaults to
-                ``window_duration_sec`` (non-overlapping windows); a smaller value
+            lufs_hop_sec: Step in seconds between window starts. Defaults to
+                ``lufs_window_sec`` (non-overlapping windows); a smaller value
                 overlaps them. The trailing partial window is dropped, so an
                 excerpt shorter than one window yields an empty ``lufs_windows``.
             backend: XLA backend for the computation, mirroring ``jax.jit``'s
@@ -399,17 +399,15 @@ class AudioTree:
 
             Will raise ValueError if audio has more than 5 channels.
         """
-        if window_duration_sec < 0.4:
+        if lufs_window_sec < 0.4:
             raise ValueError(
-                f"window_duration_sec must be at least 0.4s (the EBU momentary "
-                f"integration time), got {window_duration_sec}."
+                f"lufs_window_sec must be at least 0.4s (the EBU momentary "
+                f"integration time), got {lufs_window_sec}."
             )
-        if hop_duration_sec is None:
-            hop_duration_sec = window_duration_sec
-        if hop_duration_sec <= 0:
-            raise ValueError(
-                f"hop_duration_sec must be positive, got {hop_duration_sec}."
-            )
+        if lufs_hop_sec is None:
+            lufs_hop_sec = lufs_window_sec
+        if lufs_hop_sec <= 0:
+            raise ValueError(f"lufs_hop_sec must be positive, got {lufs_hop_sec}.")
         if backend is not None and backend not in ("cpu", "gpu", "tpu"):
             raise ValueError(
                 f"backend must be None, 'cpu', 'gpu', or 'tpu', got {backend!r}."
@@ -418,8 +416,8 @@ class AudioTree:
         # batch axis, then restore them on the computed loudness.
         leading_shape = self.waveform.shape[:-2]
         waveform = self.waveform.reshape(-1, *self.waveform.shape[-2:])
-        ws = _window_samples(window_duration_sec, self.sample_rate)
-        hs = _window_samples(hop_duration_sec, self.sample_rate)
+        ws = _window_samples(lufs_window_sec, self.sample_rate)
+        hs = _window_samples(lufs_hop_sec, self.sample_rate)
         num_windows = _windowed_num_windows(waveform.shape[-1], ws, hs)
 
         # ``backend`` chooses the compute kernel/device; the output stays in the
@@ -447,8 +445,8 @@ class AudioTree:
                 lufs_windows_array = _jit_windowed_loudness(
                     compute_waveform,
                     self.sample_rate,
-                    window_duration_sec,
-                    hop_duration_sec,
+                    lufs_window_sec,
+                    lufs_hop_sec,
                     zeros=512,
                 )
         else:
@@ -462,8 +460,8 @@ class AudioTree:
                 lufs_windows_array = _numpy_windowed_lufs(
                     compute_waveform,
                     self.sample_rate,
-                    window_duration_sec,
-                    hop_duration_sec,
+                    lufs_window_sec,
+                    lufs_hop_sec,
                 )
 
         # Coerce results back to the waveform's array library (a no-op when the
@@ -1088,7 +1086,7 @@ class AudioTree:
             raise ValueError(
                 "``salient_excerpt`` must be used with kwarg ``duration``."
             )
-        if not saliency_params.enabled or saliency_params.loudness_cutoff is None:
+        if not saliency_params.enabled or saliency_params.lufs_cutoff is None:
             excerpt = cls.excerpt(audio_path, rng=rng, **kwargs)
         else:
             # Get file info once before the loop to avoid repeated soundfile.info calls
@@ -1101,7 +1099,7 @@ class AudioTree:
             current_try = 0
             num_tries = saliency_params.num_tries
             _search_function = _resolve_search_function(saliency_params.search_function)
-            while best_lufs <= saliency_params.loudness_cutoff:
+            while best_lufs <= saliency_params.lufs_cutoff:
                 search_function = partial(
                     _search_function,
                     attempt=current_try,
@@ -1124,7 +1122,7 @@ class AudioTree:
                 current_try += 1
                 if num_tries is not None and current_try >= num_tries:
                     break
-            # ``best_lufs`` starts at -inf and ``loudness_cutoff`` is not None
+            # ``best_lufs`` starts at -inf and ``lufs_cutoff`` is not None
             # here, so the loop always runs (and assigns ``excerpt``) at least once.
             assert excerpt is not None
 

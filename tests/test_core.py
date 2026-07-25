@@ -504,13 +504,13 @@ def test_replace_lufs_windows_custom_duration_and_short_excerpt():
     """The window length is configurable; a sub-window excerpt yields no windows."""
     sr = 44100
     tree = AudioTree.create(_tone(sr, 2.0), sr)
-    assert tree.replace_lufs(window_duration_sec=1.0).lufs_windows.shape == (1, 2)
+    assert tree.replace_lufs(lufs_window_sec=1.0).lufs_windows.shape == (1, 2)
     # Shorter than one 0.4s window -> empty (but ``lufs`` is still computed).
     short = AudioTree.create(_tone(sr, 0.2), sr).replace_lufs()
     assert short.lufs.shape == (1,)
     assert short.lufs_windows.shape == (1, 0)
     with pytest.raises(ValueError):
-        tree.replace_lufs(window_duration_sec=0.2)
+        tree.replace_lufs(lufs_window_sec=0.2)
 
 
 def test_replace_lufs_windows_tracks_per_window_loudness():
@@ -526,18 +526,18 @@ def test_replace_lufs_windows_tracks_per_window_loudness():
 
 
 def test_replace_lufs_windows_hop_and_silence():
-    """`hop_duration_sec` overlaps windows; fully silent windows are -inf."""
+    """`lufs_hop_sec` overlaps windows; fully silent windows are -inf."""
     sr = 44100
     tone = _tone(sr, 2.0)
     # 0.4s windows stepping 0.2s over 2.0s -> (2.0 - 0.4) / 0.2 + 1 = 9 windows.
     overlapped = AudioTree.create(tone, sr).replace_lufs(
-        window_duration_sec=0.4, hop_duration_sec=0.2
+        lufs_window_sec=0.4, lufs_hop_sec=0.2
     )
     assert overlapped.lufs_windows.shape == (1, 9)
     # Non-overlapping (default hop) gives 2.0 / 0.4 = 5 windows.
     assert AudioTree.create(tone, sr).replace_lufs().lufs_windows.shape == (1, 5)
     with pytest.raises(ValueError):
-        AudioTree.create(tone, sr).replace_lufs(hop_duration_sec=0.0)
+        AudioTree.create(tone, sr).replace_lufs(lufs_hop_sec=0.0)
 
     # Ungated windows report -inf for digital silence (comparable across windows).
     silent = AudioTree.create(np.zeros(2 * sr, dtype=np.float32), sr).replace_lufs()
@@ -709,7 +709,7 @@ def test_salient_excerpt_finds_the_loud_half(tmp_path):
     from audiotree.core import SaliencyParams
 
     path = _write_half_silent_wav(tmp_path / "half.wav")
-    params = SaliencyParams(num_tries=32, loudness_cutoff=-40.0)
+    params = SaliencyParams(num_tries=32, lufs_cutoff=-40.0)
     tree = AudioTree.salient_excerpt(
         str(path),
         rng=np.random.default_rng(0),
@@ -729,7 +729,7 @@ def test_salient_excerpt_terminates_on_fully_silent_audio(tmp_path):
     path = tmp_path / "silent.wav"
     soundfile.write(str(path), np.zeros(16000 * 2, dtype=np.float32), 16000)
 
-    params = SaliencyParams(num_tries=3, loudness_cutoff=-40.0)
+    params = SaliencyParams(num_tries=3, lufs_cutoff=-40.0)
     tree = AudioTree.salient_excerpt(
         str(path),
         rng=np.random.default_rng(0),
@@ -747,7 +747,7 @@ def test_salient_excerpt_accepts_bias_early_by_name(tmp_path):
 
     path = _write_half_silent_wav(tmp_path / "half2.wav")
     params = SaliencyParams(
-        num_tries=8, loudness_cutoff=-40.0, search_function="bias_early"
+        num_tries=8, lufs_cutoff=-40.0, search_function="bias_early"
     )
     tree = AudioTree.salient_excerpt(
         str(path),

@@ -231,10 +231,10 @@ Use saliency to randomly select louder sections of audio:
     from audiotree.sources import create_balanced_audio_dataset
     from audiotree.core import SaliencyParams
 
-    loudness_cutoff = -40  # Only select sections above -40 LUFS
+    lufs_cutoff = -40  # Only select sections above -40 LUFS
     saliency_params = SaliencyParams(
         enabled=True,
-        loudness_cutoff=loudness_cutoff,
+        lufs_cutoff=lufs_cutoff,
         num_tries=10,  # Try up to 10 random positions
     )
 
@@ -248,7 +248,7 @@ Use saliency to randomly select louder sections of audio:
     # Saliency is best-effort: after num_tries it returns the loudest excerpt it
     # found, even if still below the cutoff. Filter to *guarantee* the floor,
     # dropping files that never clear it. (Saliency populates .lufs on each excerpt.)
-    ds = ds.filter(lambda audio_tree: audio_tree.lufs[0] > loudness_cutoff)
+    ds = ds.filter(lambda audio_tree: audio_tree.lufs[0] > lufs_cutoff)
     ds = ds.to_iter_dataset()
     ds = ds.batch(32, batch_fn=AudioTree.batch)
 

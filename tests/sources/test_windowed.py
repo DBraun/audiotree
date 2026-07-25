@@ -241,7 +241,7 @@ def test_alpha_out_of_range_raises():
 def test_precompute_window_lufs_is_ragged_and_floors_silence():
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 3.0, "b": 7.0}, sample_rate=8000)
-        lpf = precompute_window_lufs(fps, window_duration_sec=1.0)
+        lpf = precompute_window_lufs(fps, lufs_window_sec=1.0)
         # Ragged: window counts scale with duration (3 and 7).
         assert lpf[fps[0]].shape == (3,)
         assert lpf[fps[1]].shape == (7,)
@@ -261,7 +261,7 @@ def test_loudness_filtering_keeps_only_loud_slots():
         sf.write(fp, audio, sr)
         fps = [fp]
 
-        lpf = precompute_window_lufs(fps, window_duration_sec=1.0)
+        lpf = precompute_window_lufs(fps, lufs_window_sec=1.0)
         durations = scan_durations(fps)
 
         full = _build_slot_index(
@@ -295,14 +295,14 @@ def test_bagz_cache_round_trip():
         fps = _mixed_corpus(tmp, {"a": 3.0, "b": 6.0}, sample_rate=8000)
         cache_dir = build_window_lufs_cache(
             fps,
-            window_duration_sec=1.0,
+            lufs_window_sec=1.0,
             out_dir=Path(tmp) / "cache",
             sample_rate=8000,
             mono=True,
         )
         cache = load_window_lufs(cache_dir)
         assert isinstance(cache, WindowLufsCache)
-        assert cache.window_duration_sec == 1.0
+        assert cache.lufs_window_sec == 1.0
         assert cache.sample_rate == 8000
         assert cache.mono is True
         assert cache.durations[fps[1]] == pytest.approx(6.0, abs=0.01)
@@ -320,7 +320,7 @@ def test_save_window_lufs_handles_empty_arrays():
             "y.wav": np.zeros(0, np.float32),
         }
         out = save_window_lufs(
-            Path(tmp) / "c", lpf, window_duration_sec=1.0, sample_rate=8000, mono=True
+            Path(tmp) / "c", lpf, lufs_window_sec=1.0, sample_rate=8000, mono=True
         )
         cache = load_window_lufs(out)
         np.testing.assert_array_equal(cache.lufs["x.wav"], lpf["x.wav"])
@@ -333,7 +333,7 @@ def test_lufs_cache_path_filters_dataset():
         fps = _mixed_corpus(tmp, {"a": 6.0, "b": 6.0}, sample_rate=8000)
         cache_dir = build_window_lufs_cache(
             fps,
-            window_duration_sec=1.0,
+            lufs_window_sec=1.0,
             out_dir=Path(tmp) / "cache",
             sample_rate=8000,
             mono=True,
@@ -364,7 +364,7 @@ def test_lufs_cache_sample_rate_mismatch_raises():
         fps = _mixed_corpus(tmp, {"a": 4.0}, sample_rate=8000)
         cache_dir = build_window_lufs_cache(
             fps,
-            window_duration_sec=1.0,
+            lufs_window_sec=1.0,
             out_dir=Path(tmp) / "cache",
             sample_rate=8000,
             mono=True,
@@ -384,7 +384,7 @@ def test_lufs_cache_mono_mismatch_raises():
         fps = _mixed_corpus(tmp, {"a": 4.0}, sample_rate=8000)
         cache_dir = build_window_lufs_cache(
             fps,
-            window_duration_sec=1.0,
+            lufs_window_sec=1.0,
             out_dir=Path(tmp) / "cache",
             sample_rate=8000,
             mono=True,

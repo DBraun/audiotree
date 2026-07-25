@@ -162,7 +162,7 @@ def test_with_saliency():
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_dir = _create_test_audio_files(tmpdir, 5, duration=3.0)
 
-        saliency_params = SaliencyParams(enabled=True, loudness_cutoff=None)
+        saliency_params = SaliencyParams(enabled=True, lufs_cutoff=None)
         ds = create_audio_dataset(
             sources=audio_dir,
             sample_rate=44100,

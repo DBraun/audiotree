@@ -79,7 +79,7 @@ Use saliency to select louder sections of audio:
 
     saliency_params = SaliencyParams(
         enabled=True,
-        loudness_cutoff=-40,  # Only select sections above -40 LUFS
+        lufs_cutoff=-40,  # Only select sections above -40 LUFS
         num_tries=10,
     )
 
@@ -94,7 +94,7 @@ Use saliency to select louder sections of audio:
     )
 
 Saliency is best-effort — after ``num_tries`` it returns the loudest excerpt it
-found, even if still below ``loudness_cutoff``. To *guarantee* the floor (dropping
+found, even if still below ``lufs_cutoff``. To *guarantee* the floor (dropping
 files that never clear it), filter on ``lufs`` afterward; see :ref:`balanced_datasets`.
 
 The same saliency search is available as a classmethod,
@@ -110,7 +110,7 @@ excerpt straight from a file path without building a dataset:
     tree = AudioTree.salient_excerpt(
         "/data/song.wav",
         rng=np.random.default_rng(0),
-        saliency_params=SaliencyParams(enabled=True, loudness_cutoff=-40, num_tries=10),
+        saliency_params=SaliencyParams(enabled=True, lufs_cutoff=-40, num_tries=10),
         sample_rate=44100,
         duration=3.0,          # required
     )
@@ -205,7 +205,7 @@ In this example each ``<name>.wav`` has a sibling ``<name>.npy`` holding a
         sources=_piano_dir,
         sample_rate=16000,
         duration=1.0,
-        saliency_params=SaliencyParams(enabled=True, loudness_cutoff=None),
+        saliency_params=SaliencyParams(enabled=True, lufs_cutoff=None),
     )
 
     def attach_pianoroll(audio_tree: AudioTree) -> AudioTree:
