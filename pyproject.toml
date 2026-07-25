@@ -30,10 +30,18 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    # bagz ships no macOS wheels; the reader is Linux-only.
-    "bagz>=0.2.0; sys_platform == 'linux'",
+    # `absl`, `flax` and `jax` are imported at module scope by audiotree.core and
+    # friends. They used to arrive only transitively via jaxloudnorm/librosax,
+    # which made `import audiotree` depend on another package's dependency
+    # choices; declare them.
+    "absl-py>=2.0",
     "einops>=0.8.1",
-    "grain>=0.2.15",
+    "flax>=0.10",
+    # transforms/core.py subclasses a class that lives in `grain._src`, so the
+    # upper bound is load-bearing: the first grain release that removes it turns
+    # `import audiotree.transforms` into an ImportError for every pinned install.
+    "grain>=0.2.15,<0.3",
+    "jax>=0.4.35",
     "jaxloudnorm>=0.3.1",
     "librosa>=0.10.1",
     "librosax>=0.1.2",
@@ -42,6 +50,14 @@ dependencies = [
     "scipy>=1.10",
     "soundfile>=0.12.1",
 ]
+
+[project.optional-dependencies]
+# bagz publishes manylinux x86-64 wheels only (no macOS, no Linux aarch64, and
+# nothing for Python 3.14), so a hard dependency made `pip install audiotree`
+# unsatisfiable on platforms this package otherwise supports. It is imported
+# lazily via `audiotree._bagz.require_bagz`, and is needed only for string
+# leaves in TreeWriter/TreeDataSource and for the windowed-LUFS cache.
+bagz = ["bagz>=0.2.0"]
 
 [project.urls]
 Homepage = "https://github.com/DBraun/audiotree"
@@ -59,6 +75,9 @@ dev = [
 
 [tool.setuptools.dynamic]
 version = { attr = "audiotree.__version__" }
+
+[tool.setuptools.package-data]
+audiotree = ["py.typed"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

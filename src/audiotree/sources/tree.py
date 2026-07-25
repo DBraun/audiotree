@@ -277,21 +277,20 @@ class TreeDataSource(RandomAccessDataSource):
             self._in_memory_arrays[name] = np.array(mm)
             del mm
 
-        if self._string_leaf_info:
-            bagz = require_bagz("reading string leaves in TreeDataSource")
-            for name, info in self._string_leaf_info.items():
-                if _is_excluded(name, self.exclude_prefixes):
-                    continue
-                reader = bagz.Reader(
-                    str(
-                        safe_join(
-                            self.data_dir, info["file"], description="string leaf"
-                        )
-                    )
-                )
-                self._in_memory_strings[name] = [
-                    reader[i].decode("utf-8") for i in range(self._num_samples)
-                ]
+        for name, info in self._string_leaf_info.items():
+            # Resolve bagz per *included* leaf. Requiring it up front meant that
+            # excluding every string leaf still raised ImportError, so a dataset
+            # written on Linux could not be opened at all elsewhere — not even
+            # to read its waveforms.
+            if _is_excluded(name, self.exclude_prefixes):
+                continue
+            bagz = require_bagz(f"reading string leaf {name!r} in TreeDataSource")
+            reader = bagz.Reader(
+                str(safe_join(self.data_dir, info["file"], description="string leaf"))
+            )
+            self._in_memory_strings[name] = [
+                reader[i].decode("utf-8") for i in range(self._num_samples)
+            ]
 
         # Mark as opened so lazy path is skipped.
         self._data_files_opened = True
@@ -308,18 +307,14 @@ class TreeDataSource(RandomAccessDataSource):
                 continue
             self._leaf_names.append(name)
 
-        if self._string_leaf_info:
-            bagz = require_bagz("reading string leaves in TreeDataSource")
-            for name, info in self._string_leaf_info.items():
-                if _is_excluded(name, self.exclude_prefixes):
-                    continue
-                self._bagz_readers[name] = bagz.Reader(
-                    str(
-                        safe_join(
-                            self.data_dir, info["file"], description="string leaf"
-                        )
-                    )
-                )
+        for name, info in self._string_leaf_info.items():
+            # See _load_all_into_memory: bagz is resolved per included leaf.
+            if _is_excluded(name, self.exclude_prefixes):
+                continue
+            bagz = require_bagz(f"reading string leaf {name!r} in TreeDataSource")
+            self._bagz_readers[name] = bagz.Reader(
+                str(safe_join(self.data_dir, info["file"], description="string leaf"))
+            )
 
         self._data_files_opened = True
 

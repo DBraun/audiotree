@@ -32,7 +32,10 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get install libsndfile-dev
-        uv sync
+        # `bagz` is an optional extra (manylinux x86-64 wheels only). CI runs on
+        # exactly that platform, so install it here to exercise the string-leaf
+        # and windowed-LUFS-cache paths rather than skipping them.
+        uv sync --extra bagz
 
     - name: Run tests
       run: uv run pytest
@@ -56,7 +59,7 @@ jobs:
     - name: Install dependencies (grain floor)
       run: |
         sudo apt-get install libsndfile-dev
-        uv sync
+        uv sync --extra bagz
         # Pin grain to the declared floor in the synced env; the next step runs
         # with --no-sync so the pin sticks. Fails if the code needs newer grain.
         uv pip install "grain==0.2.15"

@@ -752,3 +752,52 @@ def test_load_into_memory_pickle_roundtrip():
 
         sample = restored[0]
         np.testing.assert_array_almost_equal(sample.waveform[0], audio[0], decimal=5)
+
+
+def test_excluding_string_leaves_works_without_bagz(tmp_path, monkeypatch):
+    """Excluding every string leaf must make a dataset readable without bagz.
+
+    bagz publishes manylinux x86-64 wheels only, and `require_bagz` used to be
+    called before the exclusion filter — so `exclude_prefixes=["caption"]` still
+    raised ImportError and a Linux-written dataset could not be opened at all
+    elsewhere, not even to read its waveforms.
+    """
+    import builtins
+
+    import numpy as np
+
+    from audiotree import AudioTree, TreeWriter
+    from audiotree.sources import TreeDataSource
+
+    pytest.importorskip("bagz", reason="need bagz to write the fixture")
+
+    data_dir = tmp_path / "ds"
+    with TreeWriter(str(data_dir), expected_samples=2) as writer:
+        writer.write(
+            {
+                "audio": AudioTree.create(
+                    np.zeros((2, 1, 16), dtype=np.float32), 16000
+                ),
+                "caption": ["a", "b"],
+            }
+        )
+
+    # Simulate a platform where bagz cannot be imported.
+    real_import = builtins.__import__
+
+    def no_bagz(name, *args, **kwargs):
+        if name == "bagz":
+            raise ImportError("no bagz on this platform")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_bagz)
+
+    # Without the exclusion, the string leaf still needs bagz.
+    with pytest.raises(ImportError, match="audiotree\\[bagz\\]"):
+        TreeDataSource(data_dir)[0]
+
+    # Excluding it makes the rest of the dataset readable.
+    source = TreeDataSource(data_dir, exclude_prefixes=["caption"])
+    sample = source[0]
+    assert sample["audio"].waveform.shape == (1, 1, 16)
+    assert "caption" not in sample
