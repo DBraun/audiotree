@@ -1,7 +1,9 @@
 AudioTree documentation
 =======================
 
-**AudioTree** represents audio as an ML-framework-agnostic `pytree <https://jax.readthedocs.io/en/latest/pytrees.html>`_, with `JAX <https://jax.readthedocs.io/en/latest/>`_ data loading and augmentations.
+**AudioTree** represents audio as a `JAX <https://jax.readthedocs.io/en/latest/>`_ `pytree <https://jax.readthedocs.io/en/latest/pytrees.html>`_:
+a batched ``AudioTree`` container, `Grain`_ data sources, and dual NumPy/JAX augmentations.
+JAX and Flax are hard requirements; there is no torch path (see :ref:`api_stability`).
 The source code is `here <https://github.com/DBraun/audiotree>`_.
 
 AudioTree can be installed with pip:
@@ -127,6 +129,8 @@ Content
    :maxdepth: 1
    :caption: Project
 
+   api_stability
+   migration_1_0
    changelog
 
 Acknowledgments
@@ -139,13 +143,12 @@ Citation
 
 .. code-block::
 
-   @software{Braun_AudioTree_2025,
+   @software{Braun_AudioTree_2026,
       author = {Braun, David},
-      month = mar,
       title = {{AudioTree}},
       url = {https://github.com/DBraun/audiotree},
-      version = {0.2.0},
-      year = {2025}
+      version = {1.0.0},
+      year = {2026}
    }
 
 .. _flax.struct.dataclass: https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass
