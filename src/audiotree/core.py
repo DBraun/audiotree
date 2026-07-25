@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import field
 from functools import partial
 import importlib
+import json
 from pathlib import Path
 from typing import (
     Any,
@@ -27,6 +28,7 @@ import loudness
 import numpy as np
 import soundfile
 
+from . import _format
 from .loudness import (
     _jit_integrated_loudness,
     _jit_windowed_loudness,
@@ -901,6 +903,17 @@ class AudioTree:
 
         # Load manifest data
         manifest_data = np.load(manifest_path, allow_pickle=True)
+        _format.check(
+            {
+                key[len(_format.NPZ_HEADER_PREFIX) :]: json.loads(
+                    str(manifest_data[key])
+                )
+                for key in manifest_data.files
+                if key.startswith(_format.NPZ_HEADER_PREFIX)
+            },
+            _format.MANIFEST,
+            source=str(manifest_path),
+        )
 
         # Determine audio directory
         if audio_dir is None:

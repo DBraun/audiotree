@@ -210,19 +210,48 @@ def test_index_out_of_range():
             _ = source[-1]
 
 
-def test_version_check():
-    """Reading a non-v2 manifest raises ValueError."""
+def test_rejects_headerless_manifest():
+    """A pre-1.0 manifest (no format header) is refused with actionable advice."""
+    import json
+
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
-
-        # Write a v1-style manifest
-        import json
-
-        manifest = {"version": "1.0", "num_samples": 5, "fields": {}}
+        manifest = {"version": "2.0", "num_samples": 5, "leaves": {}}
         with open(output_dir / "manifest.json", "w") as f:
             json.dump(manifest, f)
 
-        with pytest.raises(ValueError, match="Unsupported manifest version"):
+        with pytest.raises(ValueError, match="re-render the dataset"):
+            TreeDataSource(output_dir)
+
+
+@pytest.mark.parametrize(
+    "override,match",
+    [
+        ({"format": "audiotree-manifest"}, "expected a TreeWriter dataset"),
+        ({"format_version": [2, 0]}, "this audiotree reads 1.x"),
+        ({"min_reader_version": [1, 7]}, "requires a reader of at least 1.7"),
+        ({"format_version": "1.0"}, r"must be a \[major, minor\] pair"),
+    ],
+)
+def test_format_header_dispatch(override, match):
+    """Wrong format, future major, and future min-reader are each refused."""
+    import json
+
+    import numpy as np
+
+    from audiotree import AudioTree, TreeWriter
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        with TreeWriter(str(output_dir), expected_samples=1) as writer:
+            writer.write(AudioTree.create(np.zeros((1, 1, 8), np.float32), 16000))
+
+        path = output_dir / "manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest.update(override)
+        path.write_text(json.dumps(manifest))
+
+        with pytest.raises(ValueError, match=match):
             TreeDataSource(output_dir)
 
 

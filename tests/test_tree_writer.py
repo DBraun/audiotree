@@ -32,7 +32,9 @@ def test_basic_write_audiotree():
 
         with open(output_dir / "manifest.json") as f:
             manifest = json.load(f)
-        assert manifest["version"] == "2.0"
+        assert manifest["format"] == "audiotree-tree"
+        assert manifest["format_version"] == [1, 0]
+        assert manifest["producer"].startswith("audiotree ")
         assert manifest["num_samples"] == 5
         assert "waveform" in manifest["leaves"]
 

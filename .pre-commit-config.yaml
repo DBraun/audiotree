@@ -2,6 +2,10 @@
 #     pre-commit install
 # Run against every file (e.g. when first adopting):
 #     pre-commit run --all-files
+# Committed format-compatibility fixtures. They exist to prove the on-disk
+# layout has not changed, so no hook may rewrite them.
+exclude: ^tests/assets/golden/
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

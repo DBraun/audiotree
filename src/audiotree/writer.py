@@ -1,5 +1,6 @@
 """AudioWriter class for writing AudioTree objects to disk with manifest support."""
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -7,6 +8,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import soundfile
 
+from . import _format
 from ._fs import refuse_to_clobber
 from .core import AudioTree
 
@@ -332,6 +334,14 @@ class AudioWriter:
 
         # Convert manifest data to arrays for efficient NPZ storage
         arrays_dict = self._manifest_to_arrays()
+
+        # Stamp the format header. NPZ has no place for scalars, so each value
+        # is a 0-d array under the reserved `__audiotree_` prefix, which the
+        # reader strips before classifying the per-entry columns.
+        for key, value in _format.header(_format.MANIFEST).items():
+            arrays_dict[f"{_format.NPZ_HEADER_PREFIX}{key}"] = np.array(
+                json.dumps(value)
+            )
 
         # Save as compressed or uncompressed NPZ
         if self.compress_manifest:

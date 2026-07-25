@@ -33,9 +33,9 @@ import librosa
 import numpy as np
 import soundfile
 
-from audiotree import AudioTree
+from audiotree import AudioTree, _format
 from audiotree._bagz import require_bagz
-from audiotree._fs import safe_join
+from audiotree._fs import safe_join, write_json_atomic
 
 from .core import _default_extensions, find_audio_files
 
@@ -258,7 +258,7 @@ def save_window_lufs(
     writer.close()
 
     manifest = {
-        "version": "1.0",
+        **_format.header(_format.LUFS_WINDOWS_CACHE),
         "window_duration_sec": float(window_duration_sec),
         "sample_rate": int(sample_rate) if sample_rate is not None else None,
         "mono": bool(mono),
@@ -270,8 +270,7 @@ def save_window_lufs(
         ),
         "bagz_file": _LUFS_BAGZ,
     }
-    with open(out_dir / _LUFS_MANIFEST, "w") as f:
-        json.dump(manifest, f)
+    write_json_atomic(out_dir / _LUFS_MANIFEST, manifest, indent=None)
     return out_dir
 
 
@@ -288,6 +287,9 @@ def load_window_lufs(cache_dir: str | Path) -> WindowLufsCache:
     cache_dir = Path(cache_dir)
     with open(cache_dir / _LUFS_MANIFEST) as f:
         manifest = json.load(f)
+    _format.check(
+        manifest, _format.LUFS_WINDOWS_CACHE, source=str(cache_dir / _LUFS_MANIFEST)
+    )
 
     filepaths = manifest["filepaths"]
     reader = require_bagz("reading windowed-LUFS caches").Reader(

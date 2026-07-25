@@ -10,6 +10,7 @@ import jax
 import jax.tree_util
 import numpy as np
 
+from audiotree import _format
 from audiotree._bagz import require_bagz
 from audiotree._fs import refuse_to_clobber, write_json_atomic
 from audiotree.core import AudioTree
@@ -428,7 +429,7 @@ class TreeWriter:
         a reader never observes a half-written file.
         """
         manifest = {
-            "version": "2.0",
+            **_format.header(_format.TREE),
             "num_samples": self._current_index,
             "expected_samples": self.expected_samples,
             "created_at": datetime.now().isoformat(),

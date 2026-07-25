@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, SupportsIndex, Union
 import numpy as np
 from grain.sources import RandomAccessDataSource
 
+from audiotree import _format
 from audiotree._bagz import require_bagz
 from audiotree._fs import safe_join
 from audiotree.core import AudioTree
@@ -235,12 +236,7 @@ class TreeDataSource(RandomAccessDataSource):
         with open(self.manifest_path) as f:
             self.manifest = json.load(f)
 
-        version = self.manifest.get("version", "")
-        if not version.startswith("2."):
-            raise ValueError(
-                f"Unsupported manifest version: {version!r}. "
-                "TreeDataSource requires version 2.x manifests."
-            )
+        _format.check(self.manifest, _format.TREE, source=str(self.manifest_path))
 
         _validate_manifest(self.manifest, self.manifest_path)
 

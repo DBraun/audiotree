@@ -6,7 +6,9 @@ from typing import Callable, Dict, List, Literal, Optional, SupportsIndex, Union
 import numpy as np
 from grain import python as grain
 
-from audiotree import AudioTree
+import json
+
+from audiotree import AudioTree, _format
 from audiotree._fs import safe_join
 from audiotree.writer import _AUDIOTREE_FIELDS
 
@@ -151,12 +153,24 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         """
         data = np.load(self.manifest_path, allow_pickle=True)
 
+        # Validate the format header, and strip it before classifying columns:
+        # its entries are 0-d scalars, not per-entry arrays, so leaving them in
+        # `regular_keys` would corrupt the entry count taken from `regular_keys[0]`.
+        header = {
+            key[len(_format.NPZ_HEADER_PREFIX) :]: json.loads(str(data[key]))
+            for key in data.keys()
+            if key.startswith(_format.NPZ_HEADER_PREFIX)
+        }
+        _format.check(header, _format.MANIFEST, source=str(self.manifest_path))
+
         # Pre-classify keys outside the loop - O(k) instead of O(n×k)
         regular_keys = []
         metadata_keys = []
         tag_keys = []
 
         for key in data.keys():
+            if key.startswith(_format.NPZ_HEADER_PREFIX):
+                continue
             if key.startswith("tags_"):
                 tag_keys.append(key)
             elif key.startswith("metadata_"):

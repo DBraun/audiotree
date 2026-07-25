@@ -11,6 +11,7 @@
 *.flac binary
 *.mp3  binary
 *.ogg  binary
+*.bin  binary
 *.npy  binary
 *.npz  binary
 *.png  binary
