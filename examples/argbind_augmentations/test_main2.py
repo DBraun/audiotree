@@ -109,7 +109,7 @@ B = 2
 T = 44100
 
 audio_tree = AudioTree(np.random.uniform(-1, 1, size=(B, 1, T)), sample_rate=44100)
-audio_tree = audio_tree.replace_loudness()
+audio_tree = audio_tree.replace_lufs()
 
 train_args = {
     "test_train/volume_norm.min_db": -25,
@@ -131,14 +131,14 @@ with argbind.scope(val_args, "test_val"):
     transform = transforms_bound.volume_norm()
     val_audio = transform.random_map(audio_tree, rng)
 
-assert train_audio.loudness is not None, "train_audio.loudness is None"
-assert val_audio.loudness is not None, "val_audio.loudness is None"
+assert train_audio.lufs is not None, "train_audio.lufs is None"
+assert val_audio.lufs is not None, "val_audio.lufs is None"
 
-assert np.all(train_audio.loudness >= -25 - 1), f"train loudness too low: {train_audio.loudness}"
-assert np.all(train_audio.loudness <= -15 + 1), f"train loudness too high: {train_audio.loudness}"
+assert np.all(train_audio.lufs >= -25 - 1), f"train loudness too low: {train_audio.lufs}"
+assert np.all(train_audio.lufs <= -15 + 1), f"train loudness too high: {train_audio.lufs}"
 
-assert np.all(val_audio.loudness >= -20 - 1), f"val loudness too low: {val_audio.loudness}"
-assert np.all(val_audio.loudness <= -20 + 1), f"val loudness too high: {val_audio.loudness}"
+assert np.all(val_audio.lufs >= -20 - 1), f"val loudness too low: {val_audio.lufs}"
+assert np.all(val_audio.lufs <= -20 + 1), f"val loudness too high: {val_audio.lufs}"
 
 print("SUCCESS")
 """,

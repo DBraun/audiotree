@@ -65,10 +65,12 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 # Run docstring examples (``>>> ...``) alongside the unit tests so they can't
-# rot. ``testpaths`` lets a bare ``pytest`` collect both: doctests from ``src``
-# and the unit suite from ``tests``.
+# rot. ``testpaths`` lets a bare ``pytest`` collect all three: doctests from
+# ``src``, the unit suite from ``tests``, and the ``examples`` scripts. The
+# examples are a user's first contact with the library; leaving them out of the
+# default run let all three rot against renamed API without anything going red.
 addopts = "--doctest-modules"
-testpaths = ["src", "tests"]
+testpaths = ["src", "tests", "examples"]
 filterwarnings = [
     "ignore:.*aifc.*:DeprecationWarning:audioread.rawread",
     "ignore:.*audioop.*:DeprecationWarning:audioread.rawread",

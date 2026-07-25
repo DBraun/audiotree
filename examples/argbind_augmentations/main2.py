@@ -136,11 +136,11 @@ if __name__ == "__main__":
     audio_tree = AudioTree(
         np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100
     )
-    audio_tree = audio_tree.replace_loudness()
-    print("Before:", audio_tree.loudness)
+    audio_tree = audio_tree.replace_lufs()
+    print("Before:", audio_tree.lufs)
     print("length:", audio_tree.waveform.shape[-1])
     audio_tree = train(audio_tree)
-    print("After:", audio_tree.loudness)
+    print("After:", audio_tree.lufs)
     print("length:", audio_tree.waveform.shape[-1])
 
     # Test validation augmentation
@@ -148,9 +148,9 @@ if __name__ == "__main__":
     audio_tree = AudioTree(
         np.random.uniform(-1, 1, size=(B, 1, T * 4)), sample_rate=44100
     )
-    audio_tree = audio_tree.replace_loudness()
-    print("Before:", audio_tree.loudness)
+    audio_tree = audio_tree.replace_lufs()
+    print("Before:", audio_tree.lufs)
     print("length:", audio_tree.waveform.shape[-1])
     audio_tree = val(audio_tree)
-    print("After:", audio_tree.loudness)
+    print("After:", audio_tree.lufs)
     print("length:", audio_tree.waveform.shape[-1])

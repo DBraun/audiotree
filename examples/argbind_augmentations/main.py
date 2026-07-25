@@ -39,8 +39,8 @@ def main():
     )
 
     # Compute loudness (required for volume_norm transform)
-    audio_tree = audio_tree.replace_loudness()
-    loudness_before = audio_tree.loudness
+    audio_tree = audio_tree.replace_lufs()
+    loudness_before = audio_tree.lufs
     print("Before:", loudness_before)
 
     # Create RNG for deterministic randomness
@@ -49,12 +49,12 @@ def main():
     # Apply volume_norm transform (normalizes loudness to a random value in [min_db, max_db])
     # The config values (min_db, max_db) are set via argbind from config.yml or CLI
     audio_tree = volume_norm().random_map(audio_tree, rng)
-    loudness_after = audio_tree.loudness
+    loudness_after = audio_tree.lufs
     print("After:", loudness_after)
 
     # Apply volume_norm again to show it can produce different results with same RNG
     audio_tree = volume_norm().random_map(audio_tree, rng)
-    loudness_after = audio_tree.loudness
+    loudness_after = audio_tree.lufs
     print("After again:", loudness_after)
 
     # Apply trim transform (deterministic - trims to specified length)

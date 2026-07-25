@@ -34,9 +34,11 @@ def main():
                 audio = np.sin(2 * np.pi * 440 * t)  # A4 note
                 pitch = 69.0  # MIDI note for A4
             else:
-                # White noise
+                # White noise. It has no pitch, but every AudioTree written to
+                # one manifest must carry the same set of fields, so record NaN
+                # rather than dropping the field for this item.
                 audio = np.random.randn(44100) * 0.1
-                pitch = None
+                pitch = np.nan
 
             # Create AudioTree with metadata
             audio_tree = AudioTree.create(
@@ -44,13 +46,13 @@ def main():
                     1, 1, -1
                 ),  # Shape: (batch=1, channels=1, samples)
                 sample_rate=44100,
-                pitch=np.array([pitch]) if pitch else None,
+                pitch=np.array([pitch], dtype=np.float32),
                 velocity=np.array([64 + i * 20]),
                 filepaths=[f"original_{i}.wav"],
             )
 
             # Calculate loudness
-            audio_tree = audio_tree.replace_loudness()
+            audio_tree = audio_tree.replace_lufs()
             trees.append(audio_tree)
 
         print(f"  Created {len(trees)} AudioTree objects\n")
@@ -90,7 +92,7 @@ def main():
         print(f"  - Files with category='sine': {len(sine_only)}")
 
         # Filter by loudness
-        loud_only = source.filter_by_loudness(min_lufs=-30)
+        loud_only = source.filter_by_lufs(min_lufs=-30)
         print(f"  - Files louder than -30 LUFS: {len(loud_only)}")
 
         print("\n5. Accessing metadata from loaded files:")
@@ -100,7 +102,7 @@ def main():
         print("  First file:")
         print(f"    - Shape: {first_audio.waveform.shape}")
         print(f"    - Sample rate: {first_audio.sample_rate}")
-        print(f"    - Loudness: {first_audio.loudness[0]:.1f} LUFS")
+        print(f"    - Loudness: {first_audio.lufs[0]:.1f} LUFS")
         if first_audio.pitch is not None:
             print(f"    - Pitch: MIDI {first_audio.pitch[0]:.0f}")
         print(f"    - Velocity: {first_audio.velocity[0]}")
