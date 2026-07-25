@@ -1,3 +1,11 @@
+"""ITU-R BS.1770 loudness, with matching NumPy and JAX implementations.
+
+The K-weighting coefficients, per-channel gains and gating constants follow
+pyloudnorm (https://github.com/csteinmetz1/pyloudnorm, Copyright (c) 2018
+Christian Steinmetz) and its JAX port jaxloudnorm, both MIT licensed; the full
+notice is bundled at LICENSES/pyloudnorm-MIT.txt.
+"""
+
 import math
 
 import jax

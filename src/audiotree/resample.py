@@ -1,5 +1,6 @@
-# File under the MIT license, see https://github.com/adefossez/julius/blob/main/LICENSE for details.
-# Author: adefossez, 2020
+# Adapted from julius (https://github.com/adefossez/julius).
+# Copyright 2020 Alexandre Défossez. Licensed under the MIT license; the full
+# notice is bundled at LICENSES/julius-MIT.txt.
 """
 Differentiable, Pytorch based resampling.
 Implementation of Julius O. Smith algorithm for resampling.
