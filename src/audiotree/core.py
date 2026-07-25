@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import field
 from functools import partial
+import importlib
 from pathlib import Path
 from typing import (
     Any,
@@ -63,17 +64,22 @@ class SaliencyParams:
             Only used when loudness_cutoff is not None.
         loudness_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
             If loudness_cutoff is None but SaliencyParams is enabled, uses a random offset without loudness filtering.
-        search_function (Union[Callable, str]): The search function for determining the random offset. The default is
-            ``SaliencyParams.search_uniform``. Another option is ``SaliencyParams.search_bias_early`` which gradually
-            searches earlier in the file as more attempts are made.
+        search_function (str): Which search function determines the random offset, given as a
+            registered name: ``"uniform"`` (the default) draws uniformly over the file, and
+            ``"bias_early"`` gradually searches earlier in the file as more attempts are made.
+            A dotted path to an importable function (``"mypkg.offsets.my_search"``) selects a
+            custom one, and a callable may be passed directly in Python. An unknown name raises
+            when the ``SaliencyParams`` is constructed.
     """
 
     enabled: bool = field(default=True)
     num_tries: int = 8
     loudness_cutoff: float = -40.0
 
-    # Note: Although Union[Callable, str] would be a better type annotation, it doesn't work well with argbind
-    search_function: str = "SaliencyParams.search_uniform"
+    # Annotated ``str`` rather than ``Union[Callable, str]`` because argbind binds
+    # this from YAML and does not handle the union well; a callable is still
+    # accepted at runtime and resolved by ``_resolve_search_function``.
+    search_function: str = "uniform"
 
     @staticmethod
     def search_uniform(
@@ -104,6 +110,67 @@ class SaliencyParams:
         upper_bound2 = min(upper_bound1, lower_bound + duration)
         upper_bound = upper_bound1 * (1 - alpha) + upper_bound2 * alpha
         return rng.uniform(lower_bound, upper_bound)
+
+    def __post_init__(self):
+        # Resolve eagerly so a bad name fails when the config is built, not deep
+        # inside a data worker several minutes into training.
+        _resolve_search_function(self.search_function)
+
+
+#: Search functions selectable by name in a config file.
+_SEARCH_FUNCTIONS = {
+    "uniform": SaliencyParams.search_uniform,
+    "bias_early": SaliencyParams.search_bias_early,
+    # Pre-1.0 spellings, kept so existing configs keep resolving.
+    "SaliencyParams.search_uniform": SaliencyParams.search_uniform,
+    "SaliencyParams.search_bias_early": SaliencyParams.search_bias_early,
+}
+
+
+def _resolve_search_function(spec) -> Callable:
+    """Resolve a saliency ``search_function`` to a callable.
+
+    Accepts a callable, a registered name (``"uniform"``, ``"bias_early"``), or
+    a dotted path to an importable function (``"mypkg.offsets.my_search"``).
+
+    Deliberately *not* ``eval``: ``SaliencyParams`` is bound from YAML, so an
+    ``eval`` here makes a config file arbitrary code execution. It also only ever
+    worked for the two built-ins, since it evaluated in this module's namespace.
+    """
+    if callable(spec):
+        return spec
+    if not isinstance(spec, str):
+        raise TypeError(
+            f"search_function must be a name or a callable, got {type(spec).__name__}."
+        )
+    if spec in _SEARCH_FUNCTIONS:
+        return _SEARCH_FUNCTIONS[spec]
+
+    known = ", ".join(repr(k) for k in ("uniform", "bias_early"))
+    if "." not in spec:
+        raise ValueError(
+            f"Unknown search_function {spec!r}. Valid names: {known}, or a dotted "
+            f"path to an importable function (e.g. 'mypkg.offsets.my_search')."
+        )
+
+    module_name, _, attribute = spec.rpartition(".")
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as exc:
+        raise ValueError(
+            f"Could not import module {module_name!r} for search_function {spec!r}. "
+            f"Valid names: {known}, or a dotted path to an importable function."
+        ) from exc
+    try:
+        function = getattr(module, attribute)
+    except AttributeError as exc:
+        raise ValueError(
+            f"Module {module_name!r} has no attribute {attribute!r} "
+            f"(from search_function {spec!r})."
+        ) from exc
+    if not callable(function):
+        raise ValueError(f"search_function {spec!r} resolved to a non-callable.")
+    return function
 
 
 # Fixed width (in Unicode code points) for filepath/source strings encoded into
@@ -1017,10 +1084,7 @@ class AudioTree:
             best_lufs = -np.inf
             current_try = 0
             num_tries = saliency_params.num_tries
-            if isinstance(saliency_params.search_function, str):
-                _search_function = eval(saliency_params.search_function)
-            else:
-                _search_function = saliency_params.search_function
+            _search_function = _resolve_search_function(saliency_params.search_function)
             while best_lufs <= saliency_params.loudness_cutoff:
                 search_function = partial(
                     _search_function,

@@ -650,3 +650,110 @@ def test_replace_lufs_windows_numpy_jax_agree():
     np.testing.assert_allclose(
         np.asarray(np_tree.lufs_windows), np.asarray(jax_tree.lufs_windows), atol=0.2
     )
+
+
+# =============================================================================
+# SaliencyParams.search_function resolution
+# =============================================================================
+
+
+def test_search_function_resolution():
+    """Names, legacy spellings, dotted paths and callables all resolve."""
+    from audiotree.core import SaliencyParams, _resolve_search_function
+
+    assert SaliencyParams().search_function == "uniform"
+    assert _resolve_search_function("uniform") is SaliencyParams.search_uniform
+    assert _resolve_search_function("bias_early") is SaliencyParams.search_bias_early
+    # Pre-1.0 spellings still work.
+    assert (
+        _resolve_search_function("SaliencyParams.search_uniform")
+        is SaliencyParams.search_uniform
+    )
+    # A callable passes through, and a dotted path is imported.
+    assert _resolve_search_function(np.mean) is np.mean
+    assert _resolve_search_function("numpy.mean") is np.mean
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "uniforn",  # typo
+        "no_such_module.f",
+        "numpy.no_such_attribute",
+        # The whole point: a config string is not evaluated as code.
+        "(lambda *a, **k: __import__('sys').exit(1))",
+    ],
+)
+def test_search_function_rejects_bad_specs(spec):
+    """An unknown search_function raises when the params object is built."""
+    from audiotree.core import SaliencyParams
+
+    with pytest.raises(ValueError):
+        SaliencyParams(search_function=spec)
+
+
+def _write_half_silent_wav(path, sample_rate=16000, seconds=4.0):
+    """A file whose first half is silent and second half is a loud tone."""
+    import soundfile
+
+    n = int(sample_rate * seconds)
+    t = np.arange(n) / sample_rate
+    audio = (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+    audio[: n // 2] = 0.0
+    soundfile.write(str(path), audio, sample_rate)
+    return path
+
+
+def test_salient_excerpt_finds_the_loud_half(tmp_path):
+    """The saliency search returns an excerpt above the cutoff when one exists."""
+    from audiotree.core import SaliencyParams
+
+    path = _write_half_silent_wav(tmp_path / "half.wav")
+    params = SaliencyParams(num_tries=32, loudness_cutoff=-40.0)
+    tree = AudioTree.salient_excerpt(
+        str(path),
+        rng=np.random.default_rng(0),
+        saliency_params=params,
+        duration=0.5,
+        sample_rate=16000,
+    )
+    assert float(tree.lufs[0]) > -40.0
+
+
+def test_salient_excerpt_terminates_on_fully_silent_audio(tmp_path):
+    """A file that can never pass the cutoff must stop after num_tries, not hang."""
+    import soundfile
+
+    from audiotree.core import SaliencyParams
+
+    path = tmp_path / "silent.wav"
+    soundfile.write(str(path), np.zeros(16000 * 2, dtype=np.float32), 16000)
+
+    params = SaliencyParams(num_tries=3, loudness_cutoff=-40.0)
+    tree = AudioTree.salient_excerpt(
+        str(path),
+        rng=np.random.default_rng(0),
+        saliency_params=params,
+        duration=0.5,
+        sample_rate=16000,
+    )
+    # Returns the best (still silent) excerpt rather than looping forever.
+    assert float(tree.lufs[0]) == -np.inf
+
+
+def test_salient_excerpt_accepts_bias_early_by_name(tmp_path):
+    """``search_function`` selects the searcher by registered name."""
+    from audiotree.core import SaliencyParams
+
+    path = _write_half_silent_wav(tmp_path / "half2.wav")
+    params = SaliencyParams(
+        num_tries=8, loudness_cutoff=-40.0, search_function="bias_early"
+    )
+    tree = AudioTree.salient_excerpt(
+        str(path),
+        rng=np.random.default_rng(1),
+        saliency_params=params,
+        duration=0.5,
+        sample_rate=16000,
+    )
+    assert tree.waveform.shape == (1, 1, 8000)
