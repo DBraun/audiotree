@@ -70,6 +70,74 @@ def _is_in_scope(
     return matched_value
 
 
+def _leaf_batch_size(leaf: "AudioTree") -> int:
+    """Leading (batch) axis length of an AudioTree leaf."""
+    for value in (leaf.waveform, leaf.codes, leaf.latents):
+        if value is not None:
+            return value.shape[0]
+    raise ValueError("Cannot apply `prob` to an AudioTree with no array fields.")
+
+
+def _select_field(mask, new_value, old_value, xp, field: str):
+    """Per-item choice between a transformed field value and the original.
+
+    ``mask`` is a boolean ``(B,)`` array; ``True`` keeps the transformed item.
+    A field that only one side populates cannot be mixed item-by-item, so it is
+    dropped — the alternative is a tree whose structure depends on a coin flip.
+    """
+    if new_value is None or old_value is None:
+        return None
+    if not hasattr(new_value, "shape") or not hasattr(old_value, "shape"):
+        # Non-array metadata (e.g. a list of strings) is not per-item indexable
+        # here; the transforms do not change it, so keep the original.
+        return old_value
+    if new_value.shape != old_value.shape:
+        raise ValueError(
+            f"`prob` < 1 cannot be applied to a transform that changes the shape "
+            f"of `{field}` ({old_value.shape} -> {new_value.shape}): whether an "
+            f"item is transformed is random, so the output shape would be too. "
+            f"Use prob=1.0 and apply the transform to a pre-selected subset."
+        )
+    broadcast = mask.reshape((mask.shape[0],) + (1,) * (new_value.ndim - 1))
+    return xp.where(broadcast, new_value, old_value)
+
+
+def _select_transformed(new_leaf, old_leaf, mask, xp):
+    """Combine a transformed AudioTree with its original, one batch item at a time.
+
+    Fields that one side leaves unpopulated are canonicalized to ``None`` (and
+    metadata keys to absent), so the result has one structure regardless of how
+    the mask fell — a tree whose treedef depends on the RNG cannot be batched,
+    scanned, or jitted.
+    """
+    if not isinstance(new_leaf, AudioTree) or not isinstance(old_leaf, AudioTree):
+        return old_leaf
+
+    updates = {
+        name: _select_field(
+            mask, getattr(new_leaf, name), getattr(old_leaf, name), xp, name
+        )
+        for name in (
+            "waveform",
+            "lufs",
+            "lufs_windows",
+            "pitch",
+            "velocity",
+            "note_duration",
+            "codes",
+            "latents",
+        )
+    }
+    updates["metadata"] = {
+        key: _select_field(
+            mask, new_leaf.metadata[key], value, xp, f"metadata[{key!r}]"
+        )
+        for key, value in old_leaf.metadata.items()
+        if key in new_leaf.metadata
+    }
+    return old_leaf.replace(**updates)
+
+
 def merge_pytree(tree1, tree2):
     """Order matters!"""
 
@@ -245,6 +313,10 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
 
         treedef = jax.tree.flatten(element, is_leaf=is_leaf)[1]
         length = treedef.num_leaves
+        # Reserve the `prob` key before deriving the per-leaf keys, so it can
+        # never collide with one of them (splitting `key` twice would hand the
+        # Bernoulli draw the same bits as a leaf's transform key).
+        key, prob_key = random.split(key)
         subkeys = random.split(key, length) if self.split_seed else [key] * length
         subkeys = jax.tree.unflatten(treedef, subkeys)
 
@@ -253,15 +325,22 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         new_tree = map_with_path(map_func, element, subkeys, config, is_leaf=is_leaf)
         new_tree = self._post_process(element, new_tree)
 
-        # Determine if we should apply the transform
-        key, subkey = random.split(key)
         if self.prob == 1:
             return new_tree
-        mask_new = random.bernoulli(subkey, p=self.prob)
-        selected = jax.tree.map(
-            (lambda x, y: jax.numpy.where(mask_new, x, y)), new_tree, element
-        )
-        return selected
+
+        # One Bernoulli draw per batch item, per leaf, so a batch is a mixture of
+        # transformed and untransformed items rather than all-or-nothing.
+        prob_keys = jax.tree.unflatten(treedef, random.split(prob_key, length))
+
+        def select(new_leaf, old_leaf, leaf_key):
+            if not isinstance(old_leaf, AudioTree):
+                return old_leaf
+            mask = random.bernoulli(
+                leaf_key, p=self.prob, shape=(_leaf_batch_size(old_leaf),)
+            )
+            return _select_transformed(new_leaf, old_leaf, mask, jax.numpy)
+
+        return jax.tree.map(select, new_tree, element, prob_keys, is_leaf=is_leaf)
 
     def _random_map_numpy(self, element: Any, rng: np.random.Generator) -> Any:
         """NumPy implementation of random_map."""
@@ -308,12 +387,22 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         new_tree = map_with_path(map_func, element, sub_rngs, config, is_leaf=is_leaf)
         new_tree = self._post_process(element, new_tree)
 
-        # Determine if we should apply the transform
         if self.prob == 1:
             return new_tree
-        if rng.random() < self.prob:
-            return new_tree
-        return element
+
+        def select(new_leaf, old_leaf):
+            if not isinstance(old_leaf, AudioTree):
+                return old_leaf
+            batch_size = _leaf_batch_size(old_leaf)
+            mask = rng.random(batch_size) < self.prob
+            if batch_size == 1:
+                # Per-item and per-batch coincide, so select wholesale. This is
+                # the grain data-loader case, and unlike the masked path it also
+                # works for transforms that change the waveform's length.
+                return new_leaf if bool(mask[0]) else old_leaf
+            return _select_transformed(new_leaf, old_leaf, mask, np)
+
+        return jax.tree.map(select, new_tree, element, is_leaf=is_leaf)
 
 
 class BaseMapTransform(BaseTransformMixIn, MapTransform):

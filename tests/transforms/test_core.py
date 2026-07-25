@@ -9,6 +9,7 @@ from jax import numpy as jnp
 import numpy as np
 import pytest
 
+import audiotree.transforms
 from audiotree import AudioTree
 from audiotree.transforms.base import BaseRandomTransform, BaseMapTransform
 from audiotree.transforms import (
@@ -637,6 +638,119 @@ def test_phase_transforms_keep_lufs():
         # keep_lufs=True: cached value carried through unchanged.
         kept = transform(keep_lufs=True).random_map(audio_tree, rng)
         np.testing.assert_array_equal(kept.lufs, original_loudness)
+
+
+# =============================================================================
+# prob < 1
+# =============================================================================
+
+# Every transform that goes through ``random_map`` and therefore honors ``prob``.
+_RANDOM_TRANSFORM_NAMES = [
+    "volume_change",
+    "volume_norm",
+    "invert_phase",
+    "swap_stereo",
+    "corrupt_phase",
+    "shift_phase",
+    "roll",
+]
+
+
+def _prob_test_tree(backend, batch_size):
+    """A tree shaped like one off the data loader: stereo, with lufs and metadata."""
+    sr = 16000
+    ramp = np.linspace(-0.4, 0.4, sr, dtype=np.float32)
+    waveform = np.tile(ramp[None, None, :], (batch_size, 2, 1))
+    if backend == "jax":
+        waveform = jnp.asarray(waveform)
+    filepaths = [f"f{i}.wav" for i in range(batch_size)]
+    return AudioTree.create(waveform, sr, filepaths=filepaths).replace_lufs()
+
+
+@pytest.mark.parametrize("name", _RANDOM_TRANSFORM_NAMES)
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+@pytest.mark.parametrize("batch_size", [1, 4])
+def test_prob_lt_one_runs(name, backend, batch_size):
+    """``prob < 1`` must work for every random transform, on both backends.
+
+    Regression test: masking used to require the transformed and original trees
+    to have identical treedefs, so any transform that nulls ``lufs`` (or adds a
+    metadata key) crashed on the JAX backend, and the string-encoded
+    ``metadata["filepath"]`` that ``from_file`` always sets crashed the rest.
+    """
+    lib = jax_transforms if backend == "jax" else audiotree.transforms
+    tree = _prob_test_tree(backend, batch_size)
+    seed = jax.random.key(0) if backend == "jax" else np.random.default_rng(0)
+
+    result = getattr(lib, name)(prob=0.5).random_map(tree, seed)
+
+    assert result.waveform.shape == tree.waveform.shape
+    assert not np.isnan(np.asarray(result.waveform)).any()
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_prob_is_drawn_per_batch_item(backend):
+    """``prob`` is one draw per item, not one coin flip for the whole batch.
+
+    A whole-batch draw yields batches that are entirely transformed or entirely
+    untransformed, which silently removes the augmentation diversity ``prob`` is
+    supposed to provide.
+    """
+    batch_size = 16
+    tree = _prob_test_tree(backend, batch_size)
+    lib = jax_transforms if backend == "jax" else audiotree.transforms
+
+    def flips(seed_value):
+        seed = (
+            jax.random.key(seed_value)
+            if backend == "jax"
+            else np.random.default_rng(seed_value)
+        )
+        out = lib.invert_phase(prob=0.5).random_map(tree, seed)
+        return np.array(
+            [
+                bool(
+                    np.all(np.asarray(out.waveform[i]) == -np.asarray(tree.waveform[i]))
+                )
+                for i in range(batch_size)
+            ]
+        )
+
+    # At least one batch is a genuine mixture rather than all-or-nothing.
+    assert any(0 < flips(s).sum() < batch_size for s in range(5))
+
+    # And the marginal per-item rate tracks `prob`.
+    total = sum(int(flips(s).sum()) for s in range(40))
+    np.testing.assert_allclose(total / (40 * batch_size), 0.5, atol=0.08)
+
+
+def test_prob_lt_one_keeps_one_structure(backend="jax"):
+    """The output treedef must not depend on how the coin fell.
+
+    A transform that nulls ``lufs`` produces a different structure than the
+    input; mixing them per item has to canonicalize, or the results cannot be
+    batched, scanned, or jitted together.
+    """
+    tree = _prob_test_tree("jax", 4)
+    treedefs = {
+        jax.tree.structure(
+            jax_transforms.shift_phase(prob=0.5).random_map(tree, jax.random.key(s))
+        )
+        for s in range(12)
+    }
+    assert len(treedefs) == 1
+
+
+def test_prob_lt_one_is_jittable():
+    """The masked path must survive `jax.jit` (no Python branch on the mask)."""
+    tree = _prob_test_tree("jax", 4)
+
+    @jax.jit
+    def run(t, key):
+        return jax_transforms.corrupt_phase(prob=0.5).random_map(t, key)
+
+    out = run(tree, jax.random.key(0))
+    assert out.waveform.shape == tree.waveform.shape
 
 
 # =============================================================================
