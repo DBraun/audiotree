@@ -10,6 +10,9 @@ repos:
       - id: end-of-file-fixer
       - id: mixed-line-ending
         args: [--fix=lf]
+        # .gitattributes mandates CRLF for Windows batch scripts, so normalizing
+        # them to LF here would make this hook and git fight on every run.
+        exclude: \.bat$
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict
