@@ -1295,3 +1295,20 @@ if __name__ == "__main__":
     test_filter_with_no_match()
     test_filter_with_all_match()
     print("All tests passed!")
+
+
+def test_audio_writer_refuses_to_clobber_an_existing_dataset():
+    """A second AudioWriter on a finished directory must raise.
+
+    Both writers truncate, so this previously overwrote part of the audio and
+    orphaned the rest, referenced by nothing.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        writer = AudioWriter(tmpdir)
+        writer.write(AudioTree.create(np.zeros((1, 1, 800), dtype=np.float32), 16000))
+        writer.close()
+
+        with pytest.raises(FileExistsError, match="already contains a dataset"):
+            AudioWriter(tmpdir)
+
+        AudioWriter(tmpdir, exist_ok=True)  # opt in

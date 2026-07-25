@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import soundfile
 
+from ._fs import refuse_to_clobber
 from .core import AudioTree
 
 
@@ -46,6 +47,10 @@ class AudioWriter:
         close_pbar: Whether to close the progress bar on exit (default False)
         show_progress: Create an internal tqdm progress bar (requires tqdm installed)
         progress_desc: Description for internal progress bar (default "Writing audio")
+        exist_ok: Whether to write into a directory that already holds a manifest.
+            Defaults to ``False``, which raises ``FileExistsError`` rather than
+            overwriting an existing dataset (and catches two writers aimed at one
+            directory). Pass ``True`` to deliberately overwrite or append.
 
     Example:
         Write a handful of (silent, one-second mono) ``AudioTree`` objects to a
@@ -63,15 +68,24 @@ class AudioWriter:
         >>> sorted(p.name for p in Path(out_dir).glob("*"))
         ['audio_0000.wav', 'audio_0001.wav', 'audio_0002.wav', 'manifest.npz']
 
+        Writing again to a directory that already holds a manifest raises, so a
+        finished dataset is never silently overwritten:
+
+        >>> AudioWriter(out_dir)
+        Traceback (most recent call last):
+            ...
+        FileExistsError: ... already contains a dataset (manifest.npz). ...
+
         Pass an external progress bar with ``pbar=...``, or have the writer
-        create its own with ``show_progress=True``:
+        create its own with ``show_progress=True``. ``exist_ok=True`` opts in to
+        reusing the directory:
 
         >>> from tqdm import tqdm  # doctest: +SKIP
         >>> pbar = tqdm(total=len(audio_trees), desc="Processing")  # doctest: +SKIP
-        >>> with AudioWriter(out_dir, pbar=pbar) as writer:  # doctest: +SKIP
+        >>> with AudioWriter(out_dir, pbar=pbar, exist_ok=True) as writer:  # doctest: +SKIP
         ...     for audio_tree in audio_trees:
         ...         _ = writer.write(audio_tree)
-        >>> with AudioWriter(out_dir, show_progress=True) as writer:
+        >>> with AudioWriter(out_dir, show_progress=True, exist_ok=True) as writer:
         ...     for audio_tree in audio_trees:
         ...         _ = writer.write(audio_tree)
     """
@@ -88,9 +102,14 @@ class AudioWriter:
         close_pbar: bool = False,
         show_progress: bool = False,
         progress_desc: Optional[str] = None,
+        *,
+        exist_ok: bool = False,
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        if not exist_ok:
+            refuse_to_clobber(self.output_dir, ("manifest.npz", "manifest.json"))
+        self.exist_ok = exist_ok
         self.pattern = pattern
         # Inferred from the first written tree; every later write must match it.
         self.sample_rate = None

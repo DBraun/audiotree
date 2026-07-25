@@ -537,3 +537,43 @@ def test_write_accepts_identical_structure():
         source = TreeDataSource(tmpdir)
         assert len(source) == 4
         np.testing.assert_array_equal(source[2]["a"].ravel(), [9.0, 9.0, 9.0])
+
+
+def test_manifest_is_readable_before_close():
+    """A crash mid-render must leave a readable prefix, not an orphaned directory.
+
+    manifest.json used to be written only at the bottom of close(), so a
+    multi-hour pre-render killed at 99% produced valid .bin files that
+    TreeDataSource refused to open at all.
+    """
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        writer = TreeWriter(tmpdir, expected_samples=100)
+        writer.open()
+        for i in range(5):
+            writer.write({"x": np.full((10, 2), float(i), dtype=np.float32)})
+        writer.flush()
+
+        # Simulate a reader arriving while the writer is still alive.
+        manifest = json.loads((Path(tmpdir) / "manifest.json").read_text())
+        assert manifest["num_samples"] == 50
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 50
+        np.testing.assert_array_equal(source[45]["x"].ravel(), [4.0, 4.0])
+
+        writer.close()
+        assert len(TreeDataSource(tmpdir)) == 50
+
+
+def test_writer_refuses_to_clobber_an_existing_dataset():
+    """Pointing a writer at a populated directory must raise, not destroy it."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=2) as writer:
+            writer.write({"x": np.ones((2, 3), dtype=np.float32)})
+
+        with pytest.raises(FileExistsError, match="already contains a dataset"):
+            TreeWriter(tmpdir, expected_samples=2).open()
+
+        # Opting in is allowed.
+        TreeWriter(tmpdir, expected_samples=2, exist_ok=True).open().close()

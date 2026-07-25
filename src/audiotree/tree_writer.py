@@ -12,6 +12,7 @@ import jax.tree_util
 import numpy as np
 
 from audiotree._bagz import require_bagz
+from audiotree._fs import refuse_to_clobber, write_json_atomic
 from audiotree.core import AudioTree
 
 # AudioTree pytree field names in declaration order (matching Flax flatten order).
@@ -214,10 +215,13 @@ class TreeWriter:
         metadata: Optional[Dict[str, Any]] = None,
         pbar=None,
         close_pbar: bool = False,
+        *,
+        exist_ok: bool = False,
     ):
         self.output_dir = Path(output_dir)
         self.expected_samples = expected_samples
         self.metadata = metadata or {}
+        self.exist_ok = exist_ok
         self._pbar = pbar
         self._close_pbar = close_pbar
 
@@ -240,6 +244,8 @@ class TreeWriter:
         if self._is_open:
             raise RuntimeError("Writer is already open")
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        if not self.exist_ok:
+            refuse_to_clobber(self.output_dir, ("manifest.json", "*.bin", "*.bagz"))
         self._is_open = True
         return self
 
@@ -317,6 +323,11 @@ class TreeWriter:
                 filename = f"{name}.bagz"
                 self._string_leaf_info[name] = {"file": filename}
                 self._bagz_writers[name] = bagz.Writer(str(self.output_dir / filename))
+
+        # Publish the manifest as soon as the schema is known, so a pre-render
+        # killed partway through leaves a readable prefix rather than a
+        # directory of orphaned .bin files. `flush()` keeps it current.
+        self._write_manifest()
 
     def write(self, pytree) -> int:
         """Write a batch of samples to the memmap and bagz files.
@@ -410,10 +421,31 @@ class TreeWriter:
             self._pbar.update(batch_size)
         return batch_size
 
+    def _write_manifest(self):
+        """Write ``manifest.json`` atomically (temp file + rename).
+
+        Called on schema init, from :meth:`flush`, and from :meth:`close`, so the
+        on-disk manifest always describes a prefix that is actually readable and
+        a reader never observes a half-written file.
+        """
+        manifest = {
+            "version": "2.0",
+            "num_samples": self._current_index,
+            "expected_samples": self.expected_samples,
+            "created_at": datetime.now().isoformat(),
+            "structure": self._structure,
+            "leaves": self._leaf_info,
+            "string_leaves": self._string_leaf_info,
+            "metadata": self.metadata,
+        }
+        write_json_atomic(self.output_dir / "manifest.json", manifest)
+
     def flush(self):
-        """Flush all memmap files to disk."""
+        """Flush all memmap files to disk and refresh the manifest."""
         for mm in self._memmaps:
             mm.flush()
+        if self._structure is not None:
+            self._write_manifest()
 
     def close(self):
         """Close all memmap and bagz files and write manifest.
@@ -454,20 +486,9 @@ class TreeWriter:
             writer.close()
         self._bagz_writers.clear()
 
-        # Write manifest
-        manifest = {
-            "version": "2.0",
-            "num_samples": self._current_index,
-            "expected_samples": self.expected_samples,
-            "created_at": datetime.now().isoformat(),
-            "structure": self._structure,
-            "leaves": self._leaf_info,
-            "string_leaves": self._string_leaf_info,
-            "metadata": self.metadata,
-        }
-
-        with open(self.output_dir / "manifest.json", "w") as f:
-            json.dump(manifest, f, indent=2)
+        # Final manifest, now reflecting the truncated sample count.
+        if self._structure is not None:
+            self._write_manifest()
 
         if self._close_pbar and self._pbar is not None:
             self._pbar.close()
