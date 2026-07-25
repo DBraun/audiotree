@@ -25,6 +25,7 @@ def test_main_with_config():
         capture_output=True,
         text=True,
         cwd=str(cwd),
+        timeout=300,
     )
 
     assert result.returncode == 0, f"Script failed with stderr: {result.stderr}"
@@ -58,6 +59,7 @@ def test_main_with_custom_yaml():
             capture_output=True,
             text=True,
             cwd=str(cwd),
+            timeout=300,
         )
 
         assert result.returncode == 0, f"Script failed with stderr: {result.stderr}"

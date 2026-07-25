@@ -17,6 +17,7 @@ def test_main2_with_config():
         ],
         capture_output=True,
         text=True,
+        timeout=300,
     )
 
     assert result.returncode == 0, f"Script failed with stderr: {result.stderr}"
@@ -36,6 +37,7 @@ def test_main2_different_train_val_configs():
         ],
         capture_output=True,
         text=True,
+        timeout=300,
     )
 
     assert result.returncode == 0, f"Script failed with stderr: {result.stderr}"
@@ -143,6 +145,7 @@ print("SUCCESS")
         ],
         capture_output=True,
         text=True,
+        timeout=300,
     )
 
     assert result.returncode == 0, f"Test failed with stderr: {result.stderr}"

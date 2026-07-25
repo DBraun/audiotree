@@ -46,6 +46,7 @@ with argbind.scope(args):
                 [sys.executable, script_path, "--trim.length=4.0"],
                 capture_output=True,
                 text=True,
+                timeout=300,
             )
 
             assert result.returncode == 0, f"Script failed: {result.stderr}"
@@ -95,6 +96,7 @@ with argbind.scope(args):
                 ],
                 capture_output=True,
                 text=True,
+                timeout=300,
             )
 
             assert result.returncode == 0, f"Script failed: {result.stderr}"
@@ -152,6 +154,7 @@ with argbind.scope(args):
                 ],
                 capture_output=True,
                 text=True,
+                timeout=300,
             )
 
             assert result.returncode == 0, f"Script failed: {result.stderr}"
@@ -203,6 +206,7 @@ with argbind.scope(args):
                 [sys.executable, script_path, f"--args.load={config_path}"],
                 capture_output=True,
                 text=True,
+                timeout=300,
             )
 
             assert result.returncode == 0, f"Script failed: {result.stderr}"
@@ -258,6 +262,7 @@ with argbind.scope(args):
                 [sys.executable, script_path, f"--args.load={config_path}"],
                 capture_output=True,
                 text=True,
+                timeout=300,
             )
 
             assert result.returncode == 0, f"Script failed: {result.stderr}"
@@ -326,6 +331,7 @@ print("SUCCESS")
                 [sys.executable, script_path, f"--args.load={config_path}"],
                 capture_output=True,
                 text=True,
+                timeout=300,
             )
 
             assert result.returncode == 0, f"Script failed: {result.stderr}"

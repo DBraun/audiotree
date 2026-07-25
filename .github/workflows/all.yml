@@ -4,15 +4,16 @@ on:
   push:
     branches:
       - main
+      - dev
+  # No branch filter: every pull request runs CI, whatever it targets.
   pull_request:
-    branches:
-      - main
   release:
     types: [published]
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -41,6 +42,7 @@ jobs:
     # internals that have moved across releases, so pin the floor and run the
     # full suite to keep the minimum supported version honest.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -64,6 +66,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -79,6 +82,7 @@ jobs:
   build_docs:
     runs-on: ubuntu-latest
     needs: test
+    timeout-minutes: 30
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -111,6 +115,7 @@ jobs:
     needs: build_docs
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       pages: write
       id-token: write
@@ -125,6 +130,7 @@ jobs:
   publish:
     needs: [test, test_grain_floor, lint, build_docs]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'release' && github.event.action == 'published'
     permissions:
       id-token: write
