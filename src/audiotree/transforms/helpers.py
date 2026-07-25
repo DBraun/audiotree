@@ -10,6 +10,7 @@ import librosax
 import numpy as np
 
 from audiotree import AudioTree
+from audiotree.loudness import safe_gain_db
 
 
 # =============================================================================
@@ -30,7 +31,10 @@ def _shift_lufs_windows(lufs_windows, gain_db):
     window equally), or return ``None`` if ``lufs_windows`` is not populated.
 
     Works for both NumPy and JAX arrays: ``gain_db`` is ``(batch,)`` and
-    broadcasts over the window axis.
+    broadcasts over the window axis. ``gain_db`` must be finite — callers that
+    derive it from a measured LUFS go through :func:`audiotree.loudness.safe_gain_db`,
+    which keeps a silent item's gain at ``0.0`` so its ``-inf`` windows stay
+    ``-inf`` instead of becoming ``NaN``.
     """
     if lufs_windows is None:
         return None
@@ -50,12 +54,16 @@ def _volume_norm_jax(
     B = waveform.shape[0]
 
     target_db = random.uniform(key, shape=(B,), minval=min_db, maxval=max_db)
-    gain_db = target_db - audio_tree.lufs
+    # Silent items (``-inf`` LUFS) get a 0 dB gain and keep their ``-inf``, rather
+    # than being scaled by ``+inf`` into an all-NaN waveform.
+    gain_db = safe_gain_db(audio_tree.lufs, target_db, xp=jnp)
 
     waveform = waveform * _db2linear_jax(gain_db)[:, None, None]
     lufs_windows = _shift_lufs_windows(audio_tree.lufs_windows, gain_db)
     return audio_tree.replace(
-        waveform=waveform, lufs=target_db, lufs_windows=lufs_windows
+        waveform=waveform,
+        lufs=audio_tree.lufs + gain_db,
+        lufs_windows=lufs_windows,
     )
 
 
@@ -67,12 +75,15 @@ def _volume_norm_np(
     B = waveform.shape[0]
 
     target_db = rng.uniform(min_db, max_db, size=(B,)).astype(np.float32)
-    gain_db = target_db - audio_tree.lufs
+    # See ``_volume_norm_jax``: keep silence silent instead of producing NaN.
+    gain_db = safe_gain_db(audio_tree.lufs, target_db, xp=np)
 
     waveform = waveform * _db2linear_np(gain_db)[:, None, None]
     lufs_windows = _shift_lufs_windows(audio_tree.lufs_windows, gain_db)
     return audio_tree.replace(
-        waveform=waveform, lufs=target_db, lufs_windows=lufs_windows
+        waveform=waveform,
+        lufs=(audio_tree.lufs + gain_db).astype(np.float32),
+        lufs_windows=lufs_windows,
     )
 
 

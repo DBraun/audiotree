@@ -32,6 +32,7 @@ from .loudness import (
     _numpy_windowed_lufs,
     _window_samples,
     _windowed_num_windows,
+    safe_gain_db,
 )
 from .resample import resample
 
@@ -411,6 +412,7 @@ class AudioTree:
         self,
         target_lufs: float,
         *,
+        max_gain_db: Optional[float] = None,
         backend: Optional[Literal["cpu", "gpu", "tpu"]] = None,
     ) -> Self:
         """Normalize audio to a target LUFS level.
@@ -420,8 +422,18 @@ class AudioTree:
         ``waveform``, ``lufs``, and ``lufs_windows`` fields (a constant gain shifts
         every window's LUFS by the same amount).
 
+        Items whose loudness is not finite are **passed through unscaled**. Digital
+        silence, and any excerpt below the BS.1770 absolute gate, measure ``-inf``
+        LUFS, for which no gain reaches the target; scaling by the implied ``+inf``
+        would produce an all-``NaN`` waveform. Their ``lufs`` stays ``-inf``, so a
+        silent item is still identifiable afterwards.
+
         Args:
             target_lufs: Target loudness in LUFS (e.g., -18.0 for broadcast standard).
+            max_gain_db: Optional ceiling on the applied gain, so a very quiet (but
+                still measurable) item is not amplified without bound. ``None`` (the
+                default) applies whatever gain the target implies; a capped item
+                lands at ``lufs + max_gain_db`` rather than at ``target_lufs``.
             backend: XLA backend for computing the loudness when it is not already
                 set, forwarded to :meth:`replace_lufs` (see there). Ignored when
                 ``lufs`` is already populated.
@@ -435,6 +447,13 @@ class AudioTree:
             >>> normalized = tree.normalize_lufs(-18.0)
             >>> float(normalized.lufs[0])  # now at the target LUFS
             -18.0
+
+            Silence is left alone instead of becoming ``NaN``:
+
+            >>> silent = AudioTree.create(jnp.zeros((1, 1, 44100)), 44100)
+            >>> out = silent.normalize_lufs(-18.0)
+            >>> bool(jnp.all(out.waveform == 0.0)), float(out.lufs[0])
+            (True, -inf)
         """
         # Ensure loudness is computed
         if self.lufs is None:
@@ -443,7 +462,7 @@ class AudioTree:
             tree = self
 
         numpy = np if isinstance(self.waveform, np.ndarray) else jnp
-        gain_db = target_lufs - tree.lufs  # per-item dB shift
+        gain_db = safe_gain_db(tree.lufs, target_lufs, max_gain_db, xp=numpy)
         linear_gain = numpy.power(10.0, gain_db / 20.0)
         # Cast to audio dtype to avoid float64 promotion
         linear_gain = linear_gain.astype(tree.waveform.dtype)
@@ -453,9 +472,10 @@ class AudioTree:
         scaled_waveform = tree.waveform * linear_gain
 
         # A constant gain shifts every window's LUFS by the same dB as the
-        # integrated value, so ``lufs`` goes to the target and ``lufs_windows``
-        # shifts by ``gain_db`` (kept aligned rather than left stale).
-        target_loudness = numpy.full(tree.lufs.shape, target_lufs, dtype=numpy.float32)
+        # integrated value, so both move by ``gain_db`` (kept aligned rather than
+        # left stale). Adding the gain rather than assigning ``target_lufs`` is
+        # what keeps a skipped (non-finite) or capped item honest.
+        new_lufs = (tree.lufs + gain_db).astype(numpy.float32)
         shifted_windows = None
         if tree.lufs_windows is not None:
             shifted_windows = (tree.lufs_windows + gain_db[..., None]).astype(
@@ -463,7 +483,7 @@ class AudioTree:
             )
         return tree.replace(
             waveform=scaled_waveform,
-            lufs=target_loudness,
+            lufs=new_lufs,
             lufs_windows=shifted_windows,
         )
 

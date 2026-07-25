@@ -592,6 +592,52 @@ def test_normalize_lufs_shifts_windows():
     )
 
 
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_normalize_lufs_silence_is_not_nan(backend):
+    """Silence has no gain to a target; it is passed through, not turned into NaN."""
+    import jax.numpy as jnp
+
+    sr = 44100
+    silence = np.zeros((1, 1, sr), dtype=np.float32)
+    if backend == "jax":
+        silence = jnp.asarray(silence)
+    tree = AudioTree.create(silence, sr).replace_lufs()
+    assert float(tree.lufs[0]) == -np.inf  # below the BS.1770 absolute gate
+
+    out = tree.normalize_lufs(-18.0)
+    assert not np.isnan(np.asarray(out.waveform)).any()
+    assert np.all(np.asarray(out.waveform) == 0.0)  # left untouched
+    assert float(out.lufs[0]) == -np.inf  # still identifiable as silent
+    assert not np.isnan(np.asarray(out.lufs_windows)).any()
+
+
+def test_normalize_lufs_mixed_batch_only_skips_the_silent_item():
+    """A silent item must not poison the audible items batched alongside it."""
+    sr = 44100
+    waveform = np.stack([_tone(sr, 1.0)[None, :], np.zeros((1, sr), dtype=np.float32)])
+    tree = AudioTree.create(waveform, sr).replace_lufs()
+
+    out = tree.normalize_lufs(-18.0)
+    assert not np.isnan(np.asarray(out.waveform)).any()
+    np.testing.assert_allclose(float(out.lufs[0]), -18.0, atol=1e-4)
+    assert float(out.lufs[1]) == -np.inf
+    assert np.all(np.asarray(out.waveform[1]) == 0.0)
+
+
+def test_normalize_lufs_max_gain_db_caps_amplification():
+    """``max_gain_db`` bounds how far a quiet item is amplified."""
+    sr = 44100
+    tree = AudioTree.create(_tone(sr, 1.0, amplitude=1e-3), sr).replace_lufs()
+    before = float(tree.lufs[0])
+    assert np.isfinite(before) and before < -18.0  # quiet, but measurable
+
+    uncapped = tree.normalize_lufs(-18.0)
+    np.testing.assert_allclose(float(uncapped.lufs[0]), -18.0, atol=1e-4)
+
+    capped = tree.normalize_lufs(-18.0, max_gain_db=6.0)
+    np.testing.assert_allclose(float(capped.lufs[0]), before + 6.0, atol=1e-4)
+
+
 def test_replace_lufs_windows_numpy_jax_agree():
     """NumPy and JAX backends produce close (not bit-identical) windowed LUFS."""
     import jax.numpy as jnp

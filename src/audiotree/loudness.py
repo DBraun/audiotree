@@ -20,6 +20,36 @@ _CHANNEL_GAINS = (1.0, 1.0, 1.0, 1.41, 1.41)
 _ABSOLUTE_OFFSET = -0.691
 
 
+def safe_gain_db(lufs, target_lufs, max_gain_db=None, *, xp=np):
+    """Per-item dB gain that moves ``lufs`` to ``target_lufs``, guarding silence.
+
+    An item whose measured loudness is not finite — digital silence, or anything
+    below the BS.1770 absolute gate, both of which read ``-inf`` — has no defined
+    gain to a target: ``target - (-inf)`` is ``+inf``, and ``0 * inf`` is ``NaN``.
+    Such items get a gain of ``0.0`` (left untouched) rather than being turned
+    into an all-``NaN`` waveform.
+
+    The resulting loudness is always ``lufs + gain_db``: ``target_lufs`` for a
+    normally-measured item, the (unchanged) non-finite value for a silent one,
+    and ``lufs + max_gain_db`` when the gain is capped.
+
+    Args:
+        lufs: Measured integrated loudness, shaped ``(*batch,)``.
+        target_lufs: Target loudness in LUFS — a scalar or a ``(*batch,)`` array.
+        max_gain_db: Optional ceiling on the applied gain, so a very quiet (but
+            still finite) item is not amplified without bound. ``None`` (the
+            default) applies whatever gain the target implies.
+        xp: The array module to compute with — :mod:`numpy` or ``jax.numpy``.
+
+    Returns:
+        The ``(*batch,)`` gain in dB, finite for every item.
+    """
+    gain_db = xp.where(xp.isfinite(lufs), target_lufs - lufs, 0.0)
+    if max_gain_db is not None:
+        gain_db = xp.minimum(gain_db, max_gain_db)
+    return gain_db
+
+
 def _window_samples(window_duration_sec: float, sample_rate: int) -> int:
     """Number of samples spanned by a loudness window (or hop) of the given duration.
 

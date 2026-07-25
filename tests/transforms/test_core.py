@@ -525,6 +525,26 @@ def test_peak_norm_silence():
     assert np.all(result.waveform == 0)
 
 
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_volume_norm_silence(backend):
+    """volume_norm leaves silence alone instead of scaling it by +inf into NaN."""
+    sr = 44100
+    silence = np.zeros((2, 1, sr), dtype=np.float32)
+    lib = volume_norm
+    if backend == "jax":
+        silence = jnp.asarray(silence)
+        lib = jax_transforms.volume_norm
+    audio_tree = AudioTree.create(silence, sr).replace_lufs()
+    assert np.all(np.asarray(audio_tree.lufs) == -np.inf)
+
+    seed = jax.random.key(0) if backend == "jax" else np.random.default_rng(0)
+    result = lib(min_db=-20, max_db=-16).random_map(audio_tree, seed)
+
+    assert not np.isnan(np.asarray(result.waveform)).any()
+    assert np.all(np.asarray(result.waveform) == 0.0)
+    assert np.all(np.asarray(result.lufs) == -np.inf)
+
+
 def test_resample_transform():
     """The resample transform changes the sample rate via AudioTree.resample."""
     audio_tree = AudioTree(np.zeros((1, 1, 44_100), dtype=np.float32), 44_100)
