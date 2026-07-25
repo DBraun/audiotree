@@ -223,6 +223,7 @@ class TreeDataSource(RandomAccessDataSource):
     def __init__(
         self,
         directory: Union[str, Path],
+        *,
         exclude_prefixes: Optional[List[str]] = None,
         load_into_memory: bool = False,
     ):

@@ -212,10 +212,10 @@ class TreeWriter:
         self,
         output_dir: Union[str, Path],
         expected_samples: int,
+        *,
         metadata: Optional[Dict[str, Any]] = None,
         pbar=None,
         close_pbar: bool = False,
-        *,
         exist_ok: bool = False,
     ):
         self.output_dir = Path(output_dir)

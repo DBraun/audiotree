@@ -10,7 +10,6 @@ from audiotree import AudioTree
 from audiotree.core import SaliencyParams
 from audiotree.sources import create_balanced_audio_dataset
 from audiotree.sources.core import _load_audio_with_saliency
-from audiotree.transforms import Batch
 
 # Paths to test audio files
 TEST_AUDIO_MONO = (
@@ -165,12 +164,12 @@ def test_create_balanced_audio_dataset_with_saliency():
             assert isinstance(item, AudioTree)
             assert item.waveform.shape == (1, 1, sample_rate)
 
-        # Use grain.DataLoader with Batch transform
+        # Batch with the supported path: AudioTree.batch as grain's batch_fn.
         batch_size = 4
-        dataloader = grain.DataLoader(
-            data_source=items,
-            sampler=grain.samplers.SequentialSampler(len(items)),
-            operations=[Batch(batch_size=batch_size)],
+        dataloader = (
+            grain.MapDataset.source(items)
+            .to_iter_dataset()
+            .batch(batch_size, batch_fn=AudioTree.batch)
         )
 
         batch_count = 0

@@ -151,6 +151,7 @@ def _load_audio_with_saliency(
 def create_audio_dataset(
     sources: List[str] | str | None = None,
     filepaths: List[str] | None = None,
+    *,
     shuffle: bool = True,
     repeat: bool = False,
     shuffle_seed: int = 0,
@@ -303,6 +304,7 @@ def create_balanced_audio_dataset(
     sources: Mapping[str, List[str]] | None = None,
     weights: Optional[Mapping[str, float]] = None,
     datasets: Optional[Mapping[str, grain.MapDataset]] = None,
+    *,
     shuffle: bool = True,
     repeat: bool = True,
     shuffle_seed: int = 0,

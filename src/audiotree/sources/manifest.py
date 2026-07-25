@@ -85,6 +85,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
     def __init__(
         self,
         manifest_path: Union[str, Path],
+        *,
         audio_dir: Optional[Union[str, Path]] = None,
         num_records: Optional[int] = None,
         sample_rate: Optional[int] = None,

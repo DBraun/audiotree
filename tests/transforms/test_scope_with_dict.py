@@ -1,6 +1,7 @@
 """Test scope functionality with Dict[str, AudioTree] inputs."""
 
 import numpy as np
+import pytest
 
 from audiotree import AudioTree
 from audiotree.transforms.functional import (
@@ -359,3 +360,62 @@ class TestCommonTrainingPipelinePattern:
 
         # Verify reference was not transformed
         assert np.array_equal(result["reference"].lufs, original_ref_loudness)
+
+
+# === scope spellings ===
+
+
+def _scoped_pair(scope):
+    """Apply +6 dB under `scope` to a {dry, wet} element; report what changed."""
+    element = {
+        "dry": AudioTree(np.ones((1, 1, 4), dtype=np.float32), 16000),
+        "wet": AudioTree(np.ones((1, 1, 4), dtype=np.float32), 16000),
+    }
+    out = volume_change(min_db=6, max_db=6, scope=scope).random_map(
+        element, np.random.default_rng(0)
+    )
+    return {k: not np.allclose(out[k].waveform, 1.0) for k in ("dry", "wet")}
+
+
+def test_scope_list_form_selects_one_leaf():
+    """The list form names the subtrees to transform."""
+    assert _scoped_pair(["wet"]) == {"dry": False, "wet": True}
+
+
+def test_scope_dict_sentinel_form_still_works():
+    """The nested-dict form with the 'scope' sentinel is unchanged."""
+    assert _scoped_pair({"wet": {"scope": True}}) == {"dry": False, "wet": True}
+
+
+def test_scope_bare_bool_shorthand_raises():
+    """`scope={'wet': True}` used to silently transform *everything*.
+
+    A scope entry is matched one level above where it sits, so a bool directly
+    under a top-level key has an empty match prefix and selects every leaf --
+    in a dry/wet pipeline that silently augments the target signal.
+    """
+    with pytest.raises(ValueError, match="selects every leaf"):
+        _scoped_pair({"wet": True})
+
+
+def test_scope_list_form_nested_path():
+    """A dotted path (or tuple) selects a nested subtree."""
+    element = {
+        "d": {
+            "e": AudioTree(np.ones((1, 1, 4), dtype=np.float32), 16000),
+            "f": AudioTree(np.ones((1, 1, 4), dtype=np.float32), 16000),
+        }
+    }
+    for scope in (["d.e"], [("d", "e")]):
+        out = volume_change(min_db=6, max_db=6, scope=scope).random_map(
+            element, np.random.default_rng(0)
+        )
+        changed = {k: not np.allclose(out["d"][k].waveform, 1.0) for k in ("e", "f")}
+        assert changed == {"e": True, "f": False}, scope
+
+
+def test_scope_rejects_bad_types():
+    with pytest.raises(TypeError, match="scope must be a list of paths"):
+        volume_change(scope="wet")
+    with pytest.raises(TypeError, match="scope path must be a string"):
+        volume_change(scope=[123])

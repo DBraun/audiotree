@@ -95,6 +95,7 @@ class AudioWriter:
     def __init__(
         self,
         output_dir: Union[str, Path] = ".",
+        *,
         pattern: str = "audio_{index:04d}.wav",
         include_timestamp: bool = False,
         compress_manifest: bool = True,
@@ -104,7 +105,6 @@ class AudioWriter:
         close_pbar: bool = False,
         show_progress: bool = False,
         progress_desc: Optional[str] = None,
-        *,
         exist_ok: bool = False,
     ):
         self.output_dir = Path(output_dir)

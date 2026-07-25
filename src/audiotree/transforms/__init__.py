@@ -59,7 +59,6 @@ from .functional import choose
 from .functional import trim
 
 # Batch is special - it's a grain BatchOperation, not a regular transform
-from .core import Batch
 
 __all__ = [
     "AudioCodec",
@@ -80,5 +79,4 @@ __all__ = [
     "encode_with_codec",
     "encode_latents",
     "trim",
-    "Batch",
 ]

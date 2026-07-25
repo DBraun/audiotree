@@ -235,8 +235,7 @@ class TestCreateBalancedAudioDataset:
             )
 
     def test_source_property_batched(self):
-        """Test that source property works correctly after batching with Batch transform."""
-        from audiotree.transforms import Batch
+        """The source property survives collation through AudioTree.batch."""
 
         with tempfile.TemporaryDirectory() as tmpdir:
             group1_dir = _create_test_audio_files(tmpdir, "music", 5)
@@ -249,10 +248,8 @@ class TestCreateBalancedAudioDataset:
                 duration=0.5,
             ).slice(slice(0, 20))
 
-            # Use AudioTree's Batch transform (concatenates properly)
-            batch_transform = Batch(batch_size=4)
             items = [ds[i] for i in range(4)]
-            batch = batch_transform._default_batch_fn(items)
+            batch = AudioTree.batch(items)
 
             # Check source property
             sources = batch.source

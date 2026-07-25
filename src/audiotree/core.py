@@ -236,6 +236,7 @@ class AudioTree:
         cls,
         waveform: ArrayLike | None,
         sample_rate: int,
+        *,
         lufs: ArrayLike | None = None,
         lufs_windows: ArrayLike | None = None,
         pitch: ArrayLike | None = None,
@@ -712,6 +713,7 @@ class AudioTree:
     def from_file(
         cls,
         audio_path: Union[str, Path],
+        *,
         sample_rate: int | None = None,
         offset: float = 0.0,
         duration: float | None = None,
@@ -853,6 +855,7 @@ class AudioTree:
     def from_manifest(
         cls,
         manifest_path: Union[str, Path],
+        *,
         audio_dir: Optional[Union[str, Path]] = None,
         filter_fn: Optional[Callable[[Any], bool]] = None,
     ) -> Self:
@@ -1177,6 +1180,7 @@ class AudioTree:
     def write(
         self,
         filepath: Union[str, Path],
+        *,
         subtype: str | None = None,
         format: str | None = None,
         endian: str | None = None,
@@ -1224,6 +1228,7 @@ class AudioTree:
     def resample(
         self,
         sample_rate: int,
+        *,
         zeros: int = 24,
         rolloff: float = 0.945,
         output_length: Optional[int] = None,
@@ -1420,7 +1425,29 @@ class AudioTree:
         )
         return flattened_audio_tree
 
-    def filter(self, filter_fn: Callable) -> Self:
+    def filter(self, predicate: Callable[[Self], bool]) -> Self:
+        """Keep only the batch items for which ``predicate`` is true.
+
+        The batch is split into one tree per item, ``predicate`` is called on
+        each, and the survivors are concatenated back into a single tree.
+
+        Args:
+            predicate: Called with a batch-of-1 ``AudioTree``; return ``True`` to
+                keep that item.
+
+        Returns:
+            AudioTree: A tree holding the kept items. When nothing is kept, the
+            result has ``batch_size == 0`` (every array field is empty along the
+            batch axis) rather than being ``None``.
+
+        Example:
+            >>> waveform = jnp.stack([jnp.zeros((1, 8)), jnp.ones((1, 8))])
+            >>> tree = AudioTree.create(waveform, 16000)
+            >>> loud = tree.filter(lambda item: bool(item.waveform.max() > 0.5))
+            >>> loud.batch_size
+            1
+        """
+        filter_fn = predicate
         B = self.waveform.shape[0]
         audio_trees = self.split(B)
         audio_trees = list(filter(filter_fn, audio_trees))

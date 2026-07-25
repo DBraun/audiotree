@@ -47,6 +47,72 @@ def _get_config_val(
     return matched_value
 
 
+# In the nested-dict scope form, this key marks "select the path I sit under".
+# ``_is_in_scope`` compares ``config_path[:-1]``, so a scope entry has to sit one
+# level deeper than the leaf it selects; this is the key that fills that level.
+_SCOPE_SENTINEL = "scope"
+
+
+def _as_path(entry) -> tuple:
+    """Normalize one entry of the list scope form to a tuple of keys."""
+    if isinstance(entry, str):
+        return tuple(part for part in entry.split(".") if part)
+    if isinstance(entry, (list, tuple)):
+        return tuple(entry)
+    raise TypeError(
+        f"A scope path must be a string like 'wet' or 'input.dry', or a tuple "
+        f"of keys; got {entry!r}."
+    )
+
+
+def normalize_scope(scope) -> KeyLeafPairs:
+    """Normalize a ``scope`` argument to internal ``(path, include)`` pairs.
+
+    Two spellings are accepted:
+
+    * A **list of paths** — ``["wet"]``, ``["input.dry"]``, ``[("input", "dry")]``.
+      This is the clear form: each entry names a subtree to transform.
+    * A **nested dict** using the ``"scope"`` sentinel —
+      ``{"wet": {"scope": True}}``, optionally with nested exclusions like
+      ``{"d": {"scope": True, "f": {"scope": False}}}``.
+
+    The dict form has a sharp edge: because a scope entry is matched one level
+    above where it sits, the obvious shorthand ``{"wet": True}`` matches *every*
+    leaf rather than only ``"wet"`` — silently transforming the target signal in
+    a dry/wet pipeline. That spelling now raises and points at the list form.
+    """
+    if scope is None:
+        return []
+
+    if isinstance(scope, (list, tuple)):
+        pairs = []
+        for entry in scope:
+            path = _as_path(entry)
+            if not path:
+                raise ValueError(f"Empty scope path in {scope!r}.")
+            keys = tuple(DictKey(key) for key in path) + (DictKey(_SCOPE_SENTINEL),)
+            pairs.append((keys, True))
+        return pairs
+
+    if isinstance(scope, dict):
+        flat = jax.tree_util.tree_flatten_with_path(scope)[0]
+        for config_path, value in flat:
+            key = getattr(config_path[0], "key", None) if config_path else None
+            if len(config_path) == 1 and key != _SCOPE_SENTINEL:
+                raise ValueError(
+                    f"scope={{{key!r}: {value!r}}} selects every leaf, not just "
+                    f"{key!r}, because a scope entry is matched one level above "
+                    f"where it sits. Write scope=[{key!r}] instead, or the "
+                    f"explicit scope={{{key!r}: {{'scope': {value!r}}}}}."
+                )
+        return flat
+
+    raise TypeError(
+        f"scope must be a list of paths (e.g. ['wet']) or a nested dict, got "
+        f"{type(scope).__name__}."
+    )
+
+
 def _is_in_scope(
     scope: KeyLeafPairs,
     lookup_path: KeyPath,
@@ -254,7 +320,7 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         self.config = jax.tree_util.tree_flatten_with_path(config or {})[0]
         self.split_seed = split_seed
         self.prob = prob
-        self.scope = jax.tree_util.tree_flatten_with_path(scope or {})[0]
+        self.scope = normalize_scope(scope)
         if isinstance(output_key, str):
             # redefine it as a function
             self.output_key = lambda _: output_key
@@ -424,7 +490,7 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
         """
         self.default_config = self.get_default_config()
         self.config = jax.tree_util.tree_flatten_with_path(config or {})[0]
-        self.scope = jax.tree_util.tree_flatten_with_path(scope or {})[0]
+        self.scope = normalize_scope(scope)
         if isinstance(output_key, str):
             # redefine it as a function
             self.output_key = lambda _: output_key

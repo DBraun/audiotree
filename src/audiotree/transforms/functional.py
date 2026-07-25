@@ -404,6 +404,11 @@ class choose(grain.transforms.RandomMap):
     With probability prob, choose c transform(s) from the list of transforms
     and apply them sequentially.
 
+    NumPy backend only. Which transforms run is decided in Python, so this
+    cannot be traced by ``jax.jit``; there is deliberately no
+    ``audiotree.transforms.jax.choose``. Compose JAX transforms explicitly
+    instead.
+
     Args:
         \*transforms: Variable number of transforms to choose from
         c: Number of transforms to choose

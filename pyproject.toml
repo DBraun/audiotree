@@ -37,9 +37,9 @@ dependencies = [
     "absl-py>=2.0",
     "einops>=0.8.1",
     "flax>=0.10",
-    # transforms/core.py subclasses a class that lives in `grain._src`, so the
-    # upper bound is load-bearing: the first grain release that removes it turns
-    # `import audiotree.transforms` into an ImportError for every pinned install.
+    # Upper-bounded on principle: grain is 0.x, so a minor release may break
+    # us. Nothing here rides its private API any more -- the one class that did
+    # (transforms.Batch) is gone -- so this can be relaxed once grain is 1.x.
     "grain>=0.2.15,<0.3",
     "jax>=0.4.35",
     "jaxloudnorm>=0.3.1",

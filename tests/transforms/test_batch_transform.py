@@ -7,7 +7,7 @@ import audiotree.transforms
 
 
 def test_batch_transform_with_dataloader():
-    """Test that Batch transform works with grain.DataLoader API."""
+    """AudioTree.batch collates correctly as grain's batch_fn."""
 
     # Create a simple data source that yields AudioTree objects with filepath metadata
     audio_trees = []
@@ -28,10 +28,10 @@ def test_batch_transform_with_dataloader():
         audio_trees.append(audio_tree)
 
     # Create a DataLoader with Batch transform
-    dataloader = grain.DataLoader(
-        data_source=audio_trees,
-        sampler=grain.samplers.SequentialSampler(len(audio_trees)),
-        operations=[audiotree.transforms.Batch(4)],
+    dataloader = (
+        grain.MapDataset.source(audio_trees)
+        .to_iter_dataset()
+        .batch(4, batch_fn=AudioTree.batch)
     )
 
     # Iterate and check batched filepaths

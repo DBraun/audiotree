@@ -310,8 +310,7 @@ def test_grain_integration():
 
 
 def test_grain_dataloader_with_batch_transform():
-    """Test that ManifestDataSource produces items compatible with Batch transform."""
-    from audiotree.transforms import Batch
+    """ManifestDataSource items collate through AudioTree.batch."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
@@ -338,12 +337,9 @@ def test_grain_dataloader_with_batch_transform():
         # Load all items from ManifestDataSource
         items = [source[i] for i in range(len(source))]
 
-        # Verify items can be batched properly with Batch transform
-        batch_op = Batch(batch_size=4)
-
         # Test that items from ManifestDataSource can be batched
-        batch1 = batch_op._default_batch_fn(items[0:4])
-        batch2 = batch_op._default_batch_fn(items[4:8])
+        batch1 = AudioTree.batch(items[0:4])
+        batch2 = AudioTree.batch(items[4:8])
 
         # Check first batch
         assert isinstance(batch1, AudioTree)
@@ -364,13 +360,11 @@ def test_grain_dataloader_with_batch_transform():
         assert np.allclose(batch2.lufs, expected_loudness_batch2, atol=0.01)
 
         # The key result: ManifestDataSource items can be successfully batched
-        # This demonstrates compatibility with grain.DataLoader + Batch transform
-        print("✓ ManifestDataSource items are compatible with Batch transform")
+        print("✓ ManifestDataSource items are compatible with AudioTree.batch")
 
 
 def test_manifest_metadata_with_batch_transform():
-    """Test that metadata arrays from manifest work with Batch transform."""
-    from audiotree.transforms import Batch
+    """Metadata arrays from a manifest survive AudioTree.batch."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
@@ -411,12 +405,9 @@ def test_manifest_metadata_with_batch_transform():
             assert item.metadata["confidence"].shape == (1,)
             items.append(item)
 
-        # Apply Batch transform
-        batch_transform = Batch(batch_size=4)
-
         # Create batches
-        batch1 = batch_transform._default_batch_fn(items[0:4])
-        batch_transform._default_batch_fn(items[4:8])
+        batch1 = AudioTree.batch(items[0:4])
+        AudioTree.batch(items[4:8])
 
         # Check batched metadata
         assert "params" in batch1.metadata
@@ -432,8 +423,7 @@ def test_manifest_metadata_with_batch_transform():
 
 
 def test_manifest_with_batch_transform():
-    """Test ManifestDataSource with manual Batch transform application."""
-    from audiotree.transforms import Batch
+    """ManifestDataSource items batch correctly when collated by hand."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
@@ -466,16 +456,13 @@ def test_manifest_with_batch_transform():
             item = item.replace(metadata={})
             items.append(item)
 
-        # Apply Batch transform manually
-        batch_transform = Batch(batch_size=4)
-
         # Create first batch
         batch1_items = items[0:4]
-        batch1 = batch_transform._default_batch_fn(batch1_items)
+        batch1 = AudioTree.batch(batch1_items)
 
         # Create second batch
         batch2_items = items[4:8]
-        batch2 = batch_transform._default_batch_fn(batch2_items)
+        batch2 = AudioTree.batch(batch2_items)
 
         # Check first batch
         assert isinstance(batch1, AudioTree)
