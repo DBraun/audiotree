@@ -10,6 +10,17 @@ from audiotree import AudioTree
 from audiotree.writer import _AUDIOTREE_FIELDS
 
 
+def _with_batch_axis(value) -> np.ndarray:
+    """Restore the leading batch axis a manifest row drops.
+
+    A manifest stores one row per item, so a read-back value is the *contents*
+    of a batch-of-1 field: ``lufs`` is a scalar, ``lufs_windows`` is ``(W,)``,
+    ``codes`` is ``(codebooks, frames)``. Every AudioTree field must carry the
+    batch axis, or ``AudioTree.batch`` concatenates along the wrong one.
+    """
+    return np.asarray(value)[np.newaxis, ...]
+
+
 class ManifestDataSource(grain.RandomAccessDataSource):
     """A DataSource that reads audio files based on a manifest file created by AudioWriter.
 
@@ -171,15 +182,17 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             for key in regular_keys:
                 value = regular_arrays[key][i]
 
-                # Handle missing values
-                if isinstance(value, (np.integer, int)) and value == -1:
-                    continue
-                elif isinstance(value, (np.floating, float)) and np.isnan(value):
-                    continue
-                elif isinstance(value, (str, np.str_)) and value == "":
+                # AudioTree fields are user data: keep the stored array and its
+                # dtype exactly. Demoting them to Python scalars loses both the
+                # dtype and, for a size-1 array, the shape (a one-window
+                # ``lufs_windows`` would come back 0-d).
+                if key in _AUDIOTREE_FIELDS:
+                    entry[key] = value
                     continue
 
-                # Convert scalar arrays and numpy types
+                # Bookkeeping columns (filename, sample_rate, channels, ...) are
+                # consumed as Python scalars, including as ``sample_rate``, which
+                # is a static pytree field and must not be a NumPy integer.
                 if isinstance(value, np.ndarray) and value.size == 1:
                     value = value.item()
 
@@ -275,10 +288,14 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             if source_filepath is not None:
                 tree_kwargs["filepaths"] = source_filepath
 
-            # Add AudioTree fields dynamically from manifest
+            # Add AudioTree fields dynamically from manifest, each with an
+            # explicit leading batch axis. ``from_file`` only adds one to a
+            # scalar, so an array-valued field (``lufs_windows``, ``codes``,
+            # ``latents``) would otherwise arrive unbatched and be concatenated
+            # along the wrong axis by ``AudioTree.batch``.
             for field_name in _AUDIOTREE_FIELDS:
                 if field_name in entry:
-                    tree_kwargs[field_name] = entry[field_name]
+                    tree_kwargs[field_name] = _with_batch_axis(entry[field_name])
 
             # Load audio file with all properties
             audio_tree = AudioTree.from_file(audio_path, **tree_kwargs)
@@ -301,15 +318,11 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             if source_filepath is not None:
                 tree_kwargs["filepaths"] = source_filepath
 
-            # Add AudioTree fields dynamically from manifest
+            # Add AudioTree fields dynamically from manifest, each with an
+            # explicit leading batch axis (see the files_written branch above).
             for field_name in _AUDIOTREE_FIELDS:
                 if field_name in entry:
-                    # Wrap scalar values in array with batch dimension
-                    value = entry[field_name]
-                    if isinstance(value, (np.ndarray, list)):
-                        tree_kwargs[field_name] = np.array([value])
-                    else:
-                        tree_kwargs[field_name] = np.array([value])
+                    tree_kwargs[field_name] = _with_batch_axis(entry[field_name])
 
             # Create AudioTree with zero audio data
             audio_tree = AudioTree.create(waveform, **tree_kwargs)

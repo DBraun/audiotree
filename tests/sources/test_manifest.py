@@ -519,3 +519,75 @@ if __name__ == "__main__":
     test_manifest_metadata_with_batch_transform()
     test_manifest_with_batch_transform()
     print("All tests passed!")
+
+
+def test_array_fields_keep_their_batch_axis_and_dtype():
+    """Array-valued AudioTree fields must survive a manifest round trip intact.
+
+    ``AudioTree.from_file`` only adds a batch axis to a *scalar*, so
+    ``lufs_windows``/``codes``/``latents`` used to come back one axis short and
+    were then concatenated along the wrong axis by ``AudioTree.batch`` --
+    silently interleaving one item's tokens into the next. Scalar fields were
+    additionally re-cast to a hard-coded dtype.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        writer = AudioWriter(str(output_dir))
+        for i in range(3):
+            tree = AudioTree.create(
+                np.full((1, 1, 8000), 0.1 * (i + 1), dtype=np.float32),
+                sample_rate=16000,
+                pitch=np.array([60 + i], dtype=np.int32),
+                codes=np.arange(2 * 5, dtype=np.int32).reshape(1, 2, 5) + i,
+            )
+            writer.write(tree.replace_lufs())
+        writer.close()
+
+        source = ManifestDataSource.from_writer_output(str(output_dir))
+        item = source[0]
+
+        # Every field carries the leading batch axis.
+        assert item.lufs.shape == (1,)
+        assert item.lufs_windows.ndim == 2 and item.lufs_windows.shape[0] == 1
+        assert item.codes.shape == (1, 2, 5)
+        # Stored dtypes are preserved rather than re-cast.
+        assert item.pitch.dtype == np.int32
+        np.testing.assert_array_equal(item.pitch, [60])
+
+        # Batching stacks along the batch axis instead of corrupting the data.
+        batched = AudioTree.batch([source[i] for i in range(3)])
+        assert batched.codes.shape == (3, 2, 5)
+        assert batched.lufs_windows.shape[0] == 3
+        np.testing.assert_array_equal(batched.pitch.ravel(), [60, 61, 62])
+        for i in range(3):
+            np.testing.assert_array_equal(
+                batched.codes[i], np.arange(2 * 5, dtype=np.int32).reshape(2, 5) + i
+            )
+
+
+def test_sentinel_values_are_not_dropped():
+    """A stored -1 / NaN / "" is user data, not a "missing" marker.
+
+    The reader used to treat those three values as absent and omit the field, so
+    an item with ``velocity=-1`` came back with a different pytree structure
+    than its siblings and broke batching for the whole dataset.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        writer = AudioWriter(str(output_dir))
+        for velocity in (100, -1, 64):
+            writer.write(
+                AudioTree.create(
+                    np.zeros((1, 1, 4000), dtype=np.float32),
+                    sample_rate=16000,
+                    velocity=np.array([velocity], dtype=np.int32),
+                )
+            )
+        writer.close()
+
+        source = ManifestDataSource.from_writer_output(str(output_dir))
+        assert source[1].velocity is not None
+        np.testing.assert_array_equal(source[1].velocity, [-1])
+
+        batched = AudioTree.batch([source[i] for i in range(3)])
+        np.testing.assert_array_equal(batched.velocity.ravel(), [100, -1, 64])
