@@ -8,10 +8,93 @@ import numpy as np
 from grain.sources import RandomAccessDataSource
 
 from audiotree._bagz import require_bagz
+from audiotree._fs import safe_join
 from audiotree.core import AudioTree
 
 # Sentinel for excluded leaves (distinct from None, which is a valid value).
 _EXCLUDED = object()
+
+# dtypes a manifest may name. All fixed-width numeric types; object/void and
+# structured dtypes are excluded because memmapping them is either unsupported
+# or an unpickling vector.
+_ALLOWED_DTYPES = frozenset(
+    [
+        "bool",
+        "int8",
+        "int16",
+        "int32",
+        "int64",
+        "uint8",
+        "uint16",
+        "uint32",
+        "uint64",
+        "float16",
+        "float32",
+        "float64",
+        "complex64",
+        "complex128",
+    ]
+)
+
+
+def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
+    """Check a manifest's declared shapes, dtypes and names before using them.
+
+    A manifest travels with the dataset it describes, so its values reach
+    ``np.memmap`` and the ``AudioTree`` constructor from a file the reader did
+    not write. ``np.memmap(mode="r")`` does bound-check against the file size,
+    so an over-large shape raises rather than reading out of bounds — but it
+    surfaces as a bare ``ValueError`` naming neither the manifest nor the leaf,
+    and a *smaller* shape silently truncates the dataset with no error at all.
+    """
+
+    def fail(message: str):
+        raise ValueError(f"Invalid manifest {manifest_path}: {message}")
+
+    num_samples = manifest.get("num_samples")
+    if not isinstance(num_samples, int) or isinstance(num_samples, bool):
+        fail(f"num_samples must be an int, got {num_samples!r}")
+    if num_samples < 0:
+        fail(f"num_samples must be non-negative, got {num_samples}")
+
+    for name, info in (manifest.get("leaves") or {}).items():
+        shape = info.get("shape_per_sample")
+        if not isinstance(shape, list) or not all(
+            isinstance(d, int) and not isinstance(d, bool) and d >= 0 for d in shape
+        ):
+            fail(f"leaf {name!r} has an invalid shape_per_sample {shape!r}")
+        if info.get("dtype") not in _ALLOWED_DTYPES:
+            fail(
+                f"leaf {name!r} declares dtype {info.get('dtype')!r}, which is not "
+                f"one of {sorted(_ALLOWED_DTYPES)}"
+            )
+        if not isinstance(info.get("file"), str):
+            fail(f"leaf {name!r} has a non-string 'file' entry")
+
+    def check_node(node, path: str):
+        if not isinstance(node, dict):
+            return
+        node_type = node.get("type")
+        if node_type == "AudioTree":
+            sample_rate = node.get("sample_rate")
+            if (
+                not isinstance(sample_rate, int)
+                or isinstance(sample_rate, bool)
+                or sample_rate <= 0
+            ):
+                fail(f"AudioTree at {path or '<root>'} has sample_rate {sample_rate!r}")
+            for key, child in (node.get("children") or {}).items():
+                if key not in AudioTree.__dataclass_fields__:
+                    fail(
+                        f"AudioTree at {path or '<root>'} declares child {key!r}, "
+                        f"which is not an AudioTree field"
+                    )
+                check_node(child, f"{path}.{key}" if path else key)
+        elif node_type == "dict":
+            for key, child in (node.get("children") or {}).items():
+                check_node(child, f"{path}.{key}" if path else str(key))
+
+    check_node(manifest.get("structure"), "")
 
 
 def _reconstruct(node, leaf_values: Dict[str, Any]):
@@ -159,6 +242,8 @@ class TreeDataSource(RandomAccessDataSource):
                 "TreeDataSource requires version 2.x manifests."
             )
 
+        _validate_manifest(self.manifest, self.manifest_path)
+
         self._num_samples = self.manifest["num_samples"]
         self._structure = self.manifest["structure"]
         self._leaf_info = self.manifest["leaves"]
@@ -184,7 +269,7 @@ class TreeDataSource(RandomAccessDataSource):
                 continue
             full_shape = tuple([self._num_samples] + info["shape_per_sample"])
             mm = np.memmap(
-                self.data_dir / info["file"],
+                safe_join(self.data_dir, info["file"], description="leaf file"),
                 dtype=np.dtype(info["dtype"]),
                 mode="r",
                 shape=full_shape,
@@ -197,7 +282,13 @@ class TreeDataSource(RandomAccessDataSource):
             for name, info in self._string_leaf_info.items():
                 if _is_excluded(name, self.exclude_prefixes):
                     continue
-                reader = bagz.Reader(str(self.data_dir / info["file"]))
+                reader = bagz.Reader(
+                    str(
+                        safe_join(
+                            self.data_dir, info["file"], description="string leaf"
+                        )
+                    )
+                )
                 self._in_memory_strings[name] = [
                     reader[i].decode("utf-8") for i in range(self._num_samples)
                 ]
@@ -223,7 +314,11 @@ class TreeDataSource(RandomAccessDataSource):
                 if _is_excluded(name, self.exclude_prefixes):
                     continue
                 self._bagz_readers[name] = bagz.Reader(
-                    str(self.data_dir / info["file"])
+                    str(
+                        safe_join(
+                            self.data_dir, info["file"], description="string leaf"
+                        )
+                    )
                 )
 
         self._data_files_opened = True
@@ -282,7 +377,7 @@ class TreeDataSource(RandomAccessDataSource):
                 info = self._leaf_info[name]
                 full_shape = tuple([self._num_samples] + info["shape_per_sample"])
                 mm = np.memmap(
-                    self.data_dir / info["file"],
+                    safe_join(self.data_dir, info["file"], description="leaf file"),
                     dtype=np.dtype(info["dtype"]),
                     mode="r",
                     shape=full_shape,

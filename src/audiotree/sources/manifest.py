@@ -7,6 +7,7 @@ import numpy as np
 from grain import python as grain
 
 from audiotree import AudioTree
+from audiotree._fs import safe_join
 from audiotree.writer import _AUDIOTREE_FIELDS
 
 
@@ -270,7 +271,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         if files_written:
             # Audio files exist - load from disk
             filename = entry["filename"]
-            audio_path = self.audio_dir / filename
+            audio_path = safe_join(self.audio_dir, filename, description="audio file")
 
             if not audio_path.exists():
                 raise FileNotFoundError(f"Audio file not found: {audio_path}")

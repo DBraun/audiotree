@@ -35,6 +35,7 @@ import soundfile
 
 from audiotree import AudioTree
 from audiotree._bagz import require_bagz
+from audiotree._fs import safe_join
 
 from .core import _default_extensions, find_audio_files
 
@@ -290,7 +291,7 @@ def load_window_lufs(cache_dir: str | Path) -> WindowLufsCache:
 
     filepaths = manifest["filepaths"]
     reader = require_bagz("reading windowed-LUFS caches").Reader(
-        str(cache_dir / manifest["bagz_file"])
+        str(safe_join(cache_dir, manifest["bagz_file"], description="cache file"))
     )
     if len(reader) != len(filepaths):
         raise RuntimeError(

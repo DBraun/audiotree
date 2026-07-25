@@ -1,7 +1,6 @@
 """TreeWriter: pytree-native writer for memory-mapped datasets."""
 
 import logging
-import json
 import os
 from datetime import datetime
 from pathlib import Path
