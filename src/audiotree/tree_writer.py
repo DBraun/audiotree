@@ -243,11 +243,47 @@ class TreeWriter:
         self._is_open = True
         return self
 
-    def _init_from_pytree(self, pytree):
-        """Infer schema from the first pytree and create memmap/bagz files."""
-        self._structure, self._leaf_names, self._string_leaf_names = (
-            _serialize_structure(pytree)
+    def _check_structure_matches(self, structure, leaf_names, string_leaf_names):
+        """Raise if a later write's structure differs from the first write's.
+
+        Leaf extraction is positional, so a renamed, added, reordered or dropped
+        leaf would otherwise write into whichever ``.bin`` happens to sit at that
+        index. ``structure`` also carries each AudioTree's ``sample_rate``, so a
+        rate change is caught here too rather than being silently mislabelled by
+        the value captured on the first write.
+        """
+        if (structure, leaf_names, string_leaf_names) == (
+            self._structure,
+            self._leaf_names,
+            self._string_leaf_names,
+        ):
+            return
+
+        expected = set(self._leaf_names) | set(self._string_leaf_names)
+        got = set(leaf_names) | set(string_leaf_names)
+        details = []
+        if got - expected:
+            details.append(f"unexpected leaves {sorted(got - expected)}")
+        if expected - got:
+            details.append(f"missing leaves {sorted(expected - got)}")
+        if not details and (
+            leaf_names != self._leaf_names
+            or string_leaf_names != self._string_leaf_names
+        ):
+            details.append("leaf ordering changed")
+        if not details:
+            details.append("structure differs (e.g. a changed sample_rate or nesting)")
+        raise ValueError(
+            "Pytree structure must match the first write: "
+            + "; ".join(details)
+            + f". Expected leaves {sorted(expected)}."
         )
+
+    def _init_from_pytree(self, pytree, structure, leaf_names, string_leaf_names):
+        """Infer schema from the first pytree and create memmap/bagz files."""
+        self._structure = structure
+        self._leaf_names = leaf_names
+        self._string_leaf_names = string_leaf_names
 
         array_leaves, _ = _extract_leaves(
             pytree, self._leaf_names, self._string_leaf_names
@@ -304,20 +340,18 @@ class TreeWriter:
         if not self._is_open:
             raise RuntimeError("Writer is not open. Call open() first.")
 
-        # Initialize schema on first write
+        structure, leaf_names, string_leaf_names = _serialize_structure(pytree)
+
+        # Initialize schema on first write, then require every later write to
+        # match it by name -- not just by leaf count.
         if self._structure is None:
-            self._init_from_pytree(pytree)
+            self._init_from_pytree(pytree, structure, leaf_names, string_leaf_names)
+        else:
+            self._check_structure_matches(structure, leaf_names, string_leaf_names)
 
         array_leaves, string_data = _extract_leaves(
             pytree, self._leaf_names, self._string_leaf_names
         )
-
-        if len(array_leaves) != len(self._memmaps):
-            raise ValueError(
-                f"Pytree has {len(array_leaves)} array leaves but schema "
-                f"expects {len(self._memmaps)}. Structure must match the "
-                f"first write."
-            )
 
         # Determine batch size from first available leaf
         batch_size = None

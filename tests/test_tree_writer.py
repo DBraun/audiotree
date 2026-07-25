@@ -478,3 +478,62 @@ def test_get_stats_with_strings():
             stats = w.get_stats()
             assert "labels" in stats["string_leaves"]
             assert "x" in stats["leaves"]
+
+
+def _f32(value, shape=(2, 3)):
+    return np.full(shape, value, dtype=np.float32)
+
+
+def test_write_rejects_renamed_leaf():
+    """A renamed leaf must raise, not write into the previous leaf's file.
+
+    Leaf extraction is positional and only the leaf *count* was checked, so
+    writing {"a", "c"} after {"a", "b"} silently stored c's data in b.bin.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=4) as writer:
+            writer.write({"a": _f32(1.0), "b": _f32(2.0)})
+            with pytest.raises(ValueError, match="must match the first write"):
+                writer.write({"a": _f32(3.0), "c": _f32(4.0)})
+
+
+@pytest.mark.parametrize(
+    "second,match",
+    [
+        ({"a": _f32(1.0), "b": _f32(2.0)}, "unexpected leaves"),
+        ({}, "missing leaves"),
+    ],
+)
+def test_write_rejects_added_or_missing_leaves(second, match):
+    """Adding or dropping a leaf mid-dataset is rejected with a named diff."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=4) as writer:
+            writer.write({"a": _f32(1.0)})
+            with pytest.raises(ValueError, match=match):
+                writer.write(second)
+
+
+def test_write_rejects_changed_sample_rate():
+    """A later AudioTree at a different rate must raise rather than be mislabelled.
+
+    ``sample_rate`` is captured from the first write and recorded once in the
+    manifest, so a second rate would silently claim to be the first.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=4) as writer:
+            writer.write(AudioTree.create(np.zeros((1, 1, 8), np.float32), 16000))
+            with pytest.raises(ValueError, match="must match the first write"):
+                writer.write(AudioTree.create(np.zeros((1, 1, 8), np.float32), 44100))
+
+
+def test_write_accepts_identical_structure():
+    """The validation must not reject a legitimately unchanged structure."""
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=4) as writer:
+            writer.write({"a": _f32(1.0)})
+            writer.write({"a": _f32(9.0)})
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 4
+        np.testing.assert_array_equal(source[2]["a"].ravel(), [9.0, 9.0, 9.0])
