@@ -248,12 +248,17 @@ AudioWriter generates manifests in NPZ format to track written files and their m
 NPZ Format
 ^^^^^^^^^^
 
+By default ``AudioWriter`` refuses to write into a directory that already holds a
+manifest, so a finished dataset is never silently overwritten (and two writers
+aimed at one directory are caught). The examples below reuse ``"output"`` and so
+pass ``exist_ok=True`` to opt in.
+
 NPZ is the recommended format for all use cases, especially for large datasets:
 
 .. testcode::
 
     # NPZ format - best for large datasets
-    with AudioWriter("output") as writer:
+    with AudioWriter("output", exist_ok=True) as writer:
         writer.write(audio_tree)
     # Creates output/manifest.npz with efficient binary storage
 
@@ -272,10 +277,10 @@ Control NPZ file compression for different trade-offs:
 .. testcode::
 
     # Compressed NPZ (default) - smaller files, slightly slower writing
-    writer = AudioWriter("output", compress_manifest=True)
+    writer = AudioWriter("output", compress_manifest=True, exist_ok=True)
 
     # Uncompressed NPZ - faster writing, larger files
-    writer = AudioWriter("output", compress_manifest=False)
+    writer = AudioWriter("output", compress_manifest=False, exist_ok=True)
 
 Compression is recommended for most cases as the size savings (often 5-10x) outweigh the minimal performance impact.
 
@@ -315,10 +320,10 @@ Control whether to include timestamps in manifest entries:
 .. testcode::
 
     # Without timestamps (default) - smaller, cleaner manifests
-    writer = AudioWriter("output", include_timestamp=False)
+    writer = AudioWriter("output", include_timestamp=False, exist_ok=True)
 
     # With timestamps - track when files were written
-    writer = AudioWriter("output", include_timestamp=True)
+    writer = AudioWriter("output", include_timestamp=True, exist_ok=True)
 
 Timestamps are useful for:
 
@@ -374,7 +379,7 @@ AudioWriter supports progress tracking via tqdm integration:
     # Create your own progress bar with custom settings
     pbar = tqdm(total=1000, desc="Generating dataset")
 
-    with AudioWriter("output", pbar=pbar) as writer:
+    with AudioWriter("output", pbar=pbar, exist_ok=True) as writer:
         for audio_tree in big_audio_tree.split(batch_size):
             if audio_tree.lufs > -30:  # Only write loud samples
                 writer.write(audio_tree)  # Automatically updates pbar
@@ -385,7 +390,7 @@ AudioWriter supports progress tracking via tqdm integration:
 
     # Let AudioWriter create its own progress bar
     with AudioWriter("output", show_progress=True,
-                     progress_desc="Writing audio") as writer:
+                     progress_desc="Writing audio", exist_ok=True) as writer:
         for audio_tree in audio_trees:
             writer.write(audio_tree)
     # Progress bar automatically closed
@@ -401,7 +406,7 @@ AudioWriter supports progress tracking via tqdm integration:
     total_samples = sum(t.waveform.shape[0] for t in loud_trees)
 
     pbar = tqdm(total=total_samples, desc="Writing loud samples")
-    with AudioWriter("output", pbar=pbar, close_pbar=True) as writer:
+    with AudioWriter("output", pbar=pbar, close_pbar=True, exist_ok=True) as writer:
         for audio_tree in trees:
             if audio_tree.lufs.mean() > -30:
                 writer.write(audio_tree)
