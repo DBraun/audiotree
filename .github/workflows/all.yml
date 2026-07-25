@@ -12,12 +12,13 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
     - name: Checkout code
@@ -29,21 +30,34 @@ jobs:
         python-version: ${{ matrix.python-version }}
         enable-cache: true
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get install libsndfile-dev
-        # `bagz` is an optional extra (manylinux x86-64 wheels only). CI runs on
-        # exactly that platform, so install it here to exercise the string-leaf
-        # and windowed-LUFS-cache paths rather than skipping them.
-        uv sync --extra bagz
+    - name: Install libsndfile (Linux)
+      if: runner.os == 'Linux'
+      run: sudo apt-get install libsndfile-dev
+
+    - name: Install libsndfile (macOS)
+      if: runner.os == 'macOS'
+      run: brew install libsndfile
+
+    # `bagz` publishes manylinux x86-64 wheels only, so the extra is installable
+    # on the Linux runners and not the macOS ones. Installing it where we can
+    # exercises the string-leaf and windowed-LUFS-cache paths instead of
+    # skipping them; the macOS jobs prove the package works without it.
+    - name: Install dependencies (Linux, with bagz)
+      if: runner.os == 'Linux'
+      run: uv sync --extra bagz
+
+    - name: Install dependencies (macOS, no bagz)
+      if: runner.os == 'macOS'
+      run: uv sync
 
     - name: Run tests
       run: uv run pytest
 
-  test_grain_floor:
-    # Guards the lower bound of `grain>=0.2.15`: transforms/core.py uses grain
-    # internals that have moved across releases, so pin the floor and run the
-    # full suite to keep the minimum supported version honest.
+  test_lowest_direct:
+    # Resolve every declared dependency to its lowest allowed version and run
+    # the suite. Without this, the floors in pyproject.toml are aspirational:
+    # the normal job always installs the newest compatible release, so a floor
+    # that is too low (or fictional) is never exercised.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -56,13 +70,10 @@ jobs:
         python-version: "3.11"
         enable-cache: true
 
-    - name: Install dependencies (grain floor)
+    - name: Install dependencies (lowest allowed versions)
       run: |
         sudo apt-get install libsndfile-dev
-        uv sync --extra bagz
-        # Pin grain to the declared floor in the synced env; the next step runs
-        # with --no-sync so the pin sticks. Fails if the code needs newer grain.
-        uv pip install "grain==0.2.15"
+        uv sync --extra bagz --resolution lowest-direct
 
     - name: Run tests
       run: uv run --no-sync pytest
@@ -131,7 +142,7 @@ jobs:
       uses: actions/deploy-pages@v5
 
   publish:
-    needs: [test, test_grain_floor, lint, build_docs]
+    needs: [test, test_lowest_direct, lint, build_docs]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.event_name == 'release' && github.event.action == 'published'
