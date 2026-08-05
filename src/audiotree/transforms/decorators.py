@@ -11,6 +11,10 @@ from audiotree.transforms.base import BaseMapTransform, BaseRandomTransform
 # function.
 _RESERVED = ("prob", "split_seed", "scope", "output_key")
 
+# Distinguishes "not passed" from an explicit value, so a map transform can
+# reject `prob` rather than silently defaulting it.
+_UNSET = object()
+
 _RESERVED_DOCS = """
     prob: Probability of applying the transform, drawn independently per batch
         item. Defaults to ``1.0`` (always).
@@ -133,10 +137,25 @@ def _build_wrapper(fn, base_class, drop, reserved_docs, make_transform):
     FunctionBasedTransform.__qualname__ = f"{fn.__name__}.Transform"
     FunctionBasedTransform.__module__ = fn.__module__
 
+    accepted_reserved = _reserved_for(base_class)
+
     def wrapper(
-        *args, prob=1.0, split_seed=True, scope=None, output_key=None, **kwargs
+        *args, prob=_UNSET, split_seed=_UNSET, scope=None, output_key=None, **kwargs
     ):
         """Create a transform instance with given parameters."""
+        # A map transform applies unconditionally, so `prob`/`split_seed` are
+        # meaningless for it. They were still swallowed by the wrapper and
+        # dropped, so `trim(length=1.0, prob=0.5)` trimmed every time with no
+        # sign that half the request was ignored.
+        for reserved_name, value in (("prob", prob), ("split_seed", split_seed)):
+            if value is not _UNSET and reserved_name not in accepted_reserved:
+                raise TypeError(
+                    f"{fn.__name__}() got unexpected parameter {reserved_name!r}: "
+                    f"it is a map transform and applies unconditionally. Only "
+                    f"random transforms take {reserved_name!r}."
+                )
+        prob = 1.0 if prob is _UNSET else prob
+        split_seed = True if split_seed is _UNSET else split_seed
         # Bind positional args against the *function's* parameters, so
         # `roll(0.5, 1.0)` means what the rendered signature says it means. The
         # reserved parameters used to sit first and positional, so those two

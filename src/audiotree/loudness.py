@@ -58,6 +58,35 @@ def safe_gain_db(lufs, target_lufs, max_gain_db=None, *, xp=np):
     return gain_db
 
 
+def shift_lufs(lufs, gain_db, *, xp=np):
+    """Apply a per-item dB gain to a measured loudness.
+
+    Adding the gain rather than assigning the target is what keeps a skipped
+    (non-finite) or capped item honest: ``-inf + 0.0`` stays ``-inf``.
+
+    The result is normalized to ``float32``, the dtype :meth:`AudioTree.replace_lufs`
+    produces. ``lufs`` is a derived measurement rather than user data, and a
+    float64 leaf would be silently narrowed by JAX under the default x64-off
+    config — which would make the NumPy and JAX backends disagree on a field
+    that is supposed to round-trip through both.
+    """
+    return (lufs + gain_db).astype(xp.float32)
+
+
+def shift_lufs_windows(lufs_windows, gain_db, *, xp=np):
+    """Shift per-window LUFS by a per-item dB gain, or pass through ``None``.
+
+    A constant gain shifts every window equally, so this keeps ``lufs_windows``
+    aligned with ``lufs`` instead of leaving it stale. ``gain_db`` is ``(batch,)``
+    and broadcasts over the window axis; it must be finite, which
+    :func:`safe_gain_db` guarantees, so a silent item's ``-inf`` windows stay
+    ``-inf`` rather than becoming ``NaN``.
+    """
+    if lufs_windows is None:
+        return None
+    return (lufs_windows + gain_db[..., None]).astype(xp.float32)
+
+
 def _window_samples(lufs_window_sec: float, sample_rate: int) -> int:
     """Number of samples spanned by a loudness window (or hop) of the given duration.
 

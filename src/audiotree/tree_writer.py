@@ -13,21 +13,7 @@ import numpy as np
 from audiotree import _format
 from audiotree._bagz import require_bagz
 from audiotree._fs import refuse_to_clobber, write_json_atomic
-from audiotree.core import AudioTree
-
-# AudioTree pytree field names in declaration order (matching Flax flatten order).
-# sample_rate is excluded (pytree_node=False).
-_AUDIOTREE_FIELD_ORDER = [
-    "waveform",
-    "lufs",
-    "lufs_windows",
-    "pitch",
-    "velocity",
-    "note_duration",
-    "codes",
-    "latents",
-    "metadata",
-]
+from audiotree.core import PYTREE_FIELDS, AudioTree
 
 
 def _path_to_string(path: Tuple) -> str:
@@ -83,7 +69,7 @@ def _serialize_structure(pytree) -> Tuple[Any, List[str], List[str]]:
         # AudioTree node
         if isinstance(node, AudioTree):
             children = {}
-            for fname in _AUDIOTREE_FIELD_ORDER:
+            for fname in PYTREE_FIELDS:
                 value = getattr(node, fname)
                 if value is None:
                     continue
@@ -145,7 +131,7 @@ def _extract_leaves(
             return
 
         if isinstance(node, AudioTree):
-            for fname in _AUDIOTREE_FIELD_ORDER:
+            for fname in PYTREE_FIELDS:
                 value = getattr(node, fname)
                 if value is None:
                     continue

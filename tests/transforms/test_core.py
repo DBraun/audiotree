@@ -644,16 +644,28 @@ def test_phase_transforms_keep_lufs():
 # prob < 1
 # =============================================================================
 
-# Every transform that goes through ``random_map`` and therefore honors ``prob``.
-_RANDOM_TRANSFORM_NAMES = [
-    "volume_change",
-    "volume_norm",
-    "invert_phase",
-    "swap_stereo",
-    "corrupt_phase",
-    "shift_phase",
-    "roll",
-]
+
+def _transform_names(namespace, base_class):
+    """Names in ``namespace`` whose transform derives from ``base_class``.
+
+    Discovered rather than listed, so a new transform is covered the day it is
+    added. The decorators attach the generated class as ``.Transform``, which
+    also avoids instantiating non-transform exports (``AudioCodec`` is a
+    Protocol and raises).
+    """
+    return sorted(
+        name
+        for name in namespace.__all__
+        if issubclass(
+            getattr(getattr(namespace, name), "Transform", type(None)), base_class
+        )
+    )
+
+
+#: Transforms that go through ``random_map`` and therefore honor ``prob``.
+_RANDOM_TRANSFORM_NAMES = _transform_names(audiotree.transforms, BaseRandomTransform)
+#: Transforms that go through ``map`` and take no ``prob``.
+_MAP_TRANSFORM_NAMES = _transform_names(audiotree.transforms, BaseMapTransform)
 
 
 def _prob_test_tree(backend, batch_size):
@@ -858,3 +870,22 @@ def test_jax_resample_transform():
     assert result.sample_rate == 22_050
     assert result.waveform.shape == (1, 1, 22_050)
     assert result.lufs is None
+
+
+def test_transform_discovery_is_not_empty():
+    """Guard the discovery itself: an empty list would silently pass everything."""
+    assert len(_RANDOM_TRANSFORM_NAMES) >= 7
+    assert len(_MAP_TRANSFORM_NAMES) >= 7
+    assert not set(_RANDOM_TRANSFORM_NAMES) & set(_MAP_TRANSFORM_NAMES)
+
+
+@pytest.mark.parametrize("name", _MAP_TRANSFORM_NAMES)
+def test_map_transforms_reject_prob(name):
+    """`prob` is meaningless for a map transform, so it must not be accepted.
+
+    It used to be swallowed by the decorator's ``**transform_params``, so a
+    user who wrote ``trim(length=1.0, prob=0.5)`` got an unconditional trim and
+    no indication that half of it was ignored.
+    """
+    with pytest.raises(TypeError, match="unexpected parameter|prob"):
+        getattr(audiotree.transforms, name)(prob=0.5)

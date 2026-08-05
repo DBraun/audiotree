@@ -10,19 +10,7 @@ import soundfile
 
 from . import _format
 from ._fs import refuse_to_clobber
-from .core import AudioTree
-
-
-# AudioTree fields that should be tracked (excluding waveform, sample_rate, metadata)
-_AUDIOTREE_FIELDS = [
-    "lufs",
-    "lufs_windows",
-    "pitch",
-    "velocity",
-    "note_duration",
-    "codes",
-    "latents",
-]
+from .core import LABEL_FIELDS, AudioTree
 
 
 class AudioWriter:
@@ -153,7 +141,7 @@ class AudioWriter:
             Set of field names that are present (not None)
         """
         present = set()
-        for field_name in _AUDIOTREE_FIELDS:
+        for field_name in LABEL_FIELDS:
             if getattr(tree, field_name, None) is not None:
                 present.add(field_name)
         return present
@@ -269,7 +257,7 @@ class AudioWriter:
             entry["timestamp"] = datetime.now().isoformat()
 
         # Add AudioTree fields dynamically, preserving dtypes
-        for field_name in _AUDIOTREE_FIELDS:
+        for field_name in LABEL_FIELDS:
             field_value = getattr(tree, field_name, None)
             if field_value is not None:
                 # Extract the value for this batch index

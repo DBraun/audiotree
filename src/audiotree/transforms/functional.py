@@ -25,6 +25,7 @@ import numpy as np
 
 from audiotree import AudioTree
 from audiotree.transforms.decorators import random_transform, map_transform
+from audiotree.loudness import shift_lufs, shift_lufs_windows
 from audiotree.transforms.helpers import (
     _volume_norm_np,
     _volume_change_np,
@@ -36,7 +37,6 @@ from audiotree.transforms.helpers import (
     _shift_phase_np,
     _roll_np,
     _trim_np,
-    _shift_lufs_windows,
 )
 
 
@@ -91,8 +91,8 @@ def volume_change(
     audio_tree, gain_db = _volume_change_np(audio_tree, rng, min_db, max_db)
     if audio_tree.lufs is not None:
         audio_tree = audio_tree.replace(
-            lufs=(audio_tree.lufs + gain_db),
-            lufs_windows=_shift_lufs_windows(audio_tree.lufs_windows, gain_db),
+            lufs=shift_lufs(audio_tree.lufs, gain_db, xp=np),
+            lufs_windows=shift_lufs_windows(audio_tree.lufs_windows, gain_db, xp=np),
         )
     return audio_tree
 

@@ -10,7 +10,7 @@ import json
 
 from audiotree import AudioTree, _format
 from audiotree._fs import safe_join
-from audiotree.writer import _AUDIOTREE_FIELDS
+from audiotree.core import LABEL_FIELDS
 
 
 def _with_batch_axis(value) -> np.ndarray:
@@ -202,7 +202,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                 # dtype exactly. Demoting them to Python scalars loses both the
                 # dtype and, for a size-1 array, the shape (a one-window
                 # ``lufs_windows`` would come back 0-d).
-                if key in _AUDIOTREE_FIELDS:
+                if key in LABEL_FIELDS:
                     entry[key] = value
                     continue
 
@@ -309,7 +309,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             # scalar, so an array-valued field (``lufs_windows``, ``codes``,
             # ``latents``) would otherwise arrive unbatched and be concatenated
             # along the wrong axis by ``AudioTree.batch``.
-            for field_name in _AUDIOTREE_FIELDS:
+            for field_name in LABEL_FIELDS:
                 if field_name in entry:
                     tree_kwargs[field_name] = _with_batch_axis(entry[field_name])
 
@@ -336,7 +336,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
 
             # Add AudioTree fields dynamically from manifest, each with an
             # explicit leading batch axis (see the files_written branch above).
-            for field_name in _AUDIOTREE_FIELDS:
+            for field_name in LABEL_FIELDS:
                 if field_name in entry:
                     tree_kwargs[field_name] = _with_batch_axis(entry[field_name])
 

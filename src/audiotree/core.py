@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import field
 from functools import partial
 import importlib
@@ -36,6 +37,8 @@ from .loudness import (
     _window_samples,
     _windowed_num_windows,
     safe_gain_db,
+    shift_lufs,
+    shift_lufs_windows,
 )
 from .resample import resample
 
@@ -217,7 +220,9 @@ class AudioTree:
         44100
 
     Note:
-        If new fields are added to this class, update ``_AUDIOTREE_FIELDS`` in ``audiotree/writer.py``.
+        Every consumer that enumerates these fields derives its list from
+        ``dataclasses.fields`` (see ``PYTREE_FIELDS`` below), so adding a field
+        here is picked up automatically.
     """
 
     waveform: ArrayLike | None
@@ -543,16 +548,10 @@ class AudioTree:
         # integrated value, so both move by ``gain_db`` (kept aligned rather than
         # left stale). Adding the gain rather than assigning ``target_lufs`` is
         # what keeps a skipped (non-finite) or capped item honest.
-        new_lufs = (tree.lufs + gain_db).astype(numpy.float32)
-        shifted_windows = None
-        if tree.lufs_windows is not None:
-            shifted_windows = (tree.lufs_windows + gain_db[..., None]).astype(
-                numpy.float32
-            )
         return tree.replace(
             waveform=scaled_waveform,
-            lufs=new_lufs,
-            lufs_windows=shifted_windows,
+            lufs=shift_lufs(tree.lufs, gain_db, xp=numpy),
+            lufs_windows=shift_lufs_windows(tree.lufs_windows, gain_db, xp=numpy),
         )
 
     @staticmethod
@@ -1010,9 +1009,7 @@ class AudioTree:
             ]
 
         # Add AudioTree fields from manifest
-        from audiotree.writer import _AUDIOTREE_FIELDS
-
-        for field_name in _AUDIOTREE_FIELDS:
+        for field_name in LABEL_FIELDS:
             if field_name in manifest_data:
                 tree_kwargs[field_name] = manifest_data[field_name][indices]
 
@@ -1508,6 +1505,25 @@ class AudioTree:
             *items[1:],
             is_leaf=lambda x: isinstance(x, AudioTree),
         )
+
+
+# --- Field lists ------------------------------------------------------------
+# Derived from the dataclass rather than restated, because these were three
+# hand-maintained copies that had to agree with each other and with the class.
+# Order is declaration order, which is also the pytree flatten order and
+# therefore the on-disk leaf order that TreeWriter records -- do not sort.
+
+#: Fields that are pytree nodes (i.e. everything but the static ``sample_rate``).
+PYTREE_FIELDS: tuple = tuple(
+    f.name for f in dataclasses.fields(AudioTree) if f.metadata.get("pytree_node", True)
+)
+
+#: Pytree fields holding a single array, so ``metadata`` (a dict) is excluded.
+ARRAY_FIELDS: tuple = tuple(f for f in PYTREE_FIELDS if f != "metadata")
+
+#: Per-item labels: the array fields other than the waveform itself. These are
+#: what the writers record as manifest columns.
+LABEL_FIELDS: tuple = tuple(f for f in ARRAY_FIELDS if f != "waveform")
 
 
 def _batch_audiotrees(audio_trees: Sequence[AudioTree]) -> AudioTree:

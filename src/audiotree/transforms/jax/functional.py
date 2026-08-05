@@ -23,9 +23,11 @@ Example:
 """
 
 import jax
+from jax import numpy as jnp
 
 from audiotree import AudioTree
 from audiotree.transforms.decorators import random_transform, map_transform
+from audiotree.loudness import shift_lufs, shift_lufs_windows
 from audiotree.transforms.helpers import (
     _volume_norm_jax,
     _volume_change_jax,
@@ -37,7 +39,6 @@ from audiotree.transforms.helpers import (
     _shift_phase_jax,
     _roll_jax,
     _trim_jax,
-    _shift_lufs_windows,
 )
 
 
@@ -84,8 +85,8 @@ def volume_change(
     audio_tree, gain_db = _volume_change_jax(audio_tree, rng, min_db, max_db)
     if audio_tree.lufs is not None:
         audio_tree = audio_tree.replace(
-            lufs=(audio_tree.lufs + gain_db),
-            lufs_windows=_shift_lufs_windows(audio_tree.lufs_windows, gain_db),
+            lufs=shift_lufs(audio_tree.lufs, gain_db, xp=jnp),
+            lufs_windows=shift_lufs_windows(audio_tree.lufs_windows, gain_db, xp=jnp),
         )
     return audio_tree
 

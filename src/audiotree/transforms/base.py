@@ -11,6 +11,7 @@ from jax.tree_util import DictKey
 import numpy as np
 
 from audiotree import AudioTree
+from audiotree.core import ARRAY_FIELDS
 
 # jax types its pytree key classes (DictKey, SequenceKey, ...) as ``Any``, so they
 # cannot appear directly in a type expression; ``KeyPath`` is the path of key
@@ -183,16 +184,7 @@ def _select_transformed(new_leaf, old_leaf, mask, xp):
         name: _select_field(
             mask, getattr(new_leaf, name), getattr(old_leaf, name), xp, name
         )
-        for name in (
-            "waveform",
-            "lufs",
-            "lufs_windows",
-            "pitch",
-            "velocity",
-            "note_duration",
-            "codes",
-            "latents",
-        )
+        for name in ARRAY_FIELDS
     }
     updates["metadata"] = {
         key: _select_field(

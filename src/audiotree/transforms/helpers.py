@@ -10,7 +10,7 @@ import librosax
 import numpy as np
 
 from audiotree import AudioTree
-from audiotree.loudness import safe_gain_db
+from audiotree.loudness import safe_gain_db, shift_lufs, shift_lufs_windows
 
 
 # =============================================================================
@@ -24,21 +24,6 @@ def _db2linear_jax(decibels):
 
 def _db2linear_np(decibels):
     return np.power(10.0, decibels / 20.0)
-
-
-def _shift_lufs_windows(lufs_windows, gain_db):
-    """Shift per-window LUFS by a per-item dB gain (a constant gain shifts every
-    window equally), or return ``None`` if ``lufs_windows`` is not populated.
-
-    Works for both NumPy and JAX arrays: ``gain_db`` is ``(batch,)`` and
-    broadcasts over the window axis. ``gain_db`` must be finite — callers that
-    derive it from a measured LUFS go through :func:`audiotree.loudness.safe_gain_db`,
-    which keeps a silent item's gain at ``0.0`` so its ``-inf`` windows stay
-    ``-inf`` instead of becoming ``NaN``.
-    """
-    if lufs_windows is None:
-        return None
-    return lufs_windows + gain_db[:, None]
 
 
 # =============================================================================
@@ -59,11 +44,10 @@ def _volume_norm_jax(
     gain_db = safe_gain_db(audio_tree.lufs, target_db, xp=jnp)
 
     waveform = waveform * _db2linear_jax(gain_db)[:, None, None]
-    lufs_windows = _shift_lufs_windows(audio_tree.lufs_windows, gain_db)
     return audio_tree.replace(
         waveform=waveform,
-        lufs=audio_tree.lufs + gain_db,
-        lufs_windows=lufs_windows,
+        lufs=shift_lufs(audio_tree.lufs, gain_db, xp=jnp),
+        lufs_windows=shift_lufs_windows(audio_tree.lufs_windows, gain_db, xp=jnp),
     )
 
 
@@ -79,11 +63,10 @@ def _volume_norm_np(
     gain_db = safe_gain_db(audio_tree.lufs, target_db, xp=np)
 
     waveform = waveform * _db2linear_np(gain_db)[:, None, None]
-    lufs_windows = _shift_lufs_windows(audio_tree.lufs_windows, gain_db)
     return audio_tree.replace(
         waveform=waveform,
-        lufs=(audio_tree.lufs + gain_db).astype(np.float32),
-        lufs_windows=lufs_windows,
+        lufs=shift_lufs(audio_tree.lufs, gain_db, xp=np),
+        lufs_windows=shift_lufs_windows(audio_tree.lufs_windows, gain_db, xp=np),
     )
 
 
