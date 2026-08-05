@@ -13,7 +13,7 @@ def test_audiotree_create_with_filepaths():
     """Test that AudioTree.create accepts and processes filepaths parameter."""
     # Test with 1D audio data and single filepath string
     audio_1d = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
-    tree1 = AudioTree.create(audio_1d, 44100, filepaths="test1.wav")
+    tree1 = AudioTree.create(audio_1d, 44100, filepath="test1.wav")
 
     assert tree1.waveform.shape == (
         1,
@@ -25,7 +25,7 @@ def test_audiotree_create_with_filepaths():
 
     # Test with 2D audio data and single filepath Path
     audio_2d = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])  # 2 channels, 3 samples
-    tree2 = AudioTree.create(audio_2d, 44100, filepaths=Path("test2.wav"))
+    tree2 = AudioTree.create(audio_2d, 44100, filepath=Path("test2.wav"))
 
     assert tree2.waveform.shape == (
         1,
@@ -37,7 +37,7 @@ def test_audiotree_create_with_filepaths():
     # Test with 3D audio data and list of filepaths
     audio_3d = np.array([[[1.0, 2.0, 3.0]]])  # Already correct shape: (1, 1, 3)
     filepaths = ["file1.wav", "file2.wav", Path("file3.wav")]
-    tree3 = AudioTree.create(audio_3d, 44100, filepaths=filepaths)
+    tree3 = AudioTree.create(audio_3d, 44100, filepath=filepaths)
 
     assert tree3.waveform.shape == (1, 1, 3)  # Should remain unchanged
     assert tree3.filepath == ["file1.wav", "file2.wav", "file3.wav"]
@@ -77,13 +77,13 @@ def test_filepath_too_long_raises():
 
     # A path exactly at the limit round-trips intact.
     exact = "a" * _str_max_length
-    tree = AudioTree.create(audio, 44100, filepaths=exact)
+    tree = AudioTree.create(audio, 44100, filepath=exact)
     assert tree.filepath == [exact]
 
     # One character over the limit raises rather than silently truncating.
     too_long = "a" * (_str_max_length + 1)
     with pytest.raises(ValueError, match="exceeds the metadata encoding limit"):
-        AudioTree.create(audio, 44100, filepaths=too_long)
+        AudioTree.create(audio, 44100, filepath=too_long)
 
 
 def test_audiotree_constructor_compatibility():
@@ -242,7 +242,7 @@ def test_audiotree_create_metadata_handling():
     # Test with existing metadata and filepaths
     existing_metadata = {"custom_key": "custom_value"}
     tree1 = AudioTree.create(
-        waveform, sample_rate, metadata=existing_metadata, filepaths="test.wav"
+        waveform, sample_rate, metadata=existing_metadata, filepath="test.wav"
     )
 
     # Should preserve existing metadata and add filepath
@@ -254,7 +254,7 @@ def test_audiotree_create_metadata_handling():
     assert "filepath" not in existing_metadata
 
     # Test with filepaths but no existing metadata
-    tree2 = AudioTree.create(waveform, sample_rate, filepaths="test2.wav")
+    tree2 = AudioTree.create(waveform, sample_rate, filepath="test2.wav")
     assert "filepath" in tree2.metadata
     assert tree2.filepath == ["test2.wav"]
 

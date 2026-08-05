@@ -299,7 +299,7 @@ AudioWriter automatically tracks all AudioTree metadata in the manifest:
         pitch=np.array([60.0, 62.0]),
         velocity=np.array([64, 80]),
         note_duration=np.array([1.0, 0.5]),
-        filepaths=["original1.wav", "original2.wav"]
+        filepath=["original1.wav", "original2.wav"]
     )
 
     # Write with custom tags
@@ -604,7 +604,7 @@ Here's a complete example of creating a training dataset with TreeWriter:
     from audiotree.sources import create_audio_dataset, TreeDataSource
     from audiotree.transforms import volume_change, shift_phase
 
-    def precompute_training_dataset(source_directory, num_samples, output_dir="precomputed_data"):
+    def precompute_training_dataset(source_directory, num_samples, directory="precomputed_data"):
         """Render an augmented dataset once so training never recomputes it."""
 
         # An infinite, shuffled stream of 3-second mono excerpts.

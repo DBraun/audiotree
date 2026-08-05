@@ -676,7 +676,7 @@ def _prob_test_tree(backend, batch_size):
     if backend == "jax":
         waveform = jnp.asarray(waveform)
     filepaths = [f"f{i}.wav" for i in range(batch_size)]
-    return AudioTree.create(waveform, sr, filepaths=filepaths).replace_lufs()
+    return AudioTree.create(waveform, sr, filepath=filepaths).replace_lufs()
 
 
 @pytest.mark.parametrize("name", _RANDOM_TRANSFORM_NAMES)

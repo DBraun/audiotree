@@ -274,7 +274,7 @@ class AudioTree:
         codes (np.ndarray or jax.Array, optional): The neural audio codec tokens for the audio.
         latents (np.ndarray or jax.Array, optional): The latent representations of the audio.
         metadata (dict): Any extra metadata can be placed here.
-        filepaths (Union[str, Path, List[Union[str, Path]]] | None): List of filepaths for the batch of audio.
+        filepath (Union[str, Path, List[Union[str, Path]]] | None): Provenance of each item -- one path, or one per batch item.
 
     Example:
         >>> audio = AudioTree.create(jnp.zeros((2, 44100)), 44100)  # stereo, 1 s
@@ -314,13 +314,13 @@ class AudioTree:
         codes: ArrayLike | None = None,
         latents: ArrayLike | None = None,
         metadata: dict | None = None,
-        filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
+        filepath: Union[str, Path, List[Union[str, Path]]] | None = None,
         source: Union[str, List[str]] | None = None,
     ) -> Self:
         """Create an ``AudioTree``, normalizing the waveform to ``(Batch, Channels, Samples)``.
 
         A bare ``(Samples,)`` or ``(Channels, Samples)`` waveform gains the missing leading axes, so
-        you don't have to reshape by hand. ``filepaths`` and ``source`` are encoded into ``metadata``.
+        you don't have to reshape by hand. ``filepath`` and ``source`` are encoded into ``metadata``.
 
         Args:
             waveform: Audio of shape ``(Samples)``, ``(Channels, Samples)``, or
@@ -337,7 +337,7 @@ class AudioTree:
             codes: Optional neural-codec tokens.
             latents: Optional latent representations.
             metadata: Optional extra metadata dict (copied, not mutated).
-            filepaths: Optional path(s) for the batch; encoded into ``metadata["filepath"]``.
+            filepath: Optional path(s) for the batch; encoded into ``metadata["filepath"]``.
             source: Optional source-group name(s) (e.g. ``"music"``), encoded into
                 ``metadata["source"]`` and read back via the :attr:`source` property. Pass a
                 single string to tag the whole batch, or a list with one name per batch item
@@ -361,14 +361,14 @@ class AudioTree:
             elif waveform.ndim == 2:
                 waveform = waveform[None, :, :]  # Add batch dimension
 
-        # Handle metadata and filepaths
+        # Handle metadata and filepath
         if metadata is None:
             metadata = {}
         else:
             metadata = metadata.copy()  # Don't modify the original dict
 
-        if filepaths is not None:
-            metadata["filepath"] = cls._encode_filepaths(filepaths)
+        if filepath is not None:
+            metadata["filepath"] = cls._encode_filepaths(filepath)
 
         if source is not None:
             metadata["source"] = cls._encode_filepaths(source)
@@ -623,7 +623,7 @@ class AudioTree:
         """Encode a single filepath *s* to an array of Unicode code points.
 
         The returned array is shaped ``(1, _str_max_length)`` so that multiple
-        rows (filepaths) can be concatenated along *axis=0*.
+        rows (filepath) can be concatenated along *axis=0*.
 
         Raises:
             ValueError: If *s* is longer than ``_str_max_length`` code points.
@@ -647,7 +647,7 @@ class AudioTree:
         """Vectorized helper to encode one or more *paths*.
 
         Args:
-            paths: A single filepath or an iterable of filepaths.
+            paths: A single filepath or an iterable of filepath.
 
         Returns
         -------
@@ -781,7 +781,7 @@ class AudioTree:
         mono: bool = False,
         pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"]
         | None = "constant",
-        filepaths: Union[str, Path, List[Union[str, Path]]] | None = None,
+        filepath: Union[str, Path, List[Union[str, Path]]] | None = None,
         source: str | None = None,
         metadata: Optional[Dict[str, Any]] = None,
         # AudioTree properties
@@ -807,7 +807,7 @@ class AudioTree:
                 ``pad_mode`` controls how the audio is right-padded (numpy.pad modes). Options:
                 "constant" (zeros, default), "edge" (repeat edge), "reflect" (mirror), "symmetric" (mirror with edge),
                 "wrap" (circular/loop), or None (no padding).
-            filepaths (Union[str, Path, List[str | Path]], optional): One or more filepaths to store in the returned
+            filepath (Union[str, Path, List[str | Path]], optional): One or more paths to store in the returned
                 ``AudioTree``'s metadata. If *None* (default) the provided ``audio_path`` will be used.
             source (str, optional): The source group name for this audio file (e.g., "music", "speech").
                 This is stored in metadata and accessible via the ``source`` property.
@@ -873,16 +873,16 @@ class AudioTree:
         # Add automatic metadata (these override user metadata to ensure correctness)
         combined_metadata["offset"] = np.array([offset])
 
-        if filepaths is None:
-            filepaths_to_store = [audio_path]
+        if filepath is None:
+            paths_to_store = [audio_path]
         else:
             # Normalize to list
-            if isinstance(filepaths, (str, Path)):
-                filepaths_to_store = [filepaths]
+            if isinstance(filepath, (str, Path)):
+                paths_to_store = [filepath]
             else:
-                filepaths_to_store = list(filepaths)
+                paths_to_store = list(filepath)
 
-        combined_metadata["filepath"] = cls._encode_filepaths(filepaths_to_store)
+        combined_metadata["filepath"] = cls._encode_filepaths(paths_to_store)
 
         if source is not None:
             combined_metadata["source"] = cls._encode_filepaths([source])
@@ -1063,12 +1063,12 @@ class AudioTree:
             "metadata": metadata,
         }
 
-        # Restore the source filepaths. AudioWriter stores them as a top-level
+        # Restore the source filepath. AudioWriter stores them as a top-level
         # ``filepath`` column of decoded strings (not under a ``metadata_``
-        # prefix), so passing them back through ``filepaths=`` re-encodes them
+        # prefix), so passing them back through ``filepath=`` re-encodes them
         # into ``metadata['filepath']`` and makes the ``.filepath`` property work.
         if "filepath" in manifest_data:
-            tree_kwargs["filepaths"] = [
+            tree_kwargs["filepath"] = [
                 str(p) for p in manifest_data["filepath"][indices]
             ]
 

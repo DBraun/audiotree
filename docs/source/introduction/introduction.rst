@@ -695,7 +695,7 @@ When creating AudioTree objects, you can associate them with source files:
     audio_tree = AudioTree.create(
         np.zeros((1, 44_100)),
         44_100,
-        filepaths="audio.wav"
+        filepath="audio.wav"
     )
     print(audio_tree.filepath)
 
@@ -703,7 +703,7 @@ When creating AudioTree objects, you can associate them with source files:
     audio_tree = AudioTree.create(
         np.zeros((3, 1, 44_100)),
         44_100,
-        filepaths=["a.wav", "b.wav", "c.wav"]
+        filepath=["a.wav", "b.wav", "c.wav"]
     )
     print(audio_tree.filepath)
 

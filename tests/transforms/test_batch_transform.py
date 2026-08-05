@@ -23,7 +23,7 @@ def test_batch_transform_with_dataloader():
         audio_tree = audiotree.AudioTree.create(
             waveform=waveform,
             sample_rate=sample_rate,
-            filepaths=f"/fake/path/audio_{i:04d}.wav",
+            filepath=f"/fake/path/audio_{i:04d}.wav",
         )
         audio_trees.append(audio_tree)
 
@@ -76,7 +76,7 @@ def test_batch_with_iter_dataset():
         audio_tree = AudioTree.create(
             waveform=waveform,
             sample_rate=sample_rate,
-            filepaths=f"/fake/path/audio_{i:04d}.wav",
+            filepath=f"/fake/path/audio_{i:04d}.wav",
         )
         audio_trees.append(audio_tree)
 
@@ -148,12 +148,12 @@ def test_batch_with_dict_elements():
         src_tree = AudioTree.create(
             waveform=src_data,
             sample_rate=sample_rate,
-            filepaths=f"/fake/path/src_{i:04d}.wav",
+            filepath=f"/fake/path/src_{i:04d}.wav",
         )
         tgt_tree = AudioTree.create(
             waveform=tgt_data,
             sample_rate=sample_rate,
-            filepaths=f"/fake/path/tgt_{i:04d}.wav",
+            filepath=f"/fake/path/tgt_{i:04d}.wav",
         )
         dict_items.append({"src": src_tree, "tgt": tgt_tree})
 

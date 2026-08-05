@@ -60,7 +60,11 @@ from .functional import trim
 
 # Batch is special - it's a grain BatchOperation, not a regular transform
 
+from audiotree.transforms.decorators import map_transform, random_transform
+
 __all__ = [
+    "map_transform",
+    "random_transform",
     "AudioCodec",
     "identity",
     "mono",

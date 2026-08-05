@@ -57,7 +57,11 @@ from .functional import (
 
 from audiotree.transforms.codec import AudioCodec, encode_latents, encode_with_codec
 
+from audiotree.transforms.decorators import map_transform, random_transform
+
 __all__ = [
+    "map_transform",
+    "random_transform",
     "AudioCodec",
     "volume_norm",
     "volume_change",

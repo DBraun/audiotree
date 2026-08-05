@@ -21,7 +21,7 @@ class AudioWriter:
     track all written audio files and their metadata.
 
     Args:
-        output_dir: Directory where audio files will be written
+        directory: Directory where audio files will be written
         pattern: Filename pattern with {index} placeholder for sequential numbering
         include_timestamp: Whether to include timestamps in manifest entries
         compress_manifest: Whether to compress NPZ manifest files (only applies to npz format)
@@ -82,7 +82,7 @@ class AudioWriter:
 
     def __init__(
         self,
-        output_dir: Union[str, Path] = ".",
+        directory: Union[str, Path] = ".",
         *,
         pattern: str = "audio_{index:04d}.wav",
         include_timestamp: bool = False,
@@ -95,10 +95,10 @@ class AudioWriter:
         progress_desc: Optional[str] = None,
         exist_ok: bool = False,
     ):
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.directory = Path(directory)
+        self.directory.mkdir(parents=True, exist_ok=True)
         if not exist_ok:
-            refuse_to_clobber(self.output_dir, ("manifest.npz", "manifest.json"))
+            refuse_to_clobber(self.directory, ("manifest.npz", "manifest.json"))
         self.exist_ok = exist_ok
         self.pattern = pattern
         # Inferred from the first written tree; every later write must match it.
@@ -199,7 +199,7 @@ class AudioWriter:
             # Generate filename
             # todo: need a way to pass more kwargs to this formatter
             filename = self.pattern.format(index=self.index)
-            filepath = self.output_dir / filename
+            filepath = self.directory / filename
 
             # Write audio file if requested
             if self.write_audio:
@@ -318,7 +318,7 @@ class AudioWriter:
         if not self.manifest_data:
             return None
 
-        manifest_path = self.output_dir / "manifest.npz"
+        manifest_path = self.directory / "manifest.npz"
 
         # Convert manifest data to arrays for efficient NPZ storage
         arrays_dict = self._manifest_to_arrays()
@@ -422,7 +422,7 @@ class AudioWriter:
         """
         stats = {
             "total_files": len(self.written_paths),
-            "output_directory": str(self.output_dir),
+            "output_directory": str(self.directory),
             "current_index": self.index,
             "write_audio": self.write_audio,
         }

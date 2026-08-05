@@ -165,7 +165,7 @@ class TreeWriter:
     combination. The schema is inferred from the first write() call.
 
     Args:
-        output_dir: Directory where memmap files will be written
+        directory: Directory where memmap files will be written
         expected_samples: Total number of samples to pre-allocate
         metadata: Optional dict of user metadata to store in manifest
         pbar: Optional tqdm progress bar instance. Updated by ``batch_size``
@@ -196,7 +196,7 @@ class TreeWriter:
 
     def __init__(
         self,
-        output_dir: Union[str, Path],
+        directory: Union[str, Path],
         expected_samples: int,
         *,
         metadata: Optional[Dict[str, Any]] = None,
@@ -204,7 +204,7 @@ class TreeWriter:
         close_pbar: bool = False,
         exist_ok: bool = False,
     ):
-        self.output_dir = Path(output_dir)
+        self.directory = Path(directory)
         self.expected_samples = expected_samples
         self.metadata = metadata or {}
         self.exist_ok = exist_ok
@@ -229,9 +229,9 @@ class TreeWriter:
         """
         if self._is_open:
             raise RuntimeError("Writer is already open")
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.directory.mkdir(parents=True, exist_ok=True)
         if not self.exist_ok:
-            refuse_to_clobber(self.output_dir, ("manifest.json", "*.bin", "*.bagz"))
+            refuse_to_clobber(self.directory, ("manifest.json", "*.bin", "*.bagz"))
         self._is_open = True
         return self
 
@@ -295,7 +295,7 @@ class TreeWriter:
 
             full_shape = (self.expected_samples,) + shape_per_sample
             mm = np.memmap(
-                self.output_dir / filename,
+                self.directory / filename,
                 dtype=dtype,
                 mode="w+",
                 shape=full_shape,
@@ -308,7 +308,7 @@ class TreeWriter:
             for name in self._string_leaf_names:
                 filename = f"{name}.bagz"
                 self._string_leaf_info[name] = {"file": filename}
-                self._bagz_writers[name] = bagz.Writer(str(self.output_dir / filename))
+                self._bagz_writers[name] = bagz.Writer(str(self.directory / filename))
 
         # Publish the manifest as soon as the schema is known, so a pre-render
         # killed partway through leaves a readable prefix rather than a
@@ -424,7 +424,7 @@ class TreeWriter:
             "string_leaves": self._string_leaf_info,
             "metadata": self.metadata,
         }
-        write_json_atomic(self.output_dir / "manifest.json", manifest)
+        write_json_atomic(self.directory / "manifest.json", manifest)
 
     def flush(self):
         """Flush all memmap files to disk and refresh the manifest."""
@@ -460,7 +460,7 @@ class TreeWriter:
                 self.expected_samples,
             )
             for name in self._leaf_names:
-                filepath = self.output_dir / self._leaf_info[name]["file"]
+                filepath = self.directory / self._leaf_info[name]["file"]
                 shape_per_sample = self._leaf_info[name]["shape_per_sample"]
                 dtype = np.dtype(self._leaf_info[name]["dtype"])
                 elems = int(np.prod(shape_per_sample)) if shape_per_sample else 1
@@ -486,7 +486,7 @@ class TreeWriter:
         return {
             "samples_written": self._current_index,
             "expected_samples": self.expected_samples,
-            "output_directory": str(self.output_dir),
+            "output_directory": str(self.directory),
             "leaves": list(self._leaf_names),
             "string_leaves": list(self._string_leaf_names),
             "is_open": self._is_open,

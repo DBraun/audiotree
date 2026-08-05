@@ -229,7 +229,7 @@ Removed API
        ``ds.to_iter_dataset().batch(n, batch_fn=AudioTree.batch)``
    * - ``AudioTree.from_array()``
      - ``AudioTree.create()``, which also normalizes 1-D and 2-D input to
-       ``(B, C, T)`` and accepts ``filepaths=`` / ``source=``
+       ``(B, C, T)`` and accepts ``filepath=`` / ``source=``
    * - ``AudioDataSimpleSource``, ``AudioDataBalancedSource``,
        ``AudioDataBalancedDataset``, ``AudioDataSourceMixin``
      - ``create_audio_dataset()`` / ``create_balanced_audio_dataset()``

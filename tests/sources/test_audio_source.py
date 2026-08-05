@@ -22,7 +22,7 @@ def test_round_trip_npz_manifest():
             lufs=np.array([-20.0, -18.0, -22.0]),
             pitch=np.array([60.0, 62.0, 64.0]),
             velocity=np.array([64, 80, 100]),
-            filepaths=["original1.wav", "original2.wav", "original3.wav"],
+            filepath=["original1.wav", "original2.wav", "original3.wav"],
         )
 
         # Write with AudioWriter
@@ -175,7 +175,7 @@ def test_restores_source_filepath():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree.create(
-            np.zeros((3, 1, 8000), dtype=np.float32), 8000, filepaths=paths
+            np.zeros((3, 1, 8000), dtype=np.float32), 8000, filepath=paths
         )
         with AudioWriter(output_dir, write_audio=False) as writer:
             writer.write(tree)
@@ -189,7 +189,7 @@ def test_restores_source_filepath():
         tree = AudioTree.create(
             (0.1 * np.random.randn(3, 1, 8000)).astype(np.float32),
             8000,
-            filepaths=paths,
+            filepath=paths,
         )
         with AudioWriter(output_dir) as writer:
             writer.write(tree)

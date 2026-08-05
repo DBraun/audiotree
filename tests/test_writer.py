@@ -205,7 +205,7 @@ def test_npz_manifest():
             pitch=np.array([60.0, 62.0, 64.0]),
             velocity=np.array([64, 80, 100]),
             note_duration=np.array([1.0, 0.5, 0.75]),
-            filepaths=["source1.wav", "source2.wav", "source3.wav"],
+            filepath=["source1.wav", "source2.wav", "source3.wav"],
         )
 
         # Write with NPZ manifest
@@ -426,7 +426,7 @@ def test_manifest_datasource_npz():
             lufs=np.array([-20.0, -15.0, -25.0]),
             pitch=np.array([60.0, 62.0, 58.0]),
             velocity=np.array([64, 80, 45]),
-            filepaths=["orig1.wav", "orig2.wav", "orig3.wav"],
+            filepath=["orig1.wav", "orig2.wav", "orig3.wav"],
         )
 
         # Write with NPZ manifest
@@ -576,7 +576,7 @@ def test_manifest_only_generation():
             lufs=np.array([-20.0, -18.0, -22.0]),
             pitch=np.array([60.0, 62.0, 64.0]),
             velocity=np.array([64, 80, 100]),
-            filepaths=["original1.wav", "original2.wav", "original3.wav"],
+            filepath=["original1.wav", "original2.wav", "original3.wav"],
         )
 
         # Write manifest only (no audio files)
@@ -978,7 +978,7 @@ def test_audiotree_from_manifest_restores_filepaths():
         tree = AudioTree.create(
             np.zeros((4, 1, 8000), dtype=np.float32),
             sample_rate=8000,
-            filepaths=paths,
+            filepath=paths,
             metadata={"label": np.arange(4)},
         )
         with AudioWriter(output_dir, write_audio=False) as writer:
@@ -1000,7 +1000,7 @@ def test_audiotree_from_manifest_restores_filepaths():
         tree = AudioTree.create(
             np.zeros((4, 1, 8000), dtype=np.float32),
             sample_rate=8000,
-            filepaths=paths,
+            filepath=paths,
         )
         with AudioWriter(output_dir) as writer:
             writer.write(tree)

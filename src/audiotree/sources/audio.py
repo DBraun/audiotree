@@ -302,7 +302,7 @@ class AudioDataSource(grain.RandomAccessDataSource):
 
             # Prefer the recorded source path over the output audio path.
             if source_filepath is not None:
-                tree_kwargs["filepaths"] = source_filepath
+                tree_kwargs["filepath"] = source_filepath
 
             # Add AudioTree fields dynamically from manifest, each with an
             # explicit leading batch axis. ``from_file`` only adds one to a
@@ -332,7 +332,7 @@ class AudioDataSource(grain.RandomAccessDataSource):
 
             # Restore the recorded source path (there is no audio file here).
             if source_filepath is not None:
-                tree_kwargs["filepaths"] = source_filepath
+                tree_kwargs["filepath"] = source_filepath
 
             # Add AudioTree fields dynamically from manifest, each with an
             # explicit leading batch axis (see the files_written branch above).
