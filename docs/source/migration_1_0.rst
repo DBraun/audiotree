@@ -98,8 +98,8 @@ ways, in signatures that sit side by side in one pipeline. Everything is now
      - 1.0
    * - ``SaliencyParams.loudness_cutoff``
      - ``SaliencyParams.lufs_cutoff``
-   * - ``ManifestDataSource.filter_by_loudness()``
-     - ``ManifestDataSource.filter_by_lufs()``
+   * - ``AudioDataSource.filter_by_loudness()``
+     - ``AudioDataSource.filter_by_lufs()``
    * - ``corrupt_phase(keep_loudness=...)``, ``shift_phase(keep_loudness=...)``
      - ``keep_lufs=...``
    * - ``build_window_loudness_cache()`` and friends
@@ -328,7 +328,7 @@ Public callables are keyword-only past the first argument or two
 ``create_audio_dataset``, ``create_balanced_audio_dataset``,
 ``create_windowed_audio_dataset``, ``find_audio_files``, ``AudioTree.create`` /
 ``from_file`` / ``from_manifest`` / ``write`` / ``resample``, ``AudioWriter``,
-``TreeWriter``, ``ManifestDataSource`` and ``TreeDataSource`` now take at most one
+``TreeWriter``, ``AudioDataSource`` and ``TreeDataSource`` now take at most one
 or two positional parameters; everything after the ``*`` must be passed by keyword.
 ``tests/test_public_api.py`` enforces the budget.
 

@@ -24,7 +24,7 @@ def _with_batch_axis(value) -> np.ndarray:
     return np.asarray(value)[np.newaxis, ...]
 
 
-class ManifestDataSource(grain.RandomAccessDataSource):
+class AudioDataSource(grain.RandomAccessDataSource):
     """A DataSource that reads audio files based on a manifest file created by AudioWriter.
 
     This DataSource is designed to work seamlessly with the output of AudioWriter, reading
@@ -64,7 +64,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
 
         Read straight from the NPZ manifest:
 
-        >>> source = ManifestDataSource(manifest_path)
+        >>> source = AudioDataSource(manifest_path)
         >>> len(source)
         5
         >>> source[0].waveform.shape
@@ -72,14 +72,14 @@ class ManifestDataSource(grain.RandomAccessDataSource):
 
         Filter entries by metadata while loading:
 
-        >>> source = ManifestDataSource(
+        >>> source = AudioDataSource(
         ...     manifest_path,
         ...     filter_fn=lambda entry: entry.get('lufs', -float('inf')) > -20
         ... )
 
         Or use the convenience constructor that points at the output directory:
 
-        >>> source = ManifestDataSource.from_writer_output(out_dir)
+        >>> source = AudioDataSource.from_writer_output(out_dir)
     """
 
     def __init__(
@@ -364,22 +364,22 @@ class ManifestDataSource(grain.RandomAccessDataSource):
         """
         return self.entries.copy()
 
-    def filter_by_tag(self, tag_name: str, tag_value) -> "ManifestDataSource":
-        """Create a new ManifestDataSource filtered by a specific tag value.
+    def filter_by_tag(self, tag_name: str, tag_value) -> "AudioDataSource":
+        """Create a new AudioDataSource filtered by a specific tag value.
 
         Args:
             tag_name: Name of the tag to filter by
             tag_value: Value the tag must have
 
         Returns:
-            New ManifestDataSource with filtered entries
+            New AudioDataSource with filtered entries
         """
 
         def filter_fn(entry):
             tags = entry.get("tags", {})
             return tags.get(tag_name) == tag_value
 
-        return ManifestDataSource(
+        return AudioDataSource(
             manifest_path=self.manifest_path,
             audio_dir=self.audio_dir,
             sample_rate=self.sample_rate,
@@ -391,8 +391,8 @@ class ManifestDataSource(grain.RandomAccessDataSource):
 
     def filter_by_lufs(
         self, min_lufs: Optional[float] = None, max_lufs: Optional[float] = None
-    ) -> "ManifestDataSource":
-        """Create a new ManifestDataSource filtered by loudness range.
+    ) -> "AudioDataSource":
+        """Create a new AudioDataSource filtered by loudness range.
 
         Filters entries based on the 'lufs' field in the manifest.
         Works with manifests created by AudioWriter in NPZ format.
@@ -402,7 +402,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             max_lufs: Maximum loudness in LUFS (inclusive)
 
         Returns:
-            New ManifestDataSource with filtered entries
+            New AudioDataSource with filtered entries
 
         Example:
             Write four items with known per-item loudness so the manifest
@@ -419,7 +419,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             ... )
             >>> with AudioWriter(out_dir) as writer:
             ...     _ = writer.write(tree)
-            >>> source = ManifestDataSource.from_writer_output(out_dir)
+            >>> source = AudioDataSource.from_writer_output(out_dir)
 
             Keep only samples louder than -20 LUFS:
 
@@ -444,7 +444,7 @@ class ManifestDataSource(grain.RandomAccessDataSource):
                 return False
             return True
 
-        return ManifestDataSource(
+        return AudioDataSource(
             manifest_path=self.manifest_path,
             audio_dir=self.audio_dir,
             sample_rate=self.sample_rate,
@@ -457,20 +457,20 @@ class ManifestDataSource(grain.RandomAccessDataSource):
     @classmethod
     def from_writer_output(
         cls, output_dir: Union[str, Path], **kwargs
-    ) -> "ManifestDataSource":
+    ) -> "AudioDataSource":
         """Convenience constructor for reading AudioWriter output.
 
         This method automatically locates the manifest file in the output directory
-        based on the specified format and creates a ManifestDataSource configured
+        based on the specified format and creates a AudioDataSource configured
         to read the audio files and metadata.
 
         Args:
             output_dir: Directory containing AudioWriter output
-            **kwargs: Additional arguments passed to ManifestDataSource
+            **kwargs: Additional arguments passed to AudioDataSource
                      (e.g., sample_rate, mono, note_duration, filter_fn)
 
         Returns:
-            ManifestDataSource configured for the output directory
+            AudioDataSource configured for the output directory
 
         Example:
             Write some audio, then read it back from the output directory:
@@ -481,13 +481,13 @@ class ManifestDataSource(grain.RandomAccessDataSource):
             >>> out_dir = tempfile.mkdtemp()
             >>> with AudioWriter(out_dir) as writer:
             ...     _ = writer.write(AudioTree.create(jnp.zeros((3, 1, 44100)), 44100))
-            >>> source = ManifestDataSource.from_writer_output(out_dir)
+            >>> source = AudioDataSource.from_writer_output(out_dir)
             >>> len(source)
             3
 
             Read with on-the-fly resampling to 16 kHz:
 
-            >>> source = ManifestDataSource.from_writer_output(out_dir, sample_rate=16000)
+            >>> source = AudioDataSource.from_writer_output(out_dir, sample_rate=16000)
             >>> source[0].waveform.shape
             (1, 1, 16000)
         """

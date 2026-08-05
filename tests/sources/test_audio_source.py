@@ -1,4 +1,4 @@
-"""Tests for ManifestDataSource."""
+"""Tests for AudioDataSource."""
 
 import tempfile
 from pathlib import Path
@@ -6,11 +6,11 @@ from pathlib import Path
 import numpy as np
 
 from audiotree import AudioTree, AudioWriter
-from audiotree.sources import ManifestDataSource
+from audiotree.sources import AudioDataSource
 
 
 def test_round_trip_npz_manifest():
-    """Test writing with AudioWriter and reading back with ManifestDataSource."""
+    """Test writing with AudioWriter and reading back with AudioDataSource."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
@@ -29,8 +29,8 @@ def test_round_trip_npz_manifest():
         with AudioWriter(output_dir) as writer:
             writer.write(audio_tree, tags={"dataset": "test", "version": 1})
 
-        # Read back with ManifestDataSource
-        source = ManifestDataSource(output_dir / "manifest.npz")
+        # Read back with AudioDataSource
+        source = AudioDataSource(output_dir / "manifest.npz")
 
         # Check length
         assert len(source) == 3
@@ -83,7 +83,7 @@ def test_filter_function():
                 writer.write(audio_tree)
 
         # Filter for loud samples only
-        source = ManifestDataSource(
+        source = AudioDataSource(
             output_dir / "manifest.npz",
             filter_fn=lambda entry: entry.get("lufs", -float("inf")) > -20,
         )
@@ -109,7 +109,7 @@ def test_filter_by_tag():
         writer.save_manifest()
 
         # Filter by category
-        source = ManifestDataSource(output_dir / "manifest.npz")
+        source = AudioDataSource(output_dir / "manifest.npz")
         source_a = source.filter_by_tag("category", "A")
 
         assert len(source_a) == 2  # Two items with category "A"
@@ -138,7 +138,7 @@ def test_filter_by_lufs():
         writer.save_manifest()
 
         # Filter by loudness range
-        source = ManifestDataSource(output_dir / "manifest.npz")
+        source = AudioDataSource(output_dir / "manifest.npz")
         filtered = source.filter_by_lufs(min_lufs=-20, max_lufs=-10)
 
         assert len(filtered) == 3  # -20, -15, -10
@@ -157,13 +157,13 @@ def test_from_writer_output():
             writer.write(audio_tree)
 
         # Use convenience constructor
-        source = ManifestDataSource.from_writer_output(output_dir)
+        source = AudioDataSource.from_writer_output(output_dir)
         assert len(source) == 2
         assert source[0].waveform.shape == (1, 1, 8000)
 
 
 def test_restores_source_filepath():
-    """ManifestDataSource exposes the original source path via .filepath.
+    """AudioDataSource exposes the original source path via .filepath.
 
     The source path is stored as a top-level ``filepath`` manifest column,
     distinct from the on-disk output filename. It is restored for both
@@ -180,7 +180,7 @@ def test_restores_source_filepath():
         with AudioWriter(output_dir, write_audio=False) as writer:
             writer.write(tree)
 
-        source = ManifestDataSource.from_writer_output(output_dir)
+        source = AudioDataSource.from_writer_output(output_dir)
         assert [source[i].filepath[0] for i in range(len(source))] == paths
 
     # Real audio written: .filepath is the source path, not the output WAV.
@@ -194,7 +194,7 @@ def test_restores_source_filepath():
         with AudioWriter(output_dir) as writer:
             writer.write(tree)
 
-        source = ManifestDataSource.from_writer_output(output_dir)
+        source = AudioDataSource.from_writer_output(output_dir)
         assert [source[i].filepath[0] for i in range(len(source))] == paths
 
     # No source paths: real-audio items fall back to the output path.
@@ -206,7 +206,7 @@ def test_restores_source_filepath():
         with AudioWriter(output_dir) as writer:
             writer.write(tree)
 
-        source = ManifestDataSource.from_writer_output(output_dir)
+        source = AudioDataSource.from_writer_output(output_dir)
         assert source[0].filepath[0].endswith("audio_0000.wav")
 
 
@@ -221,7 +221,7 @@ def test_num_records_limit():
             writer.write(audio_tree)
 
         # Load only first 3
-        source = ManifestDataSource(output_dir / "manifest.npz", num_records=3)
+        source = AudioDataSource(output_dir / "manifest.npz", num_records=3)
         assert len(source) == 3
 
 
@@ -236,7 +236,7 @@ def test_resampling():
             writer.write(audio_tree)
 
         # Read and resample to 16000 Hz
-        source = ManifestDataSource(output_dir / "manifest.npz", sample_rate=16000)
+        source = AudioDataSource(output_dir / "manifest.npz", sample_rate=16000)
 
         loaded = source[0]
         assert loaded.sample_rate == 16000
@@ -254,7 +254,7 @@ def test_mono_conversion():
             writer.write(audio_tree)
 
         # Read as mono
-        source = ManifestDataSource(output_dir / "manifest.npz", mono=True)
+        source = AudioDataSource(output_dir / "manifest.npz", mono=True)
 
         loaded = source[0]
         assert loaded.waveform.shape[1] == 1  # Mono
@@ -273,7 +273,7 @@ def test_get_entry():
         with AudioWriter(output_dir) as writer:
             writer.write(audio_tree, tags={"test": True})
 
-        source = ManifestDataSource(output_dir / "manifest.npz")
+        source = AudioDataSource(output_dir / "manifest.npz")
 
         # Get raw entry
         entry = source.get_entry(0)
@@ -283,7 +283,7 @@ def test_get_entry():
 
 
 def test_grain_integration():
-    """Test that ManifestDataSource works as a grain RandomAccessDataSource."""
+    """Test that AudioDataSource works as a grain RandomAccessDataSource."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
@@ -293,7 +293,7 @@ def test_grain_integration():
             writer.write(audio_tree)
 
         # Use as grain RandomAccessDataSource
-        source = ManifestDataSource(output_dir / "manifest.npz")
+        source = AudioDataSource(output_dir / "manifest.npz")
 
         # Test it works with basic grain functionality
         assert len(source) == 8
@@ -310,7 +310,7 @@ def test_grain_integration():
 
 
 def test_grain_dataloader_with_batch_transform():
-    """ManifestDataSource items collate through AudioTree.batch."""
+    """AudioDataSource items collate through AudioTree.batch."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
@@ -331,13 +331,13 @@ def test_grain_dataloader_with_batch_transform():
         with AudioWriter(output_dir) as writer:
             writer.write(audio_tree)
 
-        # Load with ManifestDataSource
-        source = ManifestDataSource.from_writer_output(output_dir)
+        # Load with AudioDataSource
+        source = AudioDataSource.from_writer_output(output_dir)
 
-        # Load all items from ManifestDataSource
+        # Load all items from AudioDataSource
         items = [source[i] for i in range(len(source))]
 
-        # Test that items from ManifestDataSource can be batched
+        # Test that items from AudioDataSource can be batched
         batch1 = AudioTree.batch(items[0:4])
         batch2 = AudioTree.batch(items[4:8])
 
@@ -359,8 +359,8 @@ def test_grain_dataloader_with_batch_transform():
         assert np.allclose(batch1.lufs, expected_loudness_batch1, atol=0.01)
         assert np.allclose(batch2.lufs, expected_loudness_batch2, atol=0.01)
 
-        # The key result: ManifestDataSource items can be successfully batched
-        print("✓ ManifestDataSource items are compatible with AudioTree.batch")
+        # The key result: AudioDataSource items can be successfully batched
+        print("✓ AudioDataSource items are compatible with AudioTree.batch")
 
 
 def test_manifest_metadata_with_batch_transform():
@@ -391,7 +391,7 @@ def test_manifest_metadata_with_batch_transform():
             writer.write(audio_tree)
 
         # Load data back with metadata
-        source = ManifestDataSource.from_writer_output(output_dir)
+        source = AudioDataSource.from_writer_output(output_dir)
 
         # Load items and check metadata is present
         items = []
@@ -423,7 +423,7 @@ def test_manifest_metadata_with_batch_transform():
 
 
 def test_manifest_with_batch_transform():
-    """ManifestDataSource items batch correctly when collated by hand."""
+    """AudioDataSource items batch correctly when collated by hand."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
@@ -445,7 +445,7 @@ def test_manifest_with_batch_transform():
             writer.write(audio_tree)
 
         # Load data back
-        source = ManifestDataSource.from_writer_output(output_dir)
+        source = AudioDataSource.from_writer_output(output_dir)
 
         # Manually load items and batch them
         # (avoiding grain.DataLoader which seems to have issues in test environment)
@@ -530,7 +530,7 @@ def test_array_fields_keep_their_batch_axis_and_dtype():
             writer.write(tree.replace_lufs())
         writer.close()
 
-        source = ManifestDataSource.from_writer_output(str(output_dir))
+        source = AudioDataSource.from_writer_output(str(output_dir))
         item = source[0]
 
         # Every field carries the leading batch axis.
@@ -572,7 +572,7 @@ def test_sentinel_values_are_not_dropped():
             )
         writer.close()
 
-        source = ManifestDataSource.from_writer_output(str(output_dir))
+        source = AudioDataSource.from_writer_output(str(output_dir))
         assert source[1].velocity is not None
         np.testing.assert_array_equal(source[1].velocity, [-1])
 

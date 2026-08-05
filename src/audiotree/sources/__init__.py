@@ -1,7 +1,7 @@
 from .core import create_audio_dataset
 from .core import create_balanced_audio_dataset
 from .core import find_audio_files
-from .manifest import ManifestDataSource
+from .audio import AudioDataSource
 from .tree import TreeDataSource
 from .windowed import (
     build_window_lufs_cache,
@@ -26,6 +26,6 @@ __all__ = [
     "scan_durations",
     "WindowLufsCache",
     "WindowParams",
-    "ManifestDataSource",
+    "AudioDataSource",
     "TreeDataSource",
 ]

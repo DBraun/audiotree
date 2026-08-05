@@ -16,7 +16,7 @@ import audiotree.sources
 import audiotree.transforms
 import audiotree.transforms.jax
 from audiotree import AudioTree, AudioWriter, TreeWriter
-from audiotree.sources import ManifestDataSource, TreeDataSource
+from audiotree.sources import AudioDataSource, TreeDataSource
 
 # Public callables and the number of leading positional parameters each is
 # allowed. Everything past that must be keyword-only, so adding, reordering or
@@ -33,7 +33,7 @@ POSITIONAL_BUDGET = {
     "audiotree.AudioTree.resample": 1,
     "audiotree.AudioWriter": 1,
     "audiotree.TreeWriter": 2,
-    "audiotree.sources.ManifestDataSource": 1,
+    "audiotree.sources.AudioDataSource": 1,
     "audiotree.sources.TreeDataSource": 1,
 }
 
@@ -91,7 +91,7 @@ def test_all_entries_resolve(module):
 
 
 @pytest.mark.parametrize(
-    "cls", [AudioTree, AudioWriter, TreeWriter, ManifestDataSource, TreeDataSource]
+    "cls", [AudioTree, AudioWriter, TreeWriter, AudioDataSource, TreeDataSource]
 )
 def test_public_methods_are_documented(cls):
     """Public methods carry a docstring, so autodoc has something to render."""

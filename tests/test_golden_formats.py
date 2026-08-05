@@ -22,7 +22,7 @@ import numpy as np
 import pytest
 
 from audiotree import AudioTree, _format
-from audiotree.sources import ManifestDataSource, TreeDataSource
+from audiotree.sources import AudioDataSource, TreeDataSource
 
 GOLDEN = Path(__file__).parent / "assets" / "golden"
 TREE_DIR = GOLDEN / "tree_v1_0"
@@ -100,7 +100,7 @@ def test_golden_manifest_header():
 )
 def test_golden_manifest_reads_with_expected_values(index, peak, pitch, velocity):
     """Audio, dtypes and per-item scalars all survive the committed manifest."""
-    source = ManifestDataSource.from_writer_output(MANIFEST_DIR)
+    source = AudioDataSource.from_writer_output(MANIFEST_DIR)
     assert len(source) == 3
 
     item = source[index]
@@ -117,7 +117,7 @@ def test_golden_manifest_reads_with_expected_values(index, peak, pitch, velocity
 
 def test_golden_manifest_batches_without_corruption():
     """Batching the committed items stacks them along the batch axis."""
-    source = ManifestDataSource.from_writer_output(MANIFEST_DIR)
+    source = AudioDataSource.from_writer_output(MANIFEST_DIR)
     batched = AudioTree.batch([source[i] for i in range(3)])
     assert batched.waveform.shape == (3, 1, 400)
     np.testing.assert_array_equal(batched.pitch.ravel(), [60, 61, 62])

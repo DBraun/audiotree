@@ -48,7 +48,7 @@ import jax.numpy as jnp
 import numpy as np
 from audiotree import AudioTree, AudioWriter, TreeWriter
 from audiotree.sources import (
-    ManifestDataSource,
+    AudioDataSource,
     TreeDataSource,
     create_audio_dataset,
     create_balanced_audio_dataset,

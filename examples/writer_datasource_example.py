@@ -1,11 +1,11 @@
-"""Example demonstrating AudioWriter and ManifestDataSource round-trip workflow."""
+"""Example demonstrating AudioWriter and AudioDataSource round-trip workflow."""
 
 import tempfile
 from pathlib import Path
 
 import numpy as np
 from audiotree import AudioTree, AudioWriter
-from audiotree.sources import ManifestDataSource
+from audiotree.sources import AudioDataSource
 
 
 def main():
@@ -74,11 +74,11 @@ def main():
             stats = writer.get_stats()
             print(f"\n  Total files written: {stats['total_files']}")
 
-        # 3. Read back with ManifestDataSource
-        print("3. Reading back with ManifestDataSource...")
+        # 3. Read back with AudioDataSource
+        print("3. Reading back with AudioDataSource...")
 
         # Load all files
-        source = ManifestDataSource.from_writer_output(
+        source = AudioDataSource.from_writer_output(
             output_dir,
         )
 

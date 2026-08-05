@@ -8,7 +8,7 @@ import pytest
 import soundfile
 
 from audiotree import AudioTree, AudioWriter
-from audiotree.sources import ManifestDataSource
+from audiotree.sources import AudioDataSource
 
 
 def test_lufs_windows_round_trips_through_manifest():
@@ -414,7 +414,7 @@ def test_progress_bar_no_close():
 
 
 def test_manifest_datasource_npz():
-    """Test reading NPZ manifest with ManifestDataSource."""
+    """Test reading NPZ manifest with AudioDataSource."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
@@ -433,8 +433,8 @@ def test_manifest_datasource_npz():
         with AudioWriter(output_dir) as writer:
             writer.write(audio_tree, tags={"experiment": "test_npz"})
 
-        # Read back with ManifestDataSource
-        source = ManifestDataSource.from_writer_output(output_dir)
+        # Read back with AudioDataSource
+        source = AudioDataSource.from_writer_output(output_dir)
 
         assert len(source) == 3
 
@@ -801,8 +801,8 @@ def test_metadata_different_batch_sizes():
             manifest_data["metadata_frame_id"], [100, 200, 300, 400, 500, 600]
         )
 
-        # Test reading back with ManifestDataSource
-        source = ManifestDataSource.from_writer_output(output_dir)
+        # Test reading back with AudioDataSource
+        source = AudioDataSource.from_writer_output(output_dir)
         assert len(source) == 6
 
         # Check all items have correct metadata shapes and values
@@ -1020,7 +1020,7 @@ def test_audiotree_from_manifest_restores_filepaths():
 
 
 def test_manifest_datasource_without_audio_files():
-    """Test that ManifestDataSource works with manifest-only (no audio files)."""
+    """Test that AudioDataSource works with manifest-only (no audio files)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
@@ -1048,8 +1048,8 @@ def test_manifest_datasource_without_audio_files():
         wav_files = list(output_dir.glob("*.wav"))
         assert len(wav_files) == 0, "No WAV files should exist"
 
-        # Load with ManifestDataSource - should work without audio files
-        source = ManifestDataSource.from_writer_output(output_dir)
+        # Load with AudioDataSource - should work without audio files
+        source = AudioDataSource.from_writer_output(output_dir)
         assert len(source) == 3
 
         # Check loaded items

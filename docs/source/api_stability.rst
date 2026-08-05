@@ -31,7 +31,7 @@ attributes and methods of the classes those names resolve to.
        ``create_windowed_audio_dataset``, ``find_audio_files``,
        ``build_window_lufs_cache``, ``load_window_lufs``, ``save_window_lufs``,
        ``precompute_window_lufs``, ``scan_durations``, ``WindowLufsCache``,
-       ``WindowParams``, ``ManifestDataSource``, ``TreeDataSource``
+       ``WindowParams``, ``AudioDataSource``, ``TreeDataSource``
    * - ``audiotree.transforms``
      - ``AudioCodec``, ``identity``, ``mono``, ``stereo``, ``resample``,
        ``volume_change``, ``volume_norm``, ``rescale_audio``, ``peak_norm``,
@@ -80,7 +80,7 @@ merged, or deleted in any 1.x release without a deprecation cycle:
        ``audiotree``.
    * - ``audiotree.writer``, ``audiotree.tree_writer``
      - Define ``AudioWriter`` / ``TreeWriter``; import them from ``audiotree``.
-   * - ``audiotree.sources.core``, ``.sources.manifest``, ``.sources.tree``,
+   * - ``audiotree.sources.core``, ``.sources.audio``, ``.sources.tree``,
        ``.sources.windowed``
      - Define the dataset builders, the source classes, and the windowed
        helpers; import them from ``audiotree.sources``.
@@ -118,7 +118,7 @@ silently:
   everything past the budget must be keyword-only, so adding, reordering or
   renaming a parameter cannot silently change what a positional call means.
 * Every public method of ``AudioTree``, ``AudioWriter``, ``TreeWriter``,
-  ``ManifestDataSource`` and ``TreeDataSource`` carries a docstring.
+  ``AudioDataSource`` and ``TreeDataSource`` carries a docstring.
 * A misspelled transform parameter raises ``TypeError`` rather than being ignored.
 
 Versioning
@@ -192,7 +192,7 @@ Three artifacts are a compatibility contract, because people keep them for years
      - :class:`~audiotree.tree_writer.TreeWriter`, read by ``TreeDataSource``
    * - NPZ manifest
      - ``audiotree-manifest``
-     - :class:`~audiotree.writer.AudioWriter`, read by ``ManifestDataSource``
+     - :class:`~audiotree.writer.AudioWriter`, read by ``AudioDataSource``
        and ``AudioTree.from_manifest``
    * - windowed-LUFS cache
      - ``audiotree-lufs-windows``

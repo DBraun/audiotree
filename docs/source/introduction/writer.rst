@@ -433,11 +433,11 @@ The ``pattern`` parameter supports Python string formatting:
 Reading Written Data
 ~~~~~~~~~~~~~~~~~~~~
 
-Use :class:`~audiotree.sources.manifest.ManifestDataSource` to read AudioWriter output:
+Use :class:`~audiotree.sources.audio.AudioDataSource` to read AudioWriter output:
 
 .. testcode::
 
-    from audiotree.sources import ManifestDataSource
+    from audiotree.sources import AudioDataSource
 
     # Write some data (with per-item loudness so it round-trips into the manifest)
     loudness_tree = AudioTree.create(
@@ -449,7 +449,7 @@ Use :class:`~audiotree.sources.manifest.ManifestDataSource` to read AudioWriter 
         writer.write(loudness_tree, tags={"split": "train"})
 
     # Read it back
-    source = ManifestDataSource.from_writer_output("output_read")
+    source = AudioDataSource.from_writer_output("output_read")
 
     # Access individual items
     loaded_tree = source[0]
@@ -532,7 +532,7 @@ predicate (evaluated per manifest entry) selects a subset at load time:
    **Two readers, two shapes.** :meth:`~audiotree.core.AudioTree.from_manifest`
    returns *one* batched AudioTree with the whole manifest stacked along the batch
    axis — ideal for a one-shot analysis pass over saved embeddings.
-   :class:`~audiotree.sources.ManifestDataSource` (above) is instead a Grain
+   :class:`~audiotree.sources.AudioDataSource` (above) is instead a Grain
    ``RandomAccessDataSource`` that yields one item at a time in manifest order, for
    feeding a pipeline. ``from_manifest`` restores the ``metadata_*`` arrays, the
    label fields (``lufs``, ``pitch``, ``codes``, …), and the source ``filepath``
@@ -577,14 +577,14 @@ Here's how metadata flows through AudioTree transformations and into the manifes
     guitar
     120
 
-When read back via :class:`~audiotree.sources.manifest.ManifestDataSource`, the per-item
+When read back via :class:`~audiotree.sources.audio.AudioDataSource`, the per-item
 metadata is restored as batched arrays (so a single-item read gives ``array(['guitar'])``
 for a string field):
 
 .. testcode::
 
-    from audiotree.sources import ManifestDataSource
-    source = ManifestDataSource.from_writer_output("output_flow")
+    from audiotree.sources import AudioDataSource
+    source = AudioDataSource.from_writer_output("output_flow")
     loaded = source[0]
     print(loaded.metadata["instrument"])
 
