@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import field
 from functools import partial
 import importlib
 import json
@@ -54,108 +53,68 @@ else:
     ArrayLike = np.ndarray
 
 
-@struct.dataclass
-class SaliencyParams:
-    """
-    The parameters for saliency detection.
-
-    When enabled, this controls how audio excerpts are selected from files. If lufs_cutoff is None
-    or enabled is False, a random offset is used without loudness-based filtering.
-
-    Args:
-        enabled (bool): Whether to enable saliency detection. Defaults to True. If False, loads from
-            offset=0 (deterministic). If True without lufs_cutoff, uses a random offset.
-        num_tries (int): Maximum number of attempts to find a salient section of audio (default 8).
-            Only used when lufs_cutoff is not None.
-        lufs_cutoff (float): Minimum loudness cutoff in decibels for determining salient audio (default -40).
-            If lufs_cutoff is None but SaliencyParams is enabled, uses a random offset without loudness filtering.
-        search_function (str): Which search function determines the random offset, given as a
-            registered name: ``"uniform"`` (the default) draws uniformly over the file, and
-            ``"bias_early"`` gradually searches earlier in the file as more attempts are made.
-            A dotted path to an importable function (``"mypkg.offsets.my_search"``) selects a
-            custom one, and a callable may be passed directly in Python. An unknown name raises
-            when the ``SaliencyParams`` is constructed.
-    """
-
-    enabled: bool = field(default=True)
-    num_tries: int = 8
-    lufs_cutoff: float = -40.0
-
-    # Annotated ``str`` rather than ``Union[Callable, str]`` because argbind binds
-    # this from YAML and does not handle the union well; a callable is still
-    # accepted at runtime and resolved by ``_resolve_search_function``.
-    search_function: str = "uniform"
-
-    @staticmethod
-    def search_uniform(
-        rng: np.random.Generator,
-        offset: float,
-        duration: float,
-        total_duration: float,
-        attempt: int,
-        max_attempts: int,
-    ):
-        lower_bound = max(0.0, offset)
-        upper_bound = max(total_duration - duration, lower_bound)
-        return rng.uniform(lower_bound, upper_bound)
-
-    @staticmethod
-    def search_bias_early(
-        rng: np.random.Generator,
-        offset: float,
-        duration: float,
-        total_duration: float,
-        attempt: int,
-        max_attempts: int,
-    ):
-        lower_bound = max(0.0, offset)
-        upper_bound1 = max(total_duration - duration, lower_bound)
-        # linearly interpolate the upper bound based on number of attempts so far
-        alpha = attempt / (max_attempts - 1) if max_attempts > 1 else 0
-        upper_bound2 = min(upper_bound1, lower_bound + duration)
-        upper_bound = upper_bound1 * (1 - alpha) + upper_bound2 * alpha
-        return rng.uniform(lower_bound, upper_bound)
-
-    def __post_init__(self):
-        # Resolve eagerly so a bad name fails when the config is built, not deep
-        # inside a data worker several minutes into training.
-        _resolve_search_function(self.search_function)
+def search_uniform(
+    rng: np.random.Generator,
+    offset: float,
+    duration: float,
+    total_duration: float,
+    attempt: int,
+    max_attempts: int,
+) -> float:
+    """Draw an excerpt offset uniformly over the file."""
+    lower_bound = max(0.0, offset)
+    upper_bound = max(total_duration - duration, lower_bound)
+    return rng.uniform(lower_bound, upper_bound)
 
 
-#: Search functions selectable by name in a config file.
+def search_bias_early(
+    rng: np.random.Generator,
+    offset: float,
+    duration: float,
+    total_duration: float,
+    attempt: int,
+    max_attempts: int,
+) -> float:
+    """Draw an offset that concentrates earlier in the file as attempts mount."""
+    lower_bound = max(0.0, offset)
+    upper_bound1 = max(total_duration - duration, lower_bound)
+    # linearly interpolate the upper bound based on number of attempts so far
+    alpha = attempt / (max_attempts - 1) if max_attempts > 1 else 0
+    upper_bound2 = min(upper_bound1, lower_bound + duration)
+    upper_bound = upper_bound1 * (1 - alpha) + upper_bound2 * alpha
+    return rng.uniform(lower_bound, upper_bound)
+
+
+#: Offset-search functions selectable by name in a config file.
 _SEARCH_FUNCTIONS = {
-    "uniform": SaliencyParams.search_uniform,
-    "bias_early": SaliencyParams.search_bias_early,
-    # Pre-1.0 spellings, kept so existing configs keep resolving.
-    "SaliencyParams.search_uniform": SaliencyParams.search_uniform,
-    "SaliencyParams.search_bias_early": SaliencyParams.search_bias_early,
+    "uniform": search_uniform,
+    "bias_early": search_bias_early,
 }
 
 
 def _resolve_search_function(spec) -> Callable:
-    """Resolve a saliency ``search_function`` to a callable.
+    """Resolve an excerpt ``search`` to a callable.
 
     Accepts a callable, a registered name (``"uniform"``, ``"bias_early"``), or
     a dotted path to an importable function (``"mypkg.offsets.my_search"``).
 
-    Deliberately *not* ``eval``: ``SaliencyParams`` is bound from YAML, so an
-    ``eval`` here makes a config file arbitrary code execution. It also only ever
-    worked for the two built-ins, since it evaluated in this module's namespace.
+    Deliberately *not* ``eval``: :class:`ExcerptConfig` is bound from YAML, so an
+    ``eval`` here would make a config file arbitrary code execution.
     """
     if callable(spec):
         return spec
     if not isinstance(spec, str):
         raise TypeError(
-            f"search_function must be a name or a callable, got {type(spec).__name__}."
+            f"search must be a name or a callable, got {type(spec).__name__}."
         )
     if spec in _SEARCH_FUNCTIONS:
         return _SEARCH_FUNCTIONS[spec]
 
-    known = ", ".join(repr(k) for k in ("uniform", "bias_early"))
+    known = ", ".join(repr(k) for k in _SEARCH_FUNCTIONS)
     if "." not in spec:
         raise ValueError(
-            f"Unknown search_function {spec!r}. Valid names: {known}, or a dotted "
-            f"path to an importable function (e.g. 'mypkg.offsets.my_search')."
+            f"Unknown search {spec!r}. Valid names: {known}, or a dotted path to "
+            f"an importable function (e.g. 'mypkg.offsets.my_search')."
         )
 
     module_name, _, attribute = spec.rpartition(".")
@@ -163,7 +122,7 @@ def _resolve_search_function(spec) -> Callable:
         module = importlib.import_module(module_name)
     except ImportError as exc:
         raise ValueError(
-            f"Could not import module {module_name!r} for search_function {spec!r}. "
+            f"Could not import module {module_name!r} for search {spec!r}. "
             f"Valid names: {known}, or a dotted path to an importable function."
         ) from exc
     try:
@@ -171,11 +130,116 @@ def _resolve_search_function(spec) -> Callable:
     except AttributeError as exc:
         raise ValueError(
             f"Module {module_name!r} has no attribute {attribute!r} "
-            f"(from search_function {spec!r})."
+            f"(from search {spec!r})."
         ) from exc
     if not callable(function):
-        raise ValueError(f"search_function {spec!r} resolved to a non-callable.")
+        raise ValueError(f"search {spec!r} resolved to a non-callable.")
     return function
+
+
+@dataclasses.dataclass(frozen=True)
+class ExcerptConfig:
+    """How to choose which part of a file an excerpt comes from.
+
+    One named ``strategy`` rather than a set of interacting flags:
+
+    ``"start"``
+        Always offset 0. Deterministic, and the right choice for validation sets
+        where every epoch should see identical audio.
+    ``"random"``
+        A uniformly random offset (the default). No audio is measured, so this
+        costs one read per item.
+    ``"loudest"``
+        Draw up to ``num_tries`` candidate offsets and keep the loudest, stopping
+        early once one exceeds ``lufs_cutoff``. Use it on corpora with long quiet
+        stretches; it costs up to ``num_tries`` reads and loudness measurements
+        per item.
+
+    Note that ``"loudest"`` is a best-of-``num_tries`` search, not a filter: on a
+    file where nothing clears the cutoff it still has to return something, and
+    ``on_failure`` decides what.
+
+    Attributes:
+        strategy: Which of the three above.
+        num_tries: Maximum candidate offsets to try (``"loudest"`` only).
+        lufs_cutoff: Integrated loudness (LUFS) that ends the search early
+            (``"loudest"`` only).
+        search: How each candidate offset is drawn (``"loudest"`` only) — a
+            registered name (``"uniform"``, ``"bias_early"``), a dotted path to
+            an importable function, or a callable.
+        on_failure: What to do when no candidate clears ``lufs_cutoff``
+            (``"loudest"`` only). ``"keep"`` returns the loudest excerpt found,
+            ``"skip"`` returns ``None`` (grain drops it at
+            ``to_iter_dataset()``), ``"raise"`` raises naming the file.
+
+    Example:
+        >>> from audiotree import ExcerptConfig
+        >>> ExcerptConfig().strategy                       # random offset
+        'random'
+        >>> ExcerptConfig(strategy="start").strategy       # deterministic
+        'start'
+        >>> loud = ExcerptConfig(
+        ...     strategy="loudest", lufs_cutoff=-30, on_failure="skip"
+        ... )
+        >>> loud.num_tries, loud.on_failure
+        (8, 'skip')
+    """
+
+    strategy: Literal["start", "random", "loudest"] = "random"
+    num_tries: int = 8
+    lufs_cutoff: float = -40.0
+    # Annotated as a union even though argbind binds it from YAML: the registry
+    # handles the string case, and claiming `str` while accepting a callable was
+    # a lie.
+    search: Union[str, Callable] = "uniform"
+    on_failure: Literal["keep", "skip", "raise"] = "keep"
+
+    #: Parameters that only mean anything under ``strategy="loudest"``.
+    _LOUDEST_ONLY = ("num_tries", "lufs_cutoff", "search", "on_failure")
+
+    def __post_init__(self):
+        strategies = ("start", "random", "loudest")
+        if self.strategy not in strategies:
+            raise ValueError(
+                f"strategy must be one of {strategies}, got {self.strategy!r}."
+            )
+        if self.on_failure not in ("keep", "skip", "raise"):
+            raise ValueError(
+                f"on_failure must be 'keep', 'skip' or 'raise', got "
+                f"{self.on_failure!r}."
+            )
+        if self.num_tries < 1:
+            raise ValueError(f"num_tries must be >= 1, got {self.num_tries}.")
+
+        # Setting a loudest-only knob under another strategy silently did nothing
+        # before, which is exactly how "I set lufs_cutoff and nothing happened"
+        # goes unnoticed.
+        if self.strategy != "loudest":
+            defaults = {
+                f.name: f.default
+                for f in dataclasses.fields(self)
+                if f.name in self._LOUDEST_ONLY
+            }
+            ignored = [
+                name
+                for name, default in defaults.items()
+                if getattr(self, name) != default
+            ]
+            if ignored:
+                raise ValueError(
+                    f"{', '.join(sorted(ignored))} only appl"
+                    f"{'ies' if len(ignored) == 1 else 'y'} to "
+                    f"strategy='loudest', but strategy is {self.strategy!r}."
+                )
+
+        # Resolve eagerly so a bad name fails when the config is built, not deep
+        # inside a data worker several minutes into training.
+        _resolve_search_function(self.search)
+
+    @property
+    def resolved_search(self) -> Callable:
+        """The ``search`` spec as a callable."""
+        return _resolve_search_function(self.search)
 
 
 # Fixed width (in Unicode code points) for filepath/source strings encoded into
@@ -1044,9 +1108,7 @@ class AudioTree:
         total_duration = info.duration  # seconds
 
         if search_function is None:
-            search_function = partial(
-                SaliencyParams.search_uniform, attempt=0, max_attempts=1
-            )
+            search_function = partial(search_uniform, attempt=0, max_attempts=1)
 
         random_offset = search_function(rng, offset, duration, total_duration)
 
@@ -1057,73 +1119,84 @@ class AudioTree:
         return audio_signal
 
     @classmethod
-    def salient_excerpt(
+    def loudest_excerpt(
         cls,
         audio_path: Union[str, Path],
         rng: np.random.Generator,
-        saliency_params: SaliencyParams,
+        excerpt: "ExcerptConfig",
         **kwargs,
-    ) -> Self:
-        """Create an AudioTree from a salient section of audio from a file path.
+    ) -> Optional[Self]:
+        """Create an AudioTree from the loudest of several candidate excerpts.
+
+        Draws up to ``excerpt.num_tries`` offsets and keeps the loudest, stopping
+        early once one exceeds ``excerpt.lufs_cutoff``. This is a best-of-k
+        search rather than a filter, so on a file where nothing clears the cutoff
+        it still has to return something -- ``excerpt.on_failure`` decides what.
 
         Args:
             audio_path (str): Path to audio file.
             rng (np.random.Generator): Random number generator such as ``np.random.default_rng(42)``.
-            saliency_params (SaliencyParams): Saliency parameters to use to find a salient section.
-            **kwargs: Keyword arguments passed to ``AudioTree.__init__``.
+            excerpt (ExcerptConfig): How to search. ``strategy`` must be ``"loudest"``.
+            **kwargs: Keyword arguments passed to ``AudioTree.from_file``.
 
         Returns:
-            AudioTree: An instance of ``AudioTree``.
+            AudioTree, or ``None`` when nothing cleared the cutoff and
+            ``on_failure="skip"``.
         """
         if "offset" in kwargs:
             raise ValueError(
-                "``salient_excerpt`` cannot be used with kwarg ``offset``."
+                "``loudest_excerpt`` cannot be used with kwarg ``offset``."
             )
         if "duration" not in kwargs:
             raise ValueError(
-                "``salient_excerpt`` must be used with kwarg ``duration``."
+                "``loudest_excerpt`` must be used with kwarg ``duration``."
             )
-        if not saliency_params.enabled or saliency_params.lufs_cutoff is None:
-            excerpt = cls.excerpt(audio_path, rng=rng, **kwargs)
-        else:
-            # Get file info once before the loop to avoid repeated soundfile.info calls
-            info = soundfile.info(audio_path)
-            file_duration = info.duration
+        if excerpt.strategy != "loudest":
+            raise ValueError(
+                f"loudest_excerpt needs strategy='loudest', got {excerpt.strategy!r}."
+            )
 
-            duration = kwargs["duration"]
-            excerpt = None
-            best_lufs = -np.inf
-            current_try = 0
-            num_tries = saliency_params.num_tries
-            _search_function = _resolve_search_function(saliency_params.search_function)
-            while best_lufs <= saliency_params.lufs_cutoff:
-                search_function = partial(
-                    _search_function,
-                    attempt=current_try,
-                    max_attempts=num_tries,
-                )
-                # Inline the `excerpt` logic to reuse file_duration
-                random_offset = search_function(rng, 0.0, duration, file_duration)
-                new_excerpt = cls.from_file(
-                    audio_path=audio_path, offset=random_offset, **kwargs
-                )
-                if new_excerpt.waveform.shape[-1] == 0:
-                    logging.warning(
-                        f"Empty audio loaded from {audio_path} at offset "
-                        f"{random_offset:.2f}s (file_duration={file_duration:.2f}s)"
-                    )
-                new_excerpt = new_excerpt.replace_lufs()
-                if current_try == 0 or new_excerpt.lufs > best_lufs:
-                    excerpt = new_excerpt
-                    best_lufs = new_excerpt.lufs
-                current_try += 1
-                if num_tries is not None and current_try >= num_tries:
-                    break
-            # ``best_lufs`` starts at -inf and ``lufs_cutoff`` is not None
-            # here, so the loop always runs (and assigns ``excerpt``) at least once.
-            assert excerpt is not None
+        # Read the header once rather than per attempt.
+        file_duration = soundfile.info(audio_path).duration
+        duration = kwargs["duration"]
 
-        return excerpt
+        best = None
+        best_lufs = -np.inf
+        for attempt in range(excerpt.num_tries):
+            offset = excerpt.resolved_search(
+                rng,
+                0.0,
+                duration,
+                file_duration,
+                attempt=attempt,
+                max_attempts=excerpt.num_tries,
+            )
+            candidate = cls.from_file(audio_path=audio_path, offset=offset, **kwargs)
+            if candidate.waveform.shape[-1] == 0:
+                logging.warning(
+                    f"Empty audio loaded from {audio_path} at offset "
+                    f"{offset:.2f}s (file_duration={file_duration:.2f}s)"
+                )
+            candidate = candidate.replace_lufs()
+            # One file, so a batch of one; keep it scalar for the comparison and
+            # for the failure message.
+            candidate_lufs = float(np.asarray(candidate.lufs).reshape(-1)[0])
+            if best is None or candidate_lufs > best_lufs:
+                best, best_lufs = candidate, candidate_lufs
+            if best_lufs > excerpt.lufs_cutoff:
+                return best
+
+        # Nothing cleared the cutoff. Returning the quietest thing we found is
+        # indistinguishable from success, which is why this is configurable.
+        if excerpt.on_failure == "raise":
+            raise RuntimeError(
+                f"No excerpt of {audio_path} reached {excerpt.lufs_cutoff} LUFS in "
+                f"{excerpt.num_tries} tries (loudest was {best_lufs:.1f}). "
+                f"Pass on_failure='skip' to drop such files, or lower lufs_cutoff."
+            )
+        if excerpt.on_failure == "skip":
+            return None
+        return best
 
     def to_mono(
         self, strategy: Literal["average", "left", "right"] = "average"

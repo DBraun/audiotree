@@ -653,22 +653,22 @@ def test_replace_lufs_windows_numpy_jax_agree():
 
 
 # =============================================================================
-# SaliencyParams.search_function resolution
+# ExcerptConfig.search resolution
 # =============================================================================
 
 
 def test_search_function_resolution():
     """Names, legacy spellings, dotted paths and callables all resolve."""
-    from audiotree.core import SaliencyParams, _resolve_search_function
-
-    assert SaliencyParams().search_function == "uniform"
-    assert _resolve_search_function("uniform") is SaliencyParams.search_uniform
-    assert _resolve_search_function("bias_early") is SaliencyParams.search_bias_early
-    # Pre-1.0 spellings still work.
-    assert (
-        _resolve_search_function("SaliencyParams.search_uniform")
-        is SaliencyParams.search_uniform
+    from audiotree.core import (
+        ExcerptConfig,
+        _resolve_search_function,
+        search_bias_early,
+        search_uniform,
     )
+
+    assert ExcerptConfig().search == "uniform"
+    assert _resolve_search_function("uniform") is search_uniform
+    assert _resolve_search_function("bias_early") is search_bias_early
     # A callable passes through, and a dotted path is imported.
     assert _resolve_search_function(np.mean) is np.mean
     assert _resolve_search_function("numpy.mean") is np.mean
@@ -686,10 +686,10 @@ def test_search_function_resolution():
 )
 def test_search_function_rejects_bad_specs(spec):
     """An unknown search_function raises when the params object is built."""
-    from audiotree.core import SaliencyParams
+    from audiotree.core import ExcerptConfig
 
     with pytest.raises(ValueError):
-        SaliencyParams(search_function=spec)
+        ExcerptConfig(search=spec)
 
 
 def _write_half_silent_wav(path, sample_rate=16000, seconds=4.0):
@@ -704,36 +704,36 @@ def _write_half_silent_wav(path, sample_rate=16000, seconds=4.0):
     return path
 
 
-def test_salient_excerpt_finds_the_loud_half(tmp_path):
+def test_loudest_excerpt_finds_the_loud_half(tmp_path):
     """The saliency search returns an excerpt above the cutoff when one exists."""
-    from audiotree.core import SaliencyParams
+    from audiotree.core import ExcerptConfig
 
     path = _write_half_silent_wav(tmp_path / "half.wav")
-    params = SaliencyParams(num_tries=32, lufs_cutoff=-40.0)
-    tree = AudioTree.salient_excerpt(
+    params = ExcerptConfig(strategy="loudest", num_tries=32, lufs_cutoff=-40.0)
+    tree = AudioTree.loudest_excerpt(
         str(path),
         rng=np.random.default_rng(0),
-        saliency_params=params,
+        excerpt=params,
         duration=0.5,
         sample_rate=16000,
     )
     assert float(tree.lufs[0]) > -40.0
 
 
-def test_salient_excerpt_terminates_on_fully_silent_audio(tmp_path):
+def test_loudest_excerpt_terminates_on_fully_silent_audio(tmp_path):
     """A file that can never pass the cutoff must stop after num_tries, not hang."""
     import soundfile
 
-    from audiotree.core import SaliencyParams
+    from audiotree.core import ExcerptConfig
 
     path = tmp_path / "silent.wav"
     soundfile.write(str(path), np.zeros(16000 * 2, dtype=np.float32), 16000)
 
-    params = SaliencyParams(num_tries=3, lufs_cutoff=-40.0)
-    tree = AudioTree.salient_excerpt(
+    params = ExcerptConfig(strategy="loudest", num_tries=3, lufs_cutoff=-40.0)
+    tree = AudioTree.loudest_excerpt(
         str(path),
         rng=np.random.default_rng(0),
-        saliency_params=params,
+        excerpt=params,
         duration=0.5,
         sample_rate=16000,
     )
@@ -741,18 +741,18 @@ def test_salient_excerpt_terminates_on_fully_silent_audio(tmp_path):
     assert float(tree.lufs[0]) == -np.inf
 
 
-def test_salient_excerpt_accepts_bias_early_by_name(tmp_path):
+def test_loudest_excerpt_accepts_bias_early_by_name(tmp_path):
     """``search_function`` selects the searcher by registered name."""
-    from audiotree.core import SaliencyParams
+    from audiotree.core import ExcerptConfig
 
     path = _write_half_silent_wav(tmp_path / "half2.wav")
-    params = SaliencyParams(
-        num_tries=8, lufs_cutoff=-40.0, search_function="bias_early"
+    params = ExcerptConfig(
+        strategy="loudest", num_tries=8, lufs_cutoff=-40.0, search="bias_early"
     )
-    tree = AudioTree.salient_excerpt(
+    tree = AudioTree.loudest_excerpt(
         str(path),
         rng=np.random.default_rng(1),
-        saliency_params=params,
+        excerpt=params,
         duration=0.5,
         sample_rate=16000,
     )

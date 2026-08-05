@@ -75,9 +75,10 @@ Use saliency to select louder sections of audio:
 .. code-block:: python
 
     from audiotree.sources import create_balanced_audio_dataset
-    from audiotree.core import SaliencyParams
+    from audiotree.sources import ExcerptConfig
 
-    saliency_params = SaliencyParams(
+    excerpt = ExcerptConfig(
+        strategy="loudest",
         enabled=True,
         lufs_cutoff=-40,  # Only select sections above -40 LUFS
         num_tries=10,
@@ -88,7 +89,7 @@ Use saliency to select louder sections of audio:
             "speech": ["/data/speech"],
             "music": ["/data/music"],
         },
-        saliency_params=saliency_params,
+        excerpt=excerpt,
         sample_rate=44100,
         duration=3.0,
     )
@@ -98,24 +99,24 @@ found, even if still below ``lufs_cutoff``. To *guarantee* the floor (dropping
 files that never clear it), filter on ``lufs`` afterward; see :ref:`balanced_datasets`.
 
 The same saliency search is available as a classmethod,
-:meth:`~audiotree.core.AudioTree.salient_excerpt`, for pulling a single loud
+:meth:`~audiotree.core.AudioTree.loudest_excerpt`, for pulling a single loud
 excerpt straight from a file path without building a dataset:
 
 .. code-block:: python
 
     import numpy as np
     from audiotree import AudioTree
-    from audiotree.core import SaliencyParams
+    from audiotree.sources import ExcerptConfig
 
-    tree = AudioTree.salient_excerpt(
+    tree = AudioTree.loudest_excerpt(
         "/data/song.wav",
         rng=np.random.default_rng(0),
-        saliency_params=SaliencyParams(enabled=True, lufs_cutoff=-40, num_tries=10),
+        excerpt=ExcerptConfig(strategy="loudest", lufs_cutoff=-40, num_tries=10),
         sample_rate=44100,
         duration=3.0,          # required
     )
 
-It takes the same :class:`~audiotree.core.SaliencyParams` as the dataset loaders and
+It takes the same :class:`~audiotree.sources.ExcerptConfig` as the dataset loaders and
 forwards ``sample_rate`` / ``duration`` / ``mono`` to
 :meth:`~audiotree.core.AudioTree.from_file`.
 
@@ -194,7 +195,7 @@ In this example each ``<name>.wav`` has a sibling ``<name>.npy`` holding a
 
     import numpy as np
     from audiotree import AudioTree
-    from audiotree.core import SaliencyParams
+    from audiotree.sources import ExcerptConfig
     from audiotree.sources import create_audio_dataset
 
     PIANOROLL_FPS = 100  # frame rate of the .npy pianorolls
@@ -205,7 +206,7 @@ In this example each ``<name>.wav`` has a sibling ``<name>.npy`` holding a
         sources=_piano_dir,
         sample_rate=16000,
         duration=1.0,
-        saliency_params=SaliencyParams(enabled=True, lufs_cutoff=None),
+        excerpt=ExcerptConfig(strategy="random"),
     )
 
     def attach_pianoroll(audio_tree: AudioTree) -> AudioTree:

@@ -423,7 +423,7 @@ def test_window_params_in_balanced_dataset():
 
 
 def test_window_params_and_saliency_params_mutually_exclusive():
-    from audiotree.core import SaliencyParams
+    from audiotree.core import ExcerptConfig
 
     with tempfile.TemporaryDirectory() as tmp:
         a_dir = Path(tmp) / "g"
@@ -432,5 +432,5 @@ def test_window_params_and_saliency_params_mutually_exclusive():
             create_balanced_audio_dataset(
                 sources={"A": [str(a_dir)]},
                 window_params=WindowParams(),
-                saliency_params=SaliencyParams(),
+                excerpt=ExcerptConfig(strategy="start"),
             )

@@ -8,7 +8,7 @@ import pytest
 import soundfile as sf
 
 from audiotree import AudioTree
-from audiotree.core import SaliencyParams
+from audiotree.core import ExcerptConfig
 from audiotree.sources import create_audio_dataset, find_audio_files
 
 
@@ -162,12 +162,12 @@ def test_with_saliency():
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_dir = _create_test_audio_files(tmpdir, 5, duration=3.0)
 
-        saliency_params = SaliencyParams(enabled=True, lufs_cutoff=None)
+        excerpt = ExcerptConfig(strategy="random")
         ds = create_audio_dataset(
             sources=audio_dir,
             sample_rate=44100,
             duration=1.0,
-            saliency_params=saliency_params,
+            excerpt=excerpt,
         )
 
         assert len(ds) == 5

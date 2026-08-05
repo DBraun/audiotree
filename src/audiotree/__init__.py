@@ -3,7 +3,7 @@ __author__ = "David Braun"
 from typing import TYPE_CHECKING
 
 from .core import AudioTree
-from .core import SaliencyParams
+from .core import ExcerptConfig
 from .writer import AudioWriter
 from .tree_writer import TreeWriter
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AudioTree",
-    "SaliencyParams",
+    "ExcerptConfig",
     "AudioWriter",
     "TreeWriter",
     "sources",

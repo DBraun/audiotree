@@ -1,15 +1,16 @@
-"""Test load_audio_with_saliency and create_balanced_audio_dataset with SaliencyParams."""
+"""Test load_audio_with_saliency and create_balanced_audio_dataset with ExcerptConfig."""
 
 import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 import grain
 
 from audiotree import AudioTree
-from audiotree.core import SaliencyParams
+from audiotree import ExcerptConfig
 from audiotree.sources import create_balanced_audio_dataset
-from audiotree.sources.core import _load_audio_with_saliency
+from audiotree.sources.core import _load_excerpt
 
 # Paths to test audio files
 TEST_AUDIO_MONO = (
@@ -25,19 +26,19 @@ TEST_AUDIO_STEREO = (
 )  # 20s, stereo, 44.1kHz
 
 
-def test_load_audio_with_saliency_basic():
+def test_load_excerpt_basic():
     """Test load_audio_with_saliency function with basic functionality."""
     sample_rate = 44_100
 
     # Test without saliency
     rng = np.random.default_rng(42)
-    result = _load_audio_with_saliency(
+    result = _load_excerpt(
         str(TEST_AUDIO_MONO),
         rng,
         sample_rate=sample_rate,
         duration=1.0,
         mono=True,
-        saliency_params=None,
+        excerpt=ExcerptConfig(strategy="start"),
     )
 
     assert isinstance(result, AudioTree)
@@ -46,14 +47,14 @@ def test_load_audio_with_saliency_basic():
 
     # Test with saliency enabled but no loudness cutoff
     rng = np.random.default_rng(42)
-    saliency_params = SaliencyParams(enabled=True, lufs_cutoff=None)
-    result = _load_audio_with_saliency(
+    excerpt = ExcerptConfig(strategy="random")
+    result = _load_excerpt(
         str(TEST_AUDIO_MONO),
         rng,
         sample_rate=sample_rate,
         duration=1.0,
         mono=True,
-        saliency_params=saliency_params,
+        excerpt=excerpt,
     )
 
     assert isinstance(result, AudioTree)
@@ -67,13 +68,13 @@ def test_saliency_variety_with_repetition():
     # Create dataset with same file repeated many times
     # TEST_AUDIO_MONO is 7.18 seconds long with natural speech variation
     ds = grain.MapDataset.source([str(TEST_AUDIO_MONO)] * 100).random_map(
-        lambda path, rng: _load_audio_with_saliency(
+        lambda path, rng: _load_excerpt(
             path,
             rng,
             sample_rate=sample_rate,
             duration=1.0,
             mono=True,
-            saliency_params=SaliencyParams(enabled=True, lufs_cutoff=None),
+            excerpt=ExcerptConfig(strategy="random"),
         ),
         seed=42,
     )
@@ -104,13 +105,13 @@ def test_saliency_determinism():
     # Create two datasets with same seed
     def make_dataset(seed):
         return grain.MapDataset.source([str(TEST_AUDIO_MONO)] * 10).random_map(
-            lambda path, rng: _load_audio_with_saliency(
+            lambda path, rng: _load_excerpt(
                 path,
                 rng,
                 sample_rate=sample_rate,
                 duration=1.0,
                 mono=True,
-                saliency_params=SaliencyParams(enabled=True, lufs_cutoff=None),
+                excerpt=ExcerptConfig(strategy="random"),
             ),
             seed=seed,
         )
@@ -128,7 +129,7 @@ def test_saliency_determinism():
 
 
 def test_create_balanced_audio_dataset_with_saliency():
-    """Test create_balanced_audio_dataset with SaliencyParams and grain.DataLoader."""
+    """Test create_balanced_audio_dataset with ExcerptConfig and grain.DataLoader."""
     import shutil
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -141,13 +142,13 @@ def test_create_balanced_audio_dataset_with_saliency():
             shutil.copy(TEST_AUDIO_MONO, target)
 
         sample_rate = 44_100
-        saliency_params = SaliencyParams(enabled=True, lufs_cutoff=None)
+        excerpt = ExcerptConfig(strategy="random")
         ds = create_balanced_audio_dataset(
             sources={"test": [str(output_dir)]},
             sample_rate=sample_rate,
             duration=1.0,
             mono=True,
-            saliency_params=saliency_params,
+            excerpt=excerpt,
             shuffle_seed=42,
         ).slice(slice(0, num_files))
 
@@ -216,13 +217,13 @@ def test_repeated_dataset_variety():
 
         # Create dataset with many more records than files, forcing repetition
         sample_rate = 16_000
-        saliency_params = SaliencyParams(enabled=True, lufs_cutoff=None)
+        excerpt = ExcerptConfig(strategy="random")
         ds = create_balanced_audio_dataset(
             sources={"test": [str(output_dir)]},
             sample_rate=sample_rate,
             duration=1.0,
             mono=True,
-            saliency_params=saliency_params,
+            excerpt=excerpt,
             shuffle_seed=42,
         ).slice(slice(0, 100))
 
@@ -250,7 +251,7 @@ def test_repeated_dataset_variety():
 
 
 if __name__ == "__main__":
-    test_load_audio_with_saliency_basic()
+    test_load_excerpt_basic()
     print("Basic test passed!")
 
     test_saliency_variety_with_repetition()
@@ -266,3 +267,131 @@ if __name__ == "__main__":
     print("Repeated dataset variety test passed!")
 
     print("\nAll tests passed!")
+
+
+# === ExcerptConfig ===
+
+
+def test_default_excerpt_varies_the_offset(tmp_path):
+    """The default must not read the head of every file forever.
+
+    `saliency_params=None` used to mean "offset 0", so out of the box every
+    epoch saw the same leading excerpt and `excerpt_seed` controlled nothing.
+    """
+    import soundfile
+
+    from audiotree.sources import create_audio_dataset
+
+    sr = 16000
+    t = np.arange(sr * 8) / sr
+    soundfile.write(
+        str(tmp_path / "a.wav"),
+        (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32),
+        sr,
+    )
+
+    def offsets(**kwargs):
+        ds = create_audio_dataset(
+            sources=str(tmp_path), duration=1.0, sample_rate=sr, repeat=True, **kwargs
+        )
+        return [float(ds[i].metadata["offset"][0]) for i in range(6)]
+
+    assert len(set(offsets())) > 1
+    # ...and the deterministic behavior is still reachable, by name.
+    assert offsets(excerpt=ExcerptConfig(strategy="start")) == [0.0] * 6
+    # excerpt_seed now actually selects different excerpts.
+    assert offsets(excerpt_seed=1) != offsets(excerpt_seed=2)
+
+
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        (dict(strategy="nope"), "strategy must be one of"),
+        (dict(on_failure="nope"), "on_failure must be"),
+        (dict(strategy="loudest", num_tries=0), "num_tries must be >= 1"),
+        (dict(lufs_cutoff=-30.0), "only appl"),
+        (dict(on_failure="skip"), "only appl"),
+        (dict(search="bias_early"), "only appl"),
+        (dict(strategy="loudest", search="nope"), "Unknown search"),
+    ],
+)
+def test_excerpt_config_rejects_bad_combinations(kwargs, match):
+    """Knobs that do nothing under the chosen strategy raise rather than idle.
+
+    Setting `lufs_cutoff` with no loudness search silently did nothing before,
+    which is how "I configured it and nothing happened" goes unnoticed.
+    """
+    with pytest.raises((ValueError, TypeError), match=match):
+        ExcerptConfig(**kwargs)
+
+
+def _half_silent(path, sr=16000, seconds=4.0):
+    import soundfile
+
+    n = int(sr * seconds)
+    t = np.arange(n) / sr
+    audio = (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+    audio[: n // 2] = 0.0
+    soundfile.write(str(path), audio, sr)
+    return path
+
+
+@pytest.mark.parametrize(
+    "on_failure,check",
+    [
+        ("keep", lambda out: out is not None and float(out.lufs[0]) == -np.inf),
+        ("skip", lambda out: out is None),
+    ],
+)
+def test_on_failure_keep_and_skip(tmp_path, on_failure, check):
+    """A file that never clears the cutoff is no longer silently "successful"."""
+    import soundfile
+
+    path = tmp_path / "silent.wav"
+    soundfile.write(str(path), np.zeros(16000 * 2, dtype=np.float32), 16000)
+
+    out = AudioTree.loudest_excerpt(
+        str(path),
+        rng=np.random.default_rng(0),
+        excerpt=ExcerptConfig(strategy="loudest", num_tries=3, on_failure=on_failure),
+        duration=0.5,
+        sample_rate=16000,
+    )
+    assert check(out)
+
+
+def test_on_failure_raise_names_the_file(tmp_path):
+    import soundfile
+
+    path = tmp_path / "silent.wav"
+    soundfile.write(str(path), np.zeros(16000 * 2, dtype=np.float32), 16000)
+
+    with pytest.raises(RuntimeError, match="silent.wav"):
+        AudioTree.loudest_excerpt(
+            str(path),
+            rng=np.random.default_rng(0),
+            excerpt=ExcerptConfig(strategy="loudest", num_tries=2, on_failure="raise"),
+            duration=0.5,
+            sample_rate=16000,
+        )
+
+
+def test_loudest_excerpt_stops_early_on_success(tmp_path):
+    """A file with loud content returns an excerpt above the cutoff."""
+    path = _half_silent(tmp_path / "half.wav")
+    out = AudioTree.loudest_excerpt(
+        str(path),
+        rng=np.random.default_rng(0),
+        excerpt=ExcerptConfig(strategy="loudest", num_tries=32, lufs_cutoff=-40.0),
+        duration=0.5,
+        sample_rate=16000,
+    )
+    assert float(out.lufs[0]) > -40.0
+
+
+def test_excerpt_config_is_not_a_pytree():
+    """It is CPU-side config; flattening it into leaves was never intended."""
+    import jax
+
+    config = ExcerptConfig()
+    assert jax.tree.leaves(config) == [config]

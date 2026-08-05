@@ -420,10 +420,11 @@ Complete example with batching and all optimizations:
     import jax
     from audiotree import AudioTree
     from audiotree.sources import create_balanced_audio_dataset
-    from audiotree.core import SaliencyParams
+    from audiotree.sources import ExcerptConfig
 
     # Saliency for loud sections
-    saliency = SaliencyParams(
+    excerpt = ExcerptConfig(
+        strategy="loudest",
         enabled=True,
         lufs_cutoff=-40,
         num_tries=5,
@@ -442,7 +443,7 @@ Complete example with batching and all optimizations:
         seed=42,
         sample_rate=48000,
         duration=3.0,
-        saliency_params=saliency,
+        excerpt=excerpt,
     )
 
     # Multithreading for I/O

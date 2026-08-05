@@ -229,10 +229,11 @@ Use saliency to randomly select louder sections of audio:
 
     from audiotree import AudioTree
     from audiotree.sources import create_balanced_audio_dataset
-    from audiotree.core import SaliencyParams
+    from audiotree.sources import ExcerptConfig
 
     lufs_cutoff = -40  # Only select sections above -40 LUFS
-    saliency_params = SaliencyParams(
+    excerpt = ExcerptConfig(
+        strategy="loudest",
         enabled=True,
         lufs_cutoff=lufs_cutoff,
         num_tries=10,  # Try up to 10 random positions
@@ -240,7 +241,7 @@ Use saliency to randomly select louder sections of audio:
 
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"], "music": ["/data/music"]},
-        saliency_params=saliency_params,
+        excerpt=excerpt,
         sample_rate=44100,
         duration=3.0,
     )
@@ -308,5 +309,5 @@ See Also
 --------
 
 - :func:`~audiotree.sources.create_audio_dataset` - For simple, unbalanced loading
-- :class:`~audiotree.core.SaliencyParams` - For saliency-based excerpt selection
+- :class:`~audiotree.sources.ExcerptConfig` - For saliency-based excerpt selection
 - :ref:`multiprocessing` - For parallel data loading

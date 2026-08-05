@@ -8,7 +8,7 @@ import grain
 import numpy as np
 
 from audiotree import AudioTree
-from audiotree.core import SaliencyParams
+from audiotree.core import ExcerptConfig
 
 if TYPE_CHECKING:
     from audiotree.sources.windowed import WindowParams
@@ -77,7 +77,7 @@ def find_audio_files(
     return sorted(set(filepaths))
 
 
-def _load_audio_with_saliency(
+def _load_excerpt(
     file_path: str,
     rng: np.random.Generator,
     sample_rate: int,
@@ -85,13 +85,13 @@ def _load_audio_with_saliency(
     mono: bool = True,
     pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"]
     | None = "reflect",
-    saliency_params: SaliencyParams | None = None,
+    excerpt: ExcerptConfig | None = None,
     source: str | None = None,
-) -> AudioTree:
-    """Load audio file with optional saliency-based excerpt selection.
+) -> AudioTree | None:
+    """Load one excerpt from ``file_path`` according to ``excerpt``.
 
-    Uses the provided RNG for deterministic random selection.
-    This function is designed to work with grain's random_map.
+    Uses the provided RNG for deterministic selection, so it composes with
+    grain's ``random_map``.
 
     Args:
         file_path: Path to the audio file.
@@ -102,50 +102,37 @@ def _load_audio_with_saliency(
         pad_mode: Padding mode for files shorter than duration (numpy.pad modes).
             Options: "constant" (zeros), "edge" (repeat edge), "reflect" (mirror),
             "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
-        saliency_params: Optional saliency parameters for excerpt selection.
-            If None or disabled: loads from beginning (deterministic)
-            If enabled without lufs_cutoff: random excerpt using RNG
-            If enabled with lufs_cutoff: multi-try saliency search for loud sections
+        excerpt: Which part of the file to take; see :class:`ExcerptConfig`.
+            Defaults to a random offset.
         source: Optional source group name (e.g., "music", "speech") to store in metadata.
 
     Returns:
-        AudioTree with the loaded audio data.
+        The loaded AudioTree, or ``None`` when the loudness search failed and
+        ``excerpt.on_failure == "skip"`` (grain drops ``None`` elements at
+        ``to_iter_dataset()``).
     """
-    # Deterministic load from beginning if saliency is disabled
-    if saliency_params is None or not saliency_params.enabled:
-        return AudioTree.from_file(
-            file_path,
-            sample_rate=sample_rate,
-            offset=0,
-            duration=duration,
-            mono=mono,
-            pad_mode=pad_mode,
-            source=source,
-        )
-
-    # Multi-try saliency search: find loud sections using multiple random samples
-    if saliency_params.lufs_cutoff is not None:
-        return AudioTree.salient_excerpt(
-            file_path,
-            rng,
-            saliency_params=saliency_params,
-            sample_rate=sample_rate,
-            duration=duration,
-            mono=mono,
-            pad_mode=pad_mode,
-            source=source,
-        )
-
-    # Simple random excerpt: use RNG for random position, no loudness filtering
-    return AudioTree.excerpt(
-        file_path,
-        rng=rng,
+    excerpt = excerpt or ExcerptConfig()
+    common = dict(
         sample_rate=sample_rate,
         duration=duration,
         mono=mono,
         pad_mode=pad_mode,
         source=source,
     )
+
+    if excerpt.strategy == "start":
+        return AudioTree.from_file(file_path, offset=0, **common)
+
+    if excerpt.strategy == "random":
+        return AudioTree.excerpt(file_path, rng=rng, **common)
+
+    return AudioTree.loudest_excerpt(file_path, rng, excerpt=excerpt, **common)
+
+
+#: The default excerpt policy: a random offset per draw. Shared because
+#: ExcerptConfig is frozen, and used as the "did the caller customize this?"
+#: reference by the windowed-sampling guard below.
+_DEFAULT_EXCERPT = ExcerptConfig()
 
 
 def create_audio_dataset(
@@ -162,7 +149,7 @@ def create_audio_dataset(
     pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"]
     | None = "constant",
     extensions: Optional[List[str]] = None,
-    saliency_params: Optional[SaliencyParams] = None,
+    excerpt: ExcerptConfig = _DEFAULT_EXCERPT,
     source: str | None = None,
 ) -> grain.MapDataset:
     """Create a simple MapDataset from audio files.
@@ -195,7 +182,8 @@ def create_audio_dataset(
             Options: "constant" (zeros), "edge" (repeat edge), "reflect" (mirror),
             "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
         extensions: List of audio file extensions to search for. Defaults to [".wav", ".flac"].
-        saliency_params: Optional saliency parameters for excerpt selection.
+        excerpt: Which part of each file to take; see :class:`ExcerptConfig`.
+            Defaults to a uniformly random offset.
         source: Optional source group name (e.g., "music", "speech") to store in metadata.
             If None, no source metadata is added.
 
@@ -285,14 +273,14 @@ def create_audio_dataset(
     if repeat:
         ds = ds.repeat()
 
-    # Apply random_map for loading with saliency
+    # Apply random_map so each index gets its own excerpt RNG
     load_fn = functools.partial(
-        _load_audio_with_saliency,
+        _load_excerpt,
         sample_rate=sample_rate,
         duration=duration,
         mono=mono,
         pad_mode=pad_mode,
-        saliency_params=saliency_params,
+        excerpt=excerpt,
         source=source,
     )
     ds = ds.seed(excerpt_seed).random_map(load_fn)
@@ -315,14 +303,14 @@ def create_balanced_audio_dataset(
     pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"]
     | None = "constant",
     extensions: Optional[List[str]] = None,
-    saliency_params: Optional[SaliencyParams] = None,
+    excerpt: ExcerptConfig = _DEFAULT_EXCERPT,
     window_params: Optional["WindowParams"] = None,
 ) -> grain.MapDataset:
     """Create a balanced MapDataset from multiple audio groups and/or pre-constructed datasets.
 
     This function creates a grain MapDataset that samples from multiple sources
     with specified weights. Sources can be either audio file directories or
-    pre-constructed grain MapDatasets. It uses grain's random_map for saliency-based
+    pre-constructed grain MapDatasets. It uses grain's random_map for excerpt
     loading, ensuring infinite variety in RNG seeds even when files are repeated.
 
     Args:
@@ -354,7 +342,8 @@ def create_balanced_audio_dataset(
             Options: "constant" (zeros), "edge" (repeat edge), "reflect" (mirror),
             "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
         extensions: List of audio file extensions to search for (only applies to file-based sources).
-        saliency_params: Optional saliency parameters for excerpt selection (only applies to file-based sources).
+        excerpt: Which part of each file to take; see :class:`ExcerptConfig`.
+            Defaults to a uniformly random offset. Only applies to file-based sources.
         window_params: Optional :class:`~audiotree.sources.WindowParams`. When
             given, each file-based group is built with
             :func:`~audiotree.sources.create_windowed_audio_dataset` (length-aware,
@@ -362,7 +351,7 @@ def create_balanced_audio_dataset(
             the group's ``duration``/``alpha``/etc. from the params and the shared
             ``sample_rate``/``mono``/``pad_mode`` here. The group ``weights`` still
             balance across groups, composing multiplicatively with the within-group
-            length weighting. Mutually exclusive with ``saliency_params``.
+            length weighting. Mutually exclusive with a customized ``excerpt``.
 
     Returns:
         An infinite grain.MapDataset that interleaves items from source groups
@@ -426,10 +415,11 @@ def create_balanced_audio_dataset(
     if sources is None and datasets is None:
         raise ValueError("At least one of 'sources' or 'datasets' must be provided")
 
-    if window_params is not None and saliency_params is not None:
+    if window_params is not None and excerpt != _DEFAULT_EXCERPT:
         raise ValueError(
-            "Pass at most one of `window_params` or `saliency_params`; windowed "
-            "sampling does its loudness filtering through `window_params` instead."
+            "Pass at most one of `window_params` or a customized `excerpt`; "
+            "windowed sampling chooses its own offsets and does its loudness "
+            "filtering through `window_params` instead."
         )
 
     if excerpt_seed is None:
@@ -480,7 +470,7 @@ def create_balanced_audio_dataset(
                 duration=duration,
                 pad_mode=pad_mode,
                 extensions=extensions,
-                saliency_params=saliency_params,
+                excerpt=excerpt,
                 source=group_name,  # Set source metadata to group name
             )
 

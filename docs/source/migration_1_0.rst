@@ -96,8 +96,8 @@ ways, in signatures that sit side by side in one pipeline. Everything is now
 
    * - Pre-1.0
      - 1.0
-   * - ``SaliencyParams.loudness_cutoff``
-     - ``SaliencyParams.lufs_cutoff``
+   * - ``ExcerptConfig.loudness_cutoff``
+     - ``ExcerptConfig.lufs_cutoff``
    * - ``AudioDataSource.filter_by_loudness()``
      - ``AudioDataSource.filter_by_lufs()``
    * - ``corrupt_phase(keep_loudness=...)``, ``shift_phase(keep_loudness=...)``
@@ -200,7 +200,7 @@ Sources
         num_records=10_000,
         sample_rate=44_100,
         duration=5.0,
-        saliency_params=SaliencyParams(loudness_cutoff=-40),
+        excerpt=ExcerptConfig(loudness_cutoff=-40),
     )
 
     # After
@@ -211,7 +211,7 @@ Sources
         weights={"speech": 0.7, "music": 0.3},
         sample_rate=44_100,
         duration=5.0,
-        saliency_params=SaliencyParams(lufs_cutoff=-40),
+        excerpt=ExcerptConfig(lufs_cutoff=-40),
     ).slice(slice(0, 10_000))
 
 Removed API
@@ -377,10 +377,10 @@ does, by design. ``normalize_lufs(max_gain_db=...)`` is a new opt-in ceiling so 
 very quiet but still measurable item is not amplified without bound; a capped item
 lands at ``lufs + max_gain_db`` rather than at the target.
 
-``SaliencyParams.search_function`` is resolved by name
+``ExcerptConfig.search`` is resolved by name
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``salient_excerpt`` called ``eval()`` on a field deliberately typed ``str`` so
+``loudest_excerpt`` called ``eval()`` on a field deliberately typed ``str`` so
 argbind can bind it from YAML — which made a config file arbitrary code execution in
 every data worker. Names are now looked up in a registry, with an ``importlib``
 dotted-path fallback for your own function, and resolution happens in
@@ -402,11 +402,11 @@ training.
    * - a callable
      - accepted directly in Python
 
-The pre-1.0 spellings ``"SaliencyParams.search_uniform"`` and
-``"SaliencyParams.search_bias_early"`` remain registered, so existing configs keep
+The pre-1.0 spellings ``"ExcerptConfig.search_uniform"`` and
+``"ExcerptConfig.search_bias_early"`` remain registered, so existing configs keep
 resolving.
 
-Also note ``SaliencyParams.enabled`` now defaults to ``True``. It used to default to
+Also note ``ExcerptConfig.enabled`` now defaults to ``True``. It used to default to
 ``False``, which meant every file loaded from ``offset=0``.
 
 ``bagz`` is an optional extra

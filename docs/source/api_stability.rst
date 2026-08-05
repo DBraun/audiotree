@@ -24,7 +24,7 @@ attributes and methods of the classes those names resolve to.
    * - Namespace
      - ``__all__``
    * - ``audiotree``
-     - ``AudioTree``, ``SaliencyParams``, ``AudioWriter``, ``TreeWriter``,
+     - ``AudioTree``, ``ExcerptConfig``, ``AudioWriter``, ``TreeWriter``,
        ``sources``, ``transforms``
    * - ``audiotree.sources``
      - ``create_audio_dataset``, ``create_balanced_audio_dataset``,
@@ -76,7 +76,7 @@ merged, or deleted in any 1.x release without a deprecation cycle:
    * - Module
      - Note
    * - ``audiotree.core``
-     - Defines ``AudioTree`` and ``SaliencyParams``; import them from
+     - Defines ``AudioTree`` and ``ExcerptConfig``; import them from
        ``audiotree``.
    * - ``audiotree.writer``, ``audiotree.tree_writer``
      - Define ``AudioWriter`` / ``TreeWriter``; import them from ``audiotree``.
