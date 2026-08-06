@@ -320,6 +320,25 @@ def _resolve_lufs_engine(
     return engine
 
 
+def _require_batched_rank(waveform, operation: str) -> None:
+    """Reject a mini-batched waveform for an *operation* that needs one batch axis.
+
+    :meth:`AudioTree.reshape_mini_batches` gives a tree *two* leading axes
+    ``(Mini, Batch, Channels, Samples)``. Most operations are written over the
+    trailing axes and do not care, but the ones that mean "per batch item" have
+    no rank-4 reading -- so they say which rank they got rather than failing
+    somewhere downstream with a shape nobody can trace back.
+    """
+    if waveform is None or waveform.ndim == 3:
+        return
+    raise ValueError(
+        f"{operation} needs a rank-3 (Batch, Channels, Samples) waveform, got "
+        f"rank {waveform.ndim} {tuple(waveform.shape)}. A mini-batched tree "
+        f"(rank 4, from reshape_mini_batches) has two leading axes; call "
+        f"flatten_mini_batches() first."
+    )
+
+
 def _leading_axis_size(*candidates) -> Optional[int]:
     """Batch size implied by the first non-``None`` array in *candidates*.
 
@@ -516,6 +535,17 @@ class AudioTree:
                 waveform = waveform[None, None, :]  # Add batch and channel dimension
             elif waveform.ndim == 2:
                 waveform = waveform[None, :, :]  # Add batch dimension
+            elif waveform.ndim > 3:
+                # ``filepath`` / ``source`` are encoded one row per batch item,
+                # broadcast over a *single* leading axis. A mini-batched
+                # waveform has two, so the provenance would silently come out
+                # one row per mini-batch -- fewer strings than items.
+                raise ValueError(
+                    f"AudioTree.create normalizes to (Batch, Channels, Samples) "
+                    f"and got a rank-{waveform.ndim} waveform "
+                    f"{tuple(waveform.shape)}. Create the tree at rank 3 and "
+                    f"call reshape_mini_batches() to add a mini-batch axis."
+                )
 
         # Handle metadata and filepath
         if metadata is None:
@@ -896,32 +926,68 @@ class AudioTree:
         decoded = "".join(chr(int(val)) for val in encoded_array if val != 0)
         return decoded
 
+    @classmethod
+    def _decode_strings(cls, encoded: ArrayLike, key: str) -> list:
+        """Decode a provenance array, nesting to match its leading axes.
+
+        The last axis is the encoded string, so ``(Batch, _str_max_length)``
+        decodes to a flat list of ``Batch`` strings and a mini-batched tree's
+        ``(Mini, Batch, _str_max_length)`` to ``Mini`` lists of ``Batch``
+        strings. Recursing rather than assuming the leading axis is the batch is
+        what keeps :attr:`filepath` and :attr:`source` working at rank 4 --
+        indexing one row of the latter used to hand ``_decode_string`` a whole
+        sub-array, which failed with NumPy's "truth value of an array is
+        ambiguous" and named neither the field nor the rank.
+
+        Raises:
+            ValueError: If *encoded* has no leading axis at all (a bare
+                ``(_str_max_length,)`` row), which cannot say how many items it
+                describes.
+        """
+        if encoded.ndim < 2:
+            raise ValueError(
+                f"metadata[{key!r}] must have a leading batch axis, i.e. shape "
+                f"(Batch, {_str_max_length}), got rank {encoded.ndim} "
+                f"{tuple(encoded.shape)}. Encode it with "
+                f"AudioTree.create({key}=...) rather than by hand."
+            )
+        if encoded.ndim == 2:
+            return [cls._decode_string(row) for row in encoded]
+        return [cls._decode_strings(sub, key) for sub in encoded]
+
     @property
-    def filepath(self) -> List[str]:
+    def filepath(self) -> Union[List[str], List[list]]:
         """Return the decoded filepaths stored in ``metadata['filepath']``.
+
+        One string per batch item. A mini-batched tree (rank 4, from
+        :meth:`reshape_mini_batches`) has two leading axes, so it returns one
+        list per mini-batch — the nesting always matches the tree's leading
+        axes. Call :meth:`flatten_mini_batches` first for a flat list.
 
         An empty list is returned if the AudioTree does not contain any filepath
         metadata.
         """
         if "filepath" not in self.metadata:
             return []
-        return [self._decode_string(data) for data in self.metadata["filepath"]]
+        return self._decode_strings(self.metadata["filepath"], "filepath")
 
     @property
-    def source(self) -> List[str]:
+    def source(self) -> Union[List[str], List[list]]:
         """Return the decoded source names stored in ``metadata['source']``.
 
         Source names indicate which data source group each item in the batch came from.
         For example, if an AudioDataSimpleSource was created with
         ``sources={"music": [...], "speech": [...]}``, this property might return
-        ``["music", "music", "speech", "music"]`` for a batch of 4 items.
+        ``["music", "music", "speech", "music"]`` for a batch of 4 items. Like
+        :attr:`filepath`, a mini-batched (rank-4) tree nests one list per
+        mini-batch.
 
         An empty list is returned if the AudioTree does not contain any source
         metadata.
         """
         if "source" not in self.metadata:
             return []
-        return [self._decode_string(data) for data in self.metadata["source"]]
+        return self._decode_strings(self.metadata["source"], "source")
 
     @property
     def samples(self) -> int:
@@ -934,6 +1000,11 @@ class AudioTree:
 
         Derived from ``waveform``, falling back to ``codes`` / ``latents`` for
         audio-less trees (e.g. token-only training examples).
+
+        This is the *leading* axis, not the item count: on a mini-batched tree
+        (rank 4, from :meth:`reshape_mini_batches`) it is the number of
+        mini-batches, which is also what ``len()``, iteration and indexing walk
+        over. :meth:`flatten_mini_batches` first if you want items.
         """
         for value in (self.waveform, self.codes, self.latents):
             if value is not None:
@@ -970,6 +1041,10 @@ class AudioTree:
         Any integer scalar counts as an integer key, not just the builtin
         ``int``: ``tree[np.argmax(tree.lufs)]`` keeps the batch axis exactly
         like ``tree[0]`` does.
+
+        On a mini-batched (rank-4) tree the leading axis is the mini-batch axis,
+        so ``tree[0]`` selects one mini-batch (still rank 4) rather than one
+        item; :meth:`flatten_mini_batches` first to index items.
         """
         if _is_integer_scalar(key):
             key = int(key)
@@ -1558,8 +1633,21 @@ class AudioTree:
             Path: The path that was written.
 
         Raises:
-            ValueError: If ``batch_size != 1``.
+            ValueError: If the tree has no ``waveform``, if it is mini-batched
+                (rank 4 — ``batch_size`` then counts mini-batches, not items),
+                or if ``batch_size != 1``.
         """
+        if self.waveform is None:
+            raise ValueError(
+                "AudioTree.write needs a waveform, but this tree has none "
+                "(a token-only tree holds codes/latents; decode them first)."
+            )
+        # Checked before ``batch_size``, which on a rank-4 tree counts
+        # mini-batches: a (1, Batch, Channels, Samples) tree would otherwise
+        # pass the batch-of-1 check and reach soundfile, whose "Invalid shape"
+        # complaint is about the transposed array and names neither the tree's
+        # rank nor the fix.
+        _require_batched_rank(self.waveform, "AudioTree.write")
         if self.batch_size != 1:
             raise ValueError(
                 f"AudioTree.write requires batch_size == 1, got {self.batch_size}. "
@@ -1670,7 +1758,9 @@ class AudioTree:
         """Split batch dimension into a list of smaller AudioTree objects.
 
         Divides the batch dimension evenly into n_splits separate AudioTree objects,
-        each containing a portion of the original batch.
+        each containing a portion of the original batch. Like indexing, this
+        works on the *leading* axis, which on a mini-batched (rank-4) tree is
+        the mini-batch axis rather than the item axis.
 
         Args:
             n_splits: Number of AudioTree objects to create. The batch size must be
@@ -1722,7 +1812,9 @@ class AudioTree:
             AudioTree with an additional mini-batch dimension as the first axis.
 
         Raises:
-            ValueError: If the batch size is not divisible by ``mini_batch_size``.
+            ValueError: If the batch size is not divisible by ``mini_batch_size``,
+                or if the tree is already mini-batched (rank 4) — nothing in this
+                library reads the rank-5 tree that would produce.
 
         Example:
             >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
@@ -1730,6 +1822,7 @@ class AudioTree:
             >>> x_batched.waveform.shape  # 4 mini-batches of size 3
             (4, 3, 1, 44100)
         """
+        _require_batched_rank(self.waveform, "reshape_mini_batches")
         B = self.waveform.shape[0]
 
         if B % mini_batch_size != 0:
@@ -1812,6 +1905,12 @@ class AudioTree:
             result has ``batch_size == 0`` (every array field is empty along the
             batch axis) rather than being ``None``.
 
+        Raises:
+            ValueError: If the tree is mini-batched (rank 4). Dropping items
+                independently within each mini-batch would leave the
+                mini-batches ragged, so there is no rank-4 answer; flatten,
+                filter, and reshape again.
+
         Example:
             >>> waveform = jnp.stack([jnp.zeros((1, 8)), jnp.ones((1, 8))])
             >>> tree = AudioTree.create(waveform, 16000)
@@ -1819,6 +1918,7 @@ class AudioTree:
             >>> loud.batch_size
             1
         """
+        _require_batched_rank(self.waveform, "AudioTree.filter")
         B = self.waveform.shape[0]
         audio_trees = [tree for tree in self.split(B) if predicate(tree)]
 

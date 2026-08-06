@@ -1680,3 +1680,30 @@ def test_in_range_audio_does_not_warn(tmp_path):
         warnings.simplefilter("error")
         with AudioWriter(tmp_path, subtype="PCM_16") as writer:
             writer.write(_one_second(peak=0.5))
+
+
+def test_mini_batched_tree_is_refused(tmp_path):
+    """A rank-4 tree wrote nonsense metadata instead of failing.
+
+    ``reshape_mini_batches`` gives a tree two leading axes, and the writer read
+    the first as the batch -- so every axis below shifted by one. A 6-item
+    ``(3, 2, 1, 800)`` tree produced *three* manifest rows claiming
+    ``channels=2, samples=1``. ``write_audio=True`` was saved only by soundfile
+    rejecting the transposed shape; ``write_audio=False`` -- the manifest-only
+    mode, where nothing else inspects the audio -- recorded it silently.
+    """
+    tree = AudioTree.create(np.zeros((6, 1, 800), np.float32), 16000)
+    mini_batched = tree.reshape_mini_batches(2)
+    assert mini_batched.waveform.shape == (3, 2, 1, 800)
+
+    for write_audio in (True, False):
+        with AudioWriter(tmp_path / f"out_{write_audio}", write_audio=write_audio) as w:
+            with pytest.raises(ValueError, match="needs a rank-3"):
+                w.write(mini_batched)
+
+    # Flattening it first is the documented route, and still works.
+    with AudioWriter(tmp_path / "flat", write_audio=False) as w:
+        w.write(mini_batched.flatten_mini_batches())
+    entries = _manifest.read_entries(tmp_path / "flat" / "manifest.npz")
+    assert len(entries) == 6
+    assert all(e["channels"] == 1 and e["samples"] == 800 for e in entries)

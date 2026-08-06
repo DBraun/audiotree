@@ -216,6 +216,77 @@ def test_methods_work_after_reshape_mini_batches():
     )
 
 
+def test_provenance_decodes_at_rank_4():
+    """filepath/source survive reshape_mini_batches, nesting to match the axes."""
+    audio = np.zeros((4, 1, 16), dtype=np.float32)
+    tree = AudioTree.create(
+        audio,
+        16000,
+        filepath=[f"f{i}.wav" for i in range(4)],
+        source=["music", "music", "speech", "speech"],
+    )
+    assert tree.filepath == ["f0.wav", "f1.wav", "f2.wav", "f3.wav"]
+
+    mini = tree.reshape_mini_batches(2)
+    assert mini.metadata["filepath"].shape == (2, 2, 1024)
+    # Previously a ValueError from NumPy ("truth value of an array ... is
+    # ambiguous"): the decoder assumed the leading axis was the batch.
+    assert mini.filepath == [["f0.wav", "f1.wav"], ["f2.wav", "f3.wav"]]
+    assert mini.source == [["music", "music"], ["speech", "speech"]]
+
+    # Indexing the leading axis keeps the nesting aligned with the arrays.
+    assert mini[1].waveform.shape == (1, 2, 1, 16)
+    assert mini[1].filepath == [["f2.wav", "f3.wav"]]
+
+    # Flattening restores the flat, one-string-per-item view.
+    assert mini.flatten_mini_batches().filepath == tree.filepath
+
+
+def test_provenance_without_leading_axis_raises():
+    """A hand-encoded row with no batch axis names the field instead of crashing."""
+    from audiotree.core import _str_max_length
+
+    encoded = AudioTree._encode_filepaths(["only.wav"])[0]  # (1024,), no batch axis
+    assert encoded.shape == (_str_max_length,)
+    tree = AudioTree(np.zeros((1, 1, 16)), 16000, metadata={"filepath": encoded})
+    with pytest.raises(ValueError, match="must have a leading batch axis"):
+        tree.filepath
+
+
+def test_rank_4_rejected_where_it_has_no_meaning():
+    """Operations defined per batch item name the rank instead of misbehaving."""
+    tree = AudioTree(np.zeros((4, 1, 16), dtype=np.float32), 16000)
+    mini = tree.reshape_mini_batches(2)
+
+    # write(): batch_size counts mini-batches at rank 4, so a (1, B, C, T) tree
+    # slipped past the batch-of-1 check and reached soundfile, which complained
+    # about the *transposed* shape and named neither the rank nor the fix.
+    assert mini[0].batch_size == 1
+    with pytest.raises(ValueError, match="rank 4"):
+        mini[0].write("/dev/null")
+
+    # A rank-5 tree is readable by nothing here.
+    with pytest.raises(ValueError, match="rank 4"):
+        mini.reshape_mini_batches(1)
+
+    # Per-item filtering would leave the mini-batches ragged.
+    with pytest.raises(ValueError, match="rank 4"):
+        mini.filter(lambda item: True)
+
+    # create() encodes one provenance row per batch item, and a mini-batched
+    # waveform has no single such axis: a broadcast filepath used to come out
+    # one row per mini-batch, i.e. fewer strings than items.
+    with pytest.raises(ValueError, match="rank-4 waveform"):
+        AudioTree.create(np.zeros((2, 2, 1, 16)), 16000, filepath="x.wav")
+
+
+def test_write_without_waveform_raises():
+    """A token-only tree says so rather than raising TypeError on None."""
+    tree = AudioTree(waveform=None, sample_rate=16000, codes=np.zeros((1, 4, 8)))
+    with pytest.raises(ValueError, match="needs a waveform"):
+        tree.write("/dev/null")
+
+
 def test_audiotree_create_audio_dimensionality():
     """Test that AudioTree.create handles different audio dimensionalities correctly."""
     sample_rate = 44100
@@ -1259,6 +1330,17 @@ def test_shape_guarantees_raise_instead_of_asserting():
     with pytest.raises(ValueError, match="at least 4 dimensions"):
         tree.flatten_mini_batches()
 
+    # The rank checks are the same kind of public precondition.
+    mini = AudioTree(np.zeros((4, 1, 32), dtype=np.float32), 44100)
+    mini = mini.reshape_mini_batches(2)
+    for call in (
+        lambda: mini[0].write("/dev/null"),
+        lambda: mini.reshape_mini_batches(1),
+        lambda: mini.filter(lambda item: True),
+    ):
+        with pytest.raises(ValueError, match="rank 4"):
+            call()
+
 
 def test_public_checks_survive_python_O():
     """Run the same guarantees in a ``python -O`` subprocess.
@@ -1282,11 +1364,17 @@ if assert_removed is not True:
     raise SystemExit("-O did not strip asserts; the test proves nothing")
 
 tree = AudioTree(np.zeros((5, 1, 32), dtype=np.float32), 44100)
+mini = AudioTree(np.zeros((4, 1, 32), dtype=np.float32), 44100).reshape_mini_batches(2)
 for call, needle in (
     (lambda: tree.split(2), "divisible"),
     (lambda: tree.reshape_mini_batches(2), "divisible"),
     (lambda: tree.flatten_mini_batches(), "4 dimensions"),
     (lambda: tree.write("/dev/null"), "batch_size == 1"),
+    (lambda: mini[0].write("/dev/null"), "rank 4"),
+    (lambda: mini.reshape_mini_batches(1), "rank 4"),
+    (lambda: mini.filter(lambda item: True), "rank 4"),
+    (lambda: AudioTree.create(np.zeros((2, 2, 1, 8)), 44100), "rank-4 waveform"),
+    (lambda: AudioTree(None, 44100).write("/dev/null"), "needs a waveform"),
 ):
     try:
         call()

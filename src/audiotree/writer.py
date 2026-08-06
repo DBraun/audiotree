@@ -10,7 +10,7 @@ import soundfile
 
 from . import _manifest
 from ._fs import refuse_to_clobber
-from .core import LABEL_FIELDS, AudioTree
+from .core import LABEL_FIELDS, AudioTree, _require_batched_rank
 
 # Manifest columns hold one value per written item. Metadata keys that describe
 # *where* an item came from are reconstructed by the reader instead.
@@ -247,6 +247,14 @@ class AudioWriter:
         Raises:
             ValueError: If AudioTree fields don't match previously written trees
         """
+        # One row per batch item only makes sense at rank 3. A mini-batched tree
+        # has two leading axes, and every axis below shifts by one: a 6-item
+        # (3, 2, 1, 800) tree wrote *three* rows claiming channels=2, samples=1.
+        # `write_audio=True` was saved only by soundfile rejecting the shape;
+        # manifest-only runs -- the mode where nothing else looks at the audio --
+        # recorded nonsense metadata and said nothing.
+        _require_batched_rank(tree.waveform, "AudioWriter.write")
+
         # Take the sample rate from the first written tree and require every later
         # tree to match it (resample beforehand with AudioTree.resample if needed).
         if self.sample_rate is None:
