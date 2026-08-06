@@ -54,13 +54,14 @@ from audiotree import AudioTree
 from audiotree.sources import create_audio_dataset
 from audiotree.transforms import stereo, volume_norm
 
-# A shuffled, repeating stream of 5-second excerpts from a directory of audio.
+# A shuffled, endless stream of 5-second excerpts from a directory of audio.
+# num_epochs=None never runs dry; pass an int for that many passes over the corpus.
 ds = create_audio_dataset(
     sources="/data/audio",
     sample_rate=44_100,
     duration=5.0,
     shuffle=True,
-    repeat=True,
+    num_epochs=None,
 )
 
 # Augment. One .seed() call: each random_map derives its own stream from it.

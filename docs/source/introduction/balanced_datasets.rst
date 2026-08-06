@@ -212,7 +212,7 @@ Combine file-based sources with existing Grain datasets:
     # Pre-construct a dataset (perhaps with custom processing)
     preprocessed_ds = create_audio_dataset(
         sources="/data/preprocessed",
-        repeat=True,
+        num_epochs=None,
         sample_rate=44100,
         duration=3.0,
     )

@@ -35,7 +35,7 @@ Apply transforms to a dataset using ``.random_map()`` or ``.map()``:
     ds = create_audio_dataset(
         sources="/data/audio",
         shuffle=True,
-        repeat=True,
+        num_epochs=None,
         sample_rate=44100,
         duration=5.0,
     )
@@ -84,7 +84,7 @@ Build complex augmentation pipelines:
         },
         weights={"speech": 0.7, "music": 0.3},
         shuffle=True,
-        repeat=True,
+        num_epochs=None,
         sample_rate=44100,
         duration=5.0,
     )
@@ -218,7 +218,7 @@ Add batching as part of the transform chain:
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"]},
         shuffle=True,
-        repeat=True,
+        num_epochs=None,
         sample_rate=44100,
         duration=3.0,
     )
@@ -248,7 +248,7 @@ Combine datasets with different augmentation strategies:
     # Clean speech dataset
     clean_ds = create_audio_dataset(
         sources="/data/clean_speech",
-        repeat=True,
+        num_epochs=None,
         sample_rate=44100,
         duration=3.0,
     )
@@ -260,7 +260,7 @@ Combine datasets with different augmentation strategies:
     # Noisy speech dataset
     noisy_ds = create_audio_dataset(
         sources="/data/noisy_speech",
-        repeat=True,
+        num_epochs=None,
         sample_rate=44100,
         duration=3.0,
     )
@@ -319,7 +319,8 @@ with no re-augmentation or decoding cost:
     ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
 
     # Pre-compute and write every item to a memory-mapped dataset. TreeWriter
-    # pre-allocates ``expected_samples`` rows, so pass the item count up front.
+    # pre-allocates ``expected_samples`` rows; passing the exact count just saves
+    # it from having to grow the files mid-run.
     with TreeWriter("/data/augmented", expected_samples=len(ds)) as writer:
         for item in ds:
             writer.write(item)
@@ -347,7 +348,7 @@ Chain transforms before adding multiprocessing:
     ds = create_audio_dataset(
         sources="/data/audio",
         shuffle=True,
-        repeat=True,
+        num_epochs=None,
         sample_rate=44100,
         duration=5.0,
     )
@@ -388,7 +389,7 @@ Full pipeline with chained transforms, batching, and multiprocessing:
         },
         weights={"speech": 0.6, "music": 0.4},
         shuffle=True,
-        repeat=True,  # Infinite for training
+        num_epochs=None,  # Unbounded stream for training
         sample_rate=48000,
         duration=5.0,
     )

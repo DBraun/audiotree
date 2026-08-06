@@ -89,9 +89,10 @@ augment them in the same jitted step that trains your model.
    The full catalog of transforms — their shared parameters (``prob``,
    ``split_seed``, ``scope``, ``output_key``), which ones invalidate the cached
    ``lufs``, and the decorators for writing your own — lives in the
-   :mod:`audiotree.transforms` API reference. Both backends expose the same names,
-   so anything you configure for a Grain pipeline works here by importing it from
-   ``audiotree.transforms.jax``.
+   :mod:`audiotree.transforms` API reference. Both backends expose the same names
+   (``choose`` is the one exception — it branches in Python, so it cannot be
+   traced), so anything you configure for a Grain pipeline works here by importing
+   it from ``audiotree.transforms.jax``.
 
 Next
 ----

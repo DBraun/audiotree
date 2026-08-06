@@ -152,7 +152,7 @@ See `audiotree.transforms` for all available transforms:
 - `volume_change` - Add random gain (random transform)
 - `trim` - Trim to fixed length (map transform)
 - `invert_phase` - Invert audio phase (random transform)
-- `swap_stereo` - Swap stereo channels (random transform)
+- `swap_stereo` - Swap the two channels of stereo audio; no-op on mono, raises on 3+ channels (random transform)
 - `roll` - Circular shift audio (random transform)
 - `corrupt_phase` - Corrupt phase spectrum (random transform)
 - `shift_phase` - Shift phase spectrum (random transform)

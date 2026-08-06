@@ -261,7 +261,7 @@ dataset iterator to ``grain.checkpoint.CheckpointSave`` / ``CheckpointRestore``:
     from audiotree import AudioTree
     from audiotree.sources import create_audio_dataset
 
-    ds = create_audio_dataset("/data/audio", repeat=True, duration=3.0)
+    ds = create_audio_dataset("/data/audio", num_epochs=None, duration=3.0)
     it = iter(ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch))
 
     mngr = ocp.CheckpointManager("/checkpoints")

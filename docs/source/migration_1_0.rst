@@ -196,6 +196,10 @@ Sources
        ``excerpt_seed`` defaults to ``shuffle_seed``
    * - ``num_records=N``
      - ``.slice(slice(0, N))`` on the returned dataset
+   * - ``repeat=True`` / ``repeat=False`` on ``create_audio_dataset()``,
+       ``create_balanced_audio_dataset()`` and ``create_windowed_audio_dataset()``
+     - ``num_epochs=None`` / ``num_epochs=1`` — see `A count of epochs replaces
+       the repeat flag`_
 
 .. skip-snippet-exec: the "Before" half is pre-1.0 API and cannot import.
 
@@ -374,6 +378,59 @@ to the *function's own* parameters, as the rendered signature says. Previously
 the roll parameters. ``prob``, ``split_seed``, ``scope`` and ``output_key`` are now
 keyword-only.
 
+A count of epochs replaces the repeat flag
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The three dataset builders took a boolean ``repeat``, which could only say
+"once" or "forever". They now take ``num_epochs``: an integer count, or ``None``
+for an unbounded stream. The two old settings are still expressible, and the
+defaults are unchanged in effect.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Pre-1.0
+     - 1.0
+   * - ``repeat=True``
+     - ``num_epochs=None`` — a genuinely infinite grain dataset
+       (``len(ds) == sys.maxsize``)
+   * - ``repeat=False``
+     - ``num_epochs=1``, or simply drop the argument
+   * - no equivalent
+     - ``num_epochs=3`` — three passes over the corpus, each with its own
+       shuffle, and a finite ``len(ds)``
+
+Defaults: ``num_epochs=1`` for :func:`~audiotree.sources.create_audio_dataset`
+and :func:`~audiotree.sources.create_windowed_audio_dataset`, ``num_epochs=None``
+for :func:`~audiotree.sources.create_balanced_audio_dataset` — the same behavior
+their ``repeat`` defaults gave.
+
+.. skip-snippet-exec: fragment; ``/data/audio`` stands in for your corpus.
+
+.. code-block:: python
+
+    # Before
+    ds = create_audio_dataset("/data/audio", repeat=True)
+
+    # After
+    ds = create_audio_dataset("/data/audio", num_epochs=None)
+
+**Check:** ``num_epochs=0``, a negative count, a float, or a bool now raises
+``ValueError``/``TypeError`` at construction time. Pre-1.0 a nonsensical value
+was a silent no-op.
+
+Shuffle and excerpt seeds are expanded before use
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``shuffle_seed`` and ``excerpt_seed`` keep their names, types and defaults, but
+each integer is now expanded through ``np.random.SeedSequence(...)`` before it
+reaches grain, so small nearby seeds no longer produce correlated streams.
+
+**Check:** the same seed produces a **different** file order and different
+excerpt offsets than pre-1.0. Nothing to edit — but a run you intend to
+reproduce byte-for-byte has to be re-rendered, or its output kept.
+
 Writers refuse to overwrite an existing dataset
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -504,10 +561,14 @@ differs, so one manifest never mixes rates.
 Codec transforms take a codec object
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``encode_with_codec(codec)`` and ``encode_latents(codec)`` take a single object
-implementing the ``audiotree.transforms.AudioCodec`` protocol — ``encode(AudioTree)
--> (codes, scale)`` and ``encode_to_latent(AudioTree) -> latents`` — instead of a
-bare ``encoder_fn`` (and, for ``encode_with_codec``, a ``num_codebooks`` count). The
+``encode_with_codec(codec)`` and ``encode_latents(codec)`` take a single codec
+object instead of a bare ``encoder_fn`` (and, for ``encode_with_codec``, a
+``num_codebooks`` count). The two transforms ask for two different, separately
+declared protocols, each ``@runtime_checkable`` and each with exactly one method:
+``audiotree.transforms.AudioCodec`` declares ``encode(AudioTree) -> (codes,
+scale)``, and ``audiotree.transforms.LatentAudioCodec`` declares
+``encode_to_latent(AudioTree) -> latents``. Implement whichever you need; a codec
+that does both simply satisfies both. The
 codec owns resampling, channel handling and output shapes, so the transform no
 longer repacks codes into ``(batch, codebooks*channels, frames)``: ``AudioTree.codes``
 holds exactly what the codec returned, and a non-``None`` ``scale`` is kept under

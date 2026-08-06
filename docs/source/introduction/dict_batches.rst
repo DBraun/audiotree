@@ -260,7 +260,7 @@ Full example using dict batches with scope:
     ds = create_audio_dataset(
         sources="/data/audio",
         shuffle=True,
-        repeat=True,
+        num_epochs=None,
         sample_rate=48000,
         duration=5.0,
     )
@@ -376,7 +376,7 @@ This is the simplest and most common pattern:
     from audiotree.transforms import volume_norm, volume_change
 
     # Load single dataset
-    ds = create_audio_dataset(sources="/data/audio", repeat=True)
+    ds = create_audio_dataset(sources="/data/audio", num_epochs=None)
     ds = ds.seed(42)
 
     # Create multiple versions of each item
@@ -886,7 +886,7 @@ they have a leading batch dimension.
     from audiotree.transforms import volume_norm
 
     # Create paired dataset
-    ds = create_audio_dataset("/data/audio", duration=3.0, shuffle=True, repeat=True)
+    ds = create_audio_dataset("/data/audio", duration=3.0, shuffle=True, num_epochs=None)
 
     def create_variants(audio_tree):
         return {"clean": audio_tree, "augmented": audio_tree}

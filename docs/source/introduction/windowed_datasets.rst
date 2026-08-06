@@ -55,7 +55,7 @@ Basic Usage
         hop=1.0,                        # non-overlapping windows (the default)
         alpha=1.0,                      # sample frequency proportional to length
         sample_rate=16000,
-        repeat=False,                   # one finite epoch
+        num_epochs=1,                   # one finite epoch (the default)
     )
 
     # One epoch contains every window exactly once: 4 + 40 = 44 slots.
@@ -85,7 +85,7 @@ of natural ``hop`` windows:
     for alpha in (0.0, 0.5, 1.0):
         ds = create_windowed_audio_dataset(
             sources=audio_dir, duration=1.0, hop=1.0, alpha=alpha,
-            sample_rate=16000, repeat=False,
+            sample_rate=16000, num_epochs=1,
         )
         print(alpha, len(ds))
 

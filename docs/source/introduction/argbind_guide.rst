@@ -132,9 +132,10 @@ augment differently with no code change.
     from audiotree import AudioTree, transforms as transforms_lib
 
     # bind_module binds every function/class in the module. filter_fn is
-    # optional — here it drops the two non-augmentation helpers (the ``Batch``
-    # and ``choose`` classes); omit it and they bind too, but they are simply
-    # never named in a transforms list.
+    # optional — here it drops the class exports (the ``AudioCodec`` /
+    # ``LatentAudioCodec`` protocols and ``choose``, none of which is a plain
+    # augmentation); omit it and they bind too, but they are simply never named
+    # in a transforms list.
     def filter_fn(fn):
         return callable(fn) and not isinstance(fn, type)
 
@@ -211,7 +212,7 @@ single tree: bind the module, then call the bound transforms inside
         ds = create_balanced_audio_dataset(
             sources={"speech": ["/data/speech"], "music": ["/data/music"]},
             shuffle=True,
-            repeat=True,
+            num_epochs=None,
             sample_rate=44100,
             duration=5.0,
         )
@@ -335,7 +336,9 @@ YAML. A quick reference of the most common transforms and their knobs:
 
     invert_phase.prob: 0.5  # 50% chance of applying
 
-**swap_stereo** - Randomly swap stereo channels (no parameters):
+**swap_stereo** - Randomly swap the two channels of stereo audio (no parameters
+of its own). Mono is an explicit no-op; three or more channels raises
+``ValueError`` rather than guessing at a permutation:
 
 .. code-block:: yaml
 
@@ -352,12 +355,20 @@ YAML. A quick reference of the most common transforms and their knobs:
 Common Transform Parameters
 ----------------------------
 
-All transforms support:
+Every decorated transform — every export except ``choose`` — supports:
+
+- ``scope``: Which parts of AudioTree to transform
+- ``output_key``: Where to store transformed output
+
+and every *random* transform additionally supports:
 
 - ``prob``: Probability of applying (0.0 to 1.0)
 - ``split_seed``: Whether to use different RNG for each item in batch
-- ``scope``: Which parts of AudioTree to transform
-- ``output_key``: Where to store transformed output
+
+``choose`` is the exception: it is a hand-written ``grain.transforms.RandomMap``
+taking ``choose(*transforms, c=1, weights=None, prob=1.0)``, with no
+``split_seed``, ``scope`` or ``output_key`` — scope the transforms you hand it
+instead. See :ref:`api_stability` for the full rule.
 
 Example with all parameters:
 

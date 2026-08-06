@@ -197,22 +197,36 @@ AudioTree can compute loudness in LUFS (Loudness Units Full Scale) for each item
 
    AudioTree objects with more than 5 channels will raise an error during loudness computation.
 
-Choosing a compute backend
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Choosing a device and an engine
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For a NumPy waveform, the default loudness path measures one batch item at a time
-on the CPU. When the batch is large and an accelerator is available, pass
-``backend="gpu"`` (or ``"tpu"``, or ``"cpu"``) to run the vmapped ``jaxloudnorm``
-kernel across the whole batch at once, which is much faster:
+*Where* the measurement runs and *which* kernel runs it are separate choices, so
+:meth:`~audiotree.core.AudioTree.replace_lufs` takes two separate keyword-only
+arguments:
+
+* ``device`` — an XLA platform name (``"cpu"``, ``"gpu"``, ``"tpu"``, mirroring
+  ``jax.jit``'s ``backend``) or a :class:`jax.Device`. ``None`` (the default)
+  leaves the waveform where it is.
+* ``engine`` — ``"numpy"`` for the exact ITU-R BS.1770 IIR meter (CPU-only), or
+  ``"jax"`` for the vmapped ``jaxloudnorm`` kernel with FIR-approximated
+  K-weighting. ``None`` (the default) follows the waveform's own array library,
+  except that a non-CPU ``device`` implies ``"jax"``, the only engine that can
+  run there.
+
+For a NumPy waveform the default path measures one batch item at a time on the
+CPU. When the batch is large, ``engine="jax"`` runs the whole batch through one
+vmapped kernel instead, and ``device="gpu"`` (or ``"tpu"``) additionally moves
+that work onto an accelerator:
 
 .. testcode::
 
     big_batch = AudioTree(np.ones((8, 2, 44_100)) * 0.1, 44_100)
 
-    # backend forces the JAX loudness kernel onto that XLA device. Swap in
+    # engine="jax" picks the vmapped kernel; device says where to run it. Swap in
     # "gpu" or "tpu" when you have one; "cpu" always works and is used here so
-    # the example runs anywhere.
-    loud = big_batch.replace_lufs(backend="cpu")
+    # the example runs anywhere. Note that device="cpu" on its own would *not*
+    # switch engines — it only pins the device.
+    loud = big_batch.replace_lufs(device="cpu", engine="jax")
 
     # The returned lufs always matches the waveform's array library (NumPy here),
     # so you never need a manual jax.device_put / jax.device_get round-trip.
@@ -225,7 +239,7 @@ kernel across the whole batch at once, which is much faster:
     (8,)
 
 :meth:`~audiotree.core.AudioTree.normalize_lufs` computes loudness internally, so
-it accepts the same ``backend`` argument.
+it accepts the same ``device`` and ``engine`` arguments.
 
 Keeping cached loudness in sync
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -564,11 +578,12 @@ You can use :func:`jax.tree.map` to combine multiple AudioTree objects:
     (12, 1, 44100)
 
 This concatenating ``tree.map`` is exactly what
-:meth:`~audiotree.core.AudioTree.batch` does for you: it maps
-``np.concatenate(..., axis=0)`` over every leaf (treating each AudioTree as one
-leaf), so a list of trees collapses into the identical batched tree. It is the
-same function you pass to Grain as ``batch_fn=AudioTree.batch`` when building a
-data loader.
+:meth:`~audiotree.core.AudioTree.batch` does for you: it concatenates every leaf
+along axis 0 (treating each AudioTree as one leaf), so a list of trees collapses
+into the identical batched tree. The array library is preserved — NumPy leaves in,
+NumPy leaves out; JAX in, JAX out — so batching never forces a device round-trip.
+It is the same function you pass to Grain as ``batch_fn=AudioTree.batch`` when
+building a data loader. An empty sequence raises ``ValueError``.
 
 .. testcode::
 
@@ -677,9 +692,9 @@ prefetches whole batches onto the accelerator as you iterate — see
 .. tip::
    You rarely need to ``device_put`` a tree just to compute loudness on an
    accelerator: :meth:`~audiotree.core.AudioTree.replace_lufs` and
-   :meth:`~audiotree.core.AudioTree.normalize_lufs` take a ``backend=`` argument
-   (see `Choosing a compute backend`_) that runs the kernel on the chosen device
-   and returns loudness in the waveform's own array library.
+   :meth:`~audiotree.core.AudioTree.normalize_lufs` take ``device=`` and
+   ``engine=`` arguments (see `Choosing a device and an engine`_) that run the
+   kernel where you ask and return loudness in the waveform's own array library.
 
 Metadata and Filepaths
 -----------------------
@@ -827,7 +842,7 @@ batch of 1, exactly what ``write`` requires):
 
 .. note::
    ``write`` operates on a single item by design. Calling it on a multi-item batch
-   raises an ``AssertionError``. To write a whole batch in one call — with a manifest
+   raises a ``ValueError``. To write a whole batch in one call — with a manifest
    of per-item metadata — reach for :class:`~audiotree.writer.AudioWriter`, covered in
    the :ref:`writer` chapter.
 

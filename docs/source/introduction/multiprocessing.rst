@@ -302,7 +302,7 @@ Common Patterns
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"], "music": ["/data/music"]},
         shuffle=True,
-        repeat=True,  # Infinite dataset for training
+        num_epochs=None,  # Unbounded stream for training
         sample_rate=44100,
         duration=3.0,
     )
@@ -333,11 +333,11 @@ Common Patterns
 
 .. code-block:: python
 
-    # Create validation dataset (no shuffle, no repeat)
+    # Create validation dataset (no shuffle, exactly one epoch)
     val_ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/val_speech"], "music": ["/data/val_music"]},
         shuffle=False,  # Deterministic order
-        repeat=False,
+        num_epochs=1,
         excerpt_seed=42,  # Fixes which excerpt is drawn from each file
         sample_rate=44100,
         duration=3.0,
@@ -479,7 +479,7 @@ Complete example with batching and all optimizations:
         },
         weights={"speech": 0.5, "music": 0.3, "effects": 0.2},
         shuffle=True,
-        repeat=True,
+        num_epochs=None,
         shuffle_seed=42,  # excerpt_seed defaults to this
         sample_rate=48000,
         duration=3.0,

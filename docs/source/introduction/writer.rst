@@ -83,6 +83,55 @@ natural home for pre-computed features — a spectrogram, an embedding, a codec'
 tokens — cached next to (or instead of) the waveform and read back later as a
 zero-copy memmap slice via :class:`~audiotree.sources.TreeDataSource`.
 
+``expected_samples`` is a hint, not a cap
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``expected_samples`` says how many rows to pre-allocate. Under-shooting it is
+always safe: :meth:`~audiotree.tree_writer.TreeWriter.close` truncates every
+``.bin`` file down to what was actually written. Over-shooting it is safe too —
+what happens is decided by the keyword-only ``on_overflow``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 82
+
+   * - ``on_overflow``
+     - Behavior when a batch does not fit
+   * - ``"grow"`` (default)
+     - Reallocate every leaf file and carry on. ``write()`` always returns the
+       full batch size and never drops samples.
+   * - ``"error"``
+     - Raise ``ValueError`` naming how many samples were written, allocated and
+       offered.
+   * - ``"trim"``
+     - Write as much of the batch as fits, drop the rest, and warn
+       (``UserWarning``) with the same counts. This is the only policy under
+       which ``write()`` returns less than the batch size — possibly ``0``, once
+       the allocation is full.
+
+.. testcode::
+
+    import jax.numpy as jnp
+    from audiotree import AudioTree, TreeWriter
+
+    batch = AudioTree.create(jnp.zeros((8, 1, 16_000)), 16_000)
+
+    # A deliberate under-estimate: the default policy grows past it.
+    with TreeWriter("grown", expected_samples=2) as writer:
+        written = writer.write(batch)
+        stats = writer.get_stats()
+        print(written, stats["expected_samples"], stats["allocated_samples"])
+
+.. testoutput::
+
+    8 2 8
+
+``get_stats()["expected_samples"]`` keeps reporting the constructor argument
+verbatim; ``allocated_samples`` is the live allocation. The on-disk manifest is
+unchanged either way — it still records ``expected_samples`` as you passed it.
+Pass ``on_overflow="error"`` when the count is meant to be exact and a mismatch
+is a bug worth surfacing.
+
 .. _quantized-features:
 
 Quantizing float features to int16
@@ -310,9 +359,46 @@ AudioWriter automatically tracks all AudioTree metadata in the manifest:
 
 The manifest will contain:
 
-- **Core info**: filename, sample_rate, channels, samples, duration_seconds
-- **AudioTree fields**: loudness, pitch, velocity, duration, filepath
-- **Custom tags**: Any additional metadata passed via the ``tags`` parameter
+- **Core info**: ``index``, ``filename``, ``sample_rate``, ``channels``,
+  ``samples``, ``duration_seconds``, ``files_written``, and ``subtype`` — the
+  soundfile subtype each item was actually encoded with (absent for a
+  ``write_audio=False`` run, where nothing was encoded)
+- **AudioTree fields**: ``lufs``, ``lufs_windows``, ``pitch``, ``velocity``,
+  ``note_duration``, ``codes``, ``latents``, and the source ``filepath``
+- **Custom tags**: Any additional metadata passed via the ``tags`` parameter,
+  stored as ``tags_*`` columns
+- **Metadata arrays**: every non-nested ``metadata`` entry, as a ``metadata_*``
+  column
+
+A column that some rows lack is stored with a presence mask, so a missing value is
+genuinely *absent* on read-back rather than standing in as a sentinel like ``-1``,
+``NaN`` or ``""``. That matters for a ``filter_fn``: use ``entry.get(...)`` with
+your own default rather than ``entry[...]`` for any column that may be absent
+(``"tags"`` included — it appears only on rows that have at least one tag).
+
+Choosing an encoding subtype
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``AudioWriter(subtype=...)`` is passed straight to soundfile. Left at its default
+of ``None``, AudioWriter picks **the widest subtype the container supports** —
+``FLOAT`` for WAV/AIFF/CAF/W64/RF64, ``PCM_24`` for FLAC, the container's own
+default otherwise — rather than libsndfile's default of ``PCM_16`` for WAV. Model
+output routinely exceeds ``[-1, 1]``, and a 16-bit default silently hard-clipped
+it.
+
+.. testcode::
+
+    # Default: lossless for a model's float output, at the cost of file size.
+    writer = AudioWriter("output_float", exist_ok=True)
+
+    # Ask for the old behavior explicitly when you want small, portable files.
+    writer = AudioWriter("output_pcm16", subtype="PCM_16", exist_ok=True)
+
+If the effective subtype *is* fixed-point and an item peaks above ``1.0``,
+:meth:`~audiotree.writer.AudioWriter.write` emits a ``RuntimeWarning`` naming the
+worst offender and its peak — one warning per ``write()`` call — because those
+samples do not survive the encode. Either pass ``subtype="FLOAT"`` or scale the
+audio down first (:func:`~audiotree.transforms.rescale_audio` does exactly that).
 
 Timestamp Control
 ~~~~~~~~~~~~~~~~~
@@ -624,7 +710,7 @@ Here's a complete example of creating a training dataset with TreeWriter:
             duration=3.0,
             mono=True,
             shuffle=True,
-            repeat=True,
+            num_epochs=None,
         )
 
         # Seed once; each random_map derives its own distinct seed so every
@@ -634,7 +720,8 @@ Here's a complete example of creating a training dataset with TreeWriter:
         ds = ds.random_map(shift_phase())
 
         # Take num_samples items from the infinite stream and write each one.
-        # TreeWriter pre-allocates expected_samples rows up front.
+        # TreeWriter pre-allocates expected_samples rows up front, and grows
+        # them if the stream turns out to be longer.
         it = iter(ds.to_iter_dataset())
         pbar = tqdm(total=num_samples, desc="Precomputing")
         with TreeWriter(output_dir, expected_samples=num_samples, pbar=pbar, close_pbar=True) as writer:

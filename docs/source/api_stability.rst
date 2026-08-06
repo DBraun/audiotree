@@ -33,11 +33,11 @@ attributes and methods of the classes those names resolve to.
        ``precompute_window_lufs``, ``scan_durations``, ``WindowLufsCache``,
        ``WindowParams``, ``AudioDataSource``, ``TreeDataSource``
    * - ``audiotree.transforms``
-     - ``AudioCodec``, ``identity``, ``mono``, ``stereo``, ``resample``,
-       ``volume_change``, ``volume_norm``, ``rescale_audio``, ``peak_norm``,
-       ``invert_phase``, ``swap_stereo``, ``corrupt_phase``, ``shift_phase``,
-       ``roll``, ``choose``, ``encode_with_codec``, ``encode_latents``,
-       ``trim``, ``map_transform``, ``random_transform``
+     - ``AudioCodec``, ``LatentAudioCodec``, ``identity``, ``mono``, ``stereo``,
+       ``resample``, ``volume_change``, ``volume_norm``, ``rescale_audio``,
+       ``peak_norm``, ``invert_phase``, ``swap_stereo``, ``corrupt_phase``,
+       ``shift_phase``, ``roll``, ``choose``, ``encode_with_codec``,
+       ``encode_latents``, ``trim``, ``map_transform``, ``random_transform``
    * - ``audiotree.transforms.jax``
      - the same list, minus ``choose``
 
@@ -62,8 +62,14 @@ Also public:
   ``split_seed``. The result exposes ``.map(...)`` (map transforms) or
   ``.random_map(...)`` (random transforms) for Grain.
 
-  Three exports do **not** follow that convention, and passing ``scope`` or
-  ``output_key`` to any of them raises ``TypeError``:
+  That includes the two codec transforms: ``encode_with_codec(codec, *,
+  scope=None, output_key=None)`` and ``encode_latents(codec, *, scope=None,
+  output_key=None)``. Their *AudioTree field* is fixed (``codes`` and
+  ``latents``), but ``output_key`` renames the **dict leaf** the result is
+  stored under, so ``encode_latents(codec, scope=["dry"],
+  output_key="dry_latents")`` yields ``{"dry": ..., "dry_latents": ...}``.
+
+  ``choose`` is the one export that does **not** follow the convention:
 
   .. list-table::
      :header-rows: 1
@@ -75,20 +81,24 @@ Also public:
        - ``choose(*transforms, c=1, weights=None, prob=1.0)``. A
          ``grain.transforms.RandomMap`` subclass written by hand, not a
          decorated transform: it takes ``prob`` but no ``split_seed``,
-         ``scope`` or ``output_key``. Scope the transforms you hand it
-         instead.
-     * - ``encode_with_codec``, ``encode_latents``
-       - ``encode_with_codec(codec)`` / ``encode_latents(codec)``. Map
-         transforms with a fixed output field (``codes`` and ``latents``),
-         so there is nothing for ``output_key`` to redirect and no ``scope``
-         parameter.
+         ``scope`` or ``output_key``, and passing any of those raises
+         ``TypeError``. Scope the transforms you hand it instead. Every
+         positional argument must itself be a ``grain.transforms.Map`` or
+         ``RandomMap`` — a bare callable raises ``TypeError`` — and ``c``,
+         ``weights`` and ``prob`` are range-checked with ``ValueError``.
 
-  ``AudioCodec`` is a protocol, not a transform, and is not called this way at
-  all.
+  ``AudioCodec`` and ``LatentAudioCodec`` are protocols, not transforms, and are
+  not called this way at all.
 * **The three on-disk formats** — a ``TreeWriter`` directory, an ``AudioWriter``
   NPZ manifest, and a windowed-LUFS cache. See `On-disk formats`_.
-* **The** ``AudioCodec`` **protocol** — ``encode(AudioTree) -> (codes, scale)`` and
-  ``encode_to_latent(AudioTree) -> latents``.
+* **Two codec protocols**, both ``@runtime_checkable`` and each declaring exactly
+  one method: ``AudioCodec`` — ``encode(AudioTree) -> (codes, scale)``, consumed
+  by ``encode_with_codec``; and ``LatentAudioCodec`` —
+  ``encode_to_latent(AudioTree) -> latents``, consumed by ``encode_latents``. A
+  codec that does both satisfies both.
+* **Documented transform semantics**, including the edge cases: ``swap_stereo``
+  is a no-op on mono, swaps the two channels of stereo, and raises ``ValueError``
+  on three or more channels rather than reversing the channel order.
 
 What is internal
 ----------------
@@ -120,8 +130,12 @@ merged, or deleted in any 1.x release without a deprecation cycle:
        ``audiotree.transforms.jax``, not from here.
    * - ``audiotree.loudness``, ``audiotree.resample``
      - Loudness and resampling kernels; reach them through ``AudioTree``.
-   * - ``audiotree._fs``, ``audiotree._format``, ``audiotree._bagz``
-     - Path confinement, on-disk header, and the lazy ``bagz`` import.
+   * - ``audiotree._fs``, ``audiotree._format``, ``audiotree._manifest``,
+       ``audiotree._bagz``
+     - Path confinement, on-disk header, the NPZ manifest codec shared by
+       ``AudioWriter``/``AudioDataSource``/``AudioTree.from_manifest``, and the
+       lazy ``bagz`` import. The manifest *format* is public (see `On-disk
+       formats`_); the module that reads and writes it is not.
 
 .. note::
    ``@map_transform`` and ``@random_transform`` — the documented way to write your
@@ -231,8 +245,10 @@ Three artifacts are a compatibility contract, because people keep them for years
      - ``build_window_lufs_cache()`` / ``save_window_lufs()``
 
 Each carries a header — ``format``, ``format_version``, ``min_reader_version``,
-``producer`` — and every reader validates it. The rules, all implemented in one
-place (``audiotree/_format.py``):
+``producer`` — and every reader validates it. (The NPZ manifest adds one more
+header key, ``num_entries``, so a reader knows the row count without inferring it
+from a column, and can reject a manifest whose columns disagree with it.) The
+rules, all implemented in one place (``audiotree/_format.py``):
 
 .. list-table::
    :header-rows: 1
@@ -301,10 +317,10 @@ end-to-end across environments.
   equality, and the resamplers and loudness meters are third-party. If you need
   byte-stability, pin your environment; if you need it *checked*, hash your own
   pre-rendered dataset.
-* **NumPy/JAX backend equality.** The two backends of ``replace_lufs()`` are
-  documented as not bit-identical (exact IIR K-weighting on CPU versus
-  ``jaxloudnorm``'s FIR approximation), and the same caution applies to the two
-  transform backends generally.
+* **NumPy/JAX engine equality.** The two loudness engines selectable with
+  ``replace_lufs(engine=...)`` are documented as not bit-identical (exact IIR
+  K-weighting on CPU versus ``jaxloudnorm``'s FIR approximation), and the same
+  caution applies to the two transform backends generally.
 * **Batch composition under multiprocessing.** Grain shards the pipeline *upstream*
   of ``mp_prefetch`` across worker processes, so if ``.batch()`` sits before
   ``.mp_prefetch()`` each worker forms batches from its own shard and which items
