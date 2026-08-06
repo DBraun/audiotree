@@ -128,7 +128,7 @@ def test_write_round_trip(tmp_path):
     np.testing.assert_allclose(reloaded.waveform[0], waveform[0], atol=1e-3)
 
 
-def test_write_options_and_batch_assertion(tmp_path):
+def test_write_options_and_batch_size_check(tmp_path):
     """write() forwards subtype/format and requires batch_size == 1."""
     import soundfile
 
@@ -145,9 +145,11 @@ def test_write_options_and_batch_assertion(tmp_path):
     single.write(tmp_path / "a.flac")
     assert soundfile.info(str(tmp_path / "a.flac")).format == "FLAC"
 
-    # A multi-item batch must be indexed/iterated first.
+    # A multi-item batch must be indexed/iterated first. This is a ValueError,
+    # not an assert: an assert would vanish under ``python -O`` and soundfile
+    # would silently write only the first item.
     batch = AudioTree(waveform=np.zeros((3, 1, sr), dtype=np.float32), sample_rate=sr)
-    with pytest.raises(AssertionError, match="batch_size == 1"):
+    with pytest.raises(ValueError, match="batch_size == 1"):
         batch.write(tmp_path / "fail.wav")
 
     # Iterating yields writable batch-of-1 trees.
@@ -544,8 +546,8 @@ def test_replace_lufs_windows_hop_and_silence():
     assert np.all(np.isneginf(np.asarray(silent.lufs_windows[0])))
 
 
-def test_replace_lufs_backend_forces_jax_kernel_but_keeps_array_type():
-    """`backend="cpu"` runs the JAX kernel on XLA CPU yet returns NumPy loudness."""
+def test_replace_lufs_engine_forces_jax_kernel_but_keeps_array_type():
+    """`engine="jax"` runs the FIR kernel yet returns NumPy loudness."""
     import jax.numpy as jnp
 
     sr = 44100
@@ -553,13 +555,13 @@ def test_replace_lufs_backend_forces_jax_kernel_but_keeps_array_type():
     np_tree = AudioTree.create(tone, sr)
     jx_tree = AudioTree.create(jnp.asarray(tone), sr)
 
-    # Default backend=None -> native NumPy/CPU kernel for a NumPy waveform.
+    # Default engine=None -> native NumPy/CPU kernel for a NumPy waveform.
     assert isinstance(np_tree.replace_lufs().lufs, np.ndarray)
 
-    # backend="cpu" forces the vmapped jaxloudnorm kernel (on XLA CPU) even for a
-    # NumPy waveform, but loudness comes back as NumPy so the tree stays on one
+    # engine="jax" forces the vmapped jaxloudnorm kernel even for a NumPy
+    # waveform, but loudness comes back as NumPy so the tree stays on one
     # device -- no manual device_put/device_get needed.
-    forced = np_tree.replace_lufs(backend="cpu")
+    forced = np_tree.replace_lufs(device="cpu", engine="jax")
     assert isinstance(forced.lufs, np.ndarray)
     assert isinstance(forced.lufs_windows, np.ndarray)
     # It ran the JAX kernel, so it matches the JAX path (not the exact-IIR NumPy
@@ -569,14 +571,70 @@ def test_replace_lufs_backend_forces_jax_kernel_but_keeps_array_type():
     np.testing.assert_allclose(
         forced.lufs_windows, np.asarray(jax_native.lufs_windows), atol=1e-3
     )
+    # ...and the device is optional: engine alone picks the kernel.
+    np.testing.assert_allclose(
+        np_tree.replace_lufs(engine="jax").lufs, forced.lufs, atol=1e-6
+    )
 
-    with pytest.raises(ValueError):
-        np_tree.replace_lufs(backend="jax")
-
-    # normalize_lufs forwards backend to replace_lufs and keeps NumPy output.
-    normalized = np_tree.normalize_lufs(-18.0, backend="cpu")
+    # normalize_lufs forwards device/engine to replace_lufs and keeps NumPy output.
+    normalized = np_tree.normalize_lufs(-18.0, device="cpu", engine="jax")
     assert isinstance(normalized.lufs, np.ndarray)
     np.testing.assert_allclose(float(normalized.lufs[0]), -18.0, atol=1e-4)
+
+
+def test_replace_lufs_device_and_engine_are_independent():
+    """`device=` says where, `engine=` says which kernel -- neither implies the other.
+
+    ``backend="cpu"`` used to conflate the two: it forced the FIR approximation
+    even for a NumPy waveform already sitting on the CPU, so "the exact IIR
+    meter, on this device" was unaskable.
+    """
+    import jax
+    import jax.numpy as jnp
+
+    sr = 44100
+    tone = _tone(sr, 2.0)
+    np_tree = AudioTree.create(tone, sr)
+    jx_tree = AudioTree.create(jnp.asarray(tone), sr)
+
+    exact = float(np_tree.replace_lufs().lufs[0])  # NumPy engine, exact IIR
+    approx = float(np_tree.replace_lufs(engine="jax").lufs[0])  # FIR approximation
+    assert exact != approx  # the two kernels really are different
+
+    # device="cpu" alone keeps the waveform's own engine -- it is a placement
+    # request, not a kernel request.
+    assert float(np_tree.replace_lufs(device="cpu").lufs[0]) == exact
+    np.testing.assert_allclose(
+        float(jx_tree.replace_lufs(device="cpu").lufs[0]), approx, atol=1e-4
+    )
+
+    # The newly askable combination: the exact IIR meter on a JAX waveform.
+    iir_on_jax = jx_tree.replace_lufs(engine="numpy")
+    assert isinstance(iir_on_jax.lufs, jax.Array)  # output follows the waveform
+    np.testing.assert_allclose(float(iir_on_jax.lufs[0]), exact, atol=1e-4)
+
+    # A concrete jax.Device is accepted alongside the platform names.
+    np.testing.assert_allclose(
+        float(np_tree.replace_lufs(device=jax.devices("cpu")[0], engine="jax").lufs[0]),
+        approx,
+        atol=1e-6,
+    )
+
+    # Bad values name themselves, and the CPU-only engine refuses an accelerator.
+    with pytest.raises(ValueError, match="device must be"):
+        np_tree.replace_lufs(device="jax")
+    with pytest.raises(ValueError, match="engine must be"):
+        np_tree.replace_lufs(engine="cpu")
+    with pytest.raises(TypeError, match="device must be"):
+        np_tree.replace_lufs(device=3)
+    from audiotree.core import _resolve_lufs_engine
+
+    with pytest.raises(ValueError, match="CPU"):
+        _resolve_lufs_engine("numpy", "gpu", input_is_numpy=True)
+    # On a non-CPU device, engine=None picks the only kernel that can run there.
+    assert _resolve_lufs_engine(None, "gpu", input_is_numpy=True) == "jax"
+    assert _resolve_lufs_engine(None, None, input_is_numpy=True) == "numpy"
+    assert _resolve_lufs_engine(None, None, input_is_numpy=False) == "jax"
 
 
 def test_normalize_lufs_shifts_windows():
@@ -941,3 +999,309 @@ def test_replace_is_typed_and_stays_in_sync():
     quieter = tree.replace(waveform=tree.waveform + 1.0)
     assert quieter.sample_rate == 44100
     np.testing.assert_array_equal(quieter.waveform, tree.waveform + 1.0)
+
+
+# =============================================================================
+# Derived-field invalidation
+# =============================================================================
+
+
+def _encoded_tree(sample_rate: int = 16000, channels: int = 2) -> AudioTree:
+    """A tree carrying every derived field: loudness, codec tokens and latents."""
+    tone = np.broadcast_to(_tone(sample_rate, 1.0), (2, channels, sample_rate))
+    return AudioTree.create(
+        np.ascontiguousarray(tone),
+        sample_rate,
+        codes=np.ones((2, 4, 50), dtype=np.int32),
+        latents=np.ones((2, 8, 50), dtype=np.float32),
+        metadata={"codec_scale": np.ones((2, 1), dtype=np.float32)},
+    ).replace_lufs()
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        pytest.param(lambda tree: tree.resample(8000), id="resample"),
+        pytest.param(lambda tree: tree.to_mono(), id="to_mono"),
+        pytest.param(lambda tree: tree.to_mono("left"), id="to_mono_left"),
+        pytest.param(lambda tree: tree.to_mono().to_stereo(), id="to_stereo"),
+    ],
+)
+def test_length_rate_channel_changes_invalidate_every_derived_field(operation):
+    """Codec tokens describe one waveform; a changed waveform must drop them.
+
+    ``resample``/``to_mono``/``to_stereo`` used to clear only ``lufs`` and
+    ``lufs_windows``, so ``codes``/``latents``/``metadata["codec_scale"]``
+    survived describing the *old* audio -- and ``encode_with_codec`` is
+    idempotent, so a resample-after-encode happily reused them.
+    """
+    tree = _encoded_tree()
+    assert tree.codes is not None and tree.lufs is not None
+
+    out = operation(tree)
+    assert out.lufs is None
+    assert out.lufs_windows is None
+    assert out.codes is None
+    assert out.latents is None
+    assert "codec_scale" not in out.metadata
+
+
+def test_normalize_lufs_keeps_loudness_but_drops_codec_fields():
+    """A gain has a closed form for LUFS and none for codec tokens."""
+    tree = _encoded_tree()
+    out = tree.normalize_lufs(-18.0)
+
+    # Loudness is shifted, not discarded...
+    np.testing.assert_allclose(float(out.lufs[0]), -18.0, atol=1e-4)
+    assert out.lufs_windows is not None
+    # ...but the tokens described the audio at its old level.
+    assert out.codes is None
+    assert out.latents is None
+    assert "codec_scale" not in out.metadata
+
+
+def test_no_op_conversions_keep_derived_fields():
+    """Operations that do not touch the audio are exempt from invalidation."""
+    mono = _encoded_tree(channels=1)
+    stereo = _encoded_tree(channels=2)
+    for unchanged in (
+        mono.resample(mono.sample_rate),
+        mono.to_mono(),
+        mono.to_mono("left"),
+        stereo.to_stereo(),
+    ):
+        assert unchanged.codes is not None
+        assert unchanged.lufs is not None
+        assert "codec_scale" in unchanged.metadata
+
+    # Re-batching the same items is not an audio change either.
+    for unchanged in (
+        stereo[0],
+        stereo[1:],
+        stereo.split(2)[0],
+        stereo.filter(lambda item: True),
+    ):
+        assert unchanged.codes is not None
+        assert unchanged.lufs is not None
+        assert "codec_scale" in unchanged.metadata
+
+
+def test_invalidate_derived_rejects_unknown_keep():
+    """``keep`` names derived fields only; a typo must not silently clear one."""
+    tree = _encoded_tree()
+    with pytest.raises(ValueError, match="keep must name derived fields"):
+        tree._invalidate_derived(keep=("waveform",))
+
+    # And it is the single source of truth for what "derived" means.
+    from audiotree.core import DERIVED_FIELDS, DERIVED_METADATA_KEYS
+
+    assert DERIVED_FIELDS == ("lufs", "lufs_windows", "codes", "latents")
+    assert DERIVED_METADATA_KEYS == ("codec_scale",)
+
+
+# =============================================================================
+# AudioTree.from_manifest
+# =============================================================================
+
+
+def _write_manifest(directory, **writer_kwargs):
+    """Write a small three-item dataset and return its manifest path."""
+    from audiotree import AudioWriter
+
+    rng = np.random.default_rng(0)
+    tree = AudioTree.create(
+        rng.uniform(-0.5, 0.5, (3, 1, 8000)).astype(np.float32),
+        sample_rate=8000,
+        lufs=np.array([-30.0, -18.0, -15.0], dtype=np.float32),
+        filepath=["a.wav", "b.wav", "c.wav"],
+        metadata={"frame_id": np.array([10, 20, 30], dtype=np.int32)},
+    )
+    with AudioWriter(directory, **writer_kwargs) as writer:
+        writer.write(tree, tags={"split": "train"})
+    return Path(directory) / "manifest.npz"
+
+
+def _retag_manifest(manifest_path, column, values):
+    """Rewrite one column of an existing manifest, leaving the rest alone."""
+    from audiotree import _manifest
+
+    stored = _manifest.read_columns(manifest_path)
+    columns = {name: list(array) for name, array in stored.columns.items()}
+    columns[column] = list(values)
+    _manifest.write(manifest_path, columns, stored.num_entries)
+
+
+def test_from_manifest_refuses_filenames_outside_the_audio_dir(tmp_path):
+    """A tampered manifest cannot make from_manifest read arbitrary files.
+
+    ``pathlib`` drops the left operand of a join when the right side is
+    absolute and never normalizes ``..``, so an unchecked ``audio_dir /
+    filename`` hands back the contents of any readable file as ``waveform``.
+    """
+    dataset = tmp_path / "dataset"
+    manifest_path = _write_manifest(dataset)
+
+    secret = tmp_path / "secret.wav"
+    AudioTree.create(np.ones((1, 1, 8000), dtype=np.float32), 8000).write(secret)
+
+    for filename in ("../secret.wav", str(secret)):
+        _retag_manifest(manifest_path, "filename", [filename] * 3)
+        with pytest.raises(ValueError, match="Refusing to open|resolves outside"):
+            AudioTree.from_manifest(manifest_path)
+
+
+def test_from_manifest_and_audio_data_source_agree(tmp_path):
+    """One manifest, one parser: both readers must produce the same tree."""
+    from audiotree.sources import AudioDataSource
+
+    manifest_path = _write_manifest(tmp_path / "dataset")
+
+    combined = AudioTree.from_manifest(manifest_path)
+    source = AudioDataSource(manifest_path)
+    per_item = AudioTree.batch([source[i] for i in range(len(source))])
+
+    assert combined.batch_size == per_item.batch_size == 3
+    assert combined.sample_rate == per_item.sample_rate
+    np.testing.assert_allclose(combined.waveform, per_item.waveform)
+    np.testing.assert_allclose(combined.lufs, per_item.lufs)
+    assert combined.filepath == per_item.filepath == ["a.wav", "b.wav", "c.wav"]
+    # AudioDataSource routes each row through ``from_file``, which additionally
+    # records the read ``offset``; every manifest-derived field must match.
+    assert per_item.metadata.keys() - combined.metadata.keys() == {"offset"}
+    assert combined.metadata.keys() <= per_item.metadata.keys()
+    np.testing.assert_array_equal(
+        combined.metadata["frame_id"], per_item.metadata["frame_id"]
+    )
+
+
+def test_from_manifest_filter_fn_gets_the_same_entries_as_audio_data_source(tmp_path):
+    """``filter_fn`` is handed a manifest-entry dict, like AudioDataSource's."""
+    from audiotree import _manifest
+    from audiotree.sources import AudioDataSource
+
+    manifest_path = _write_manifest(tmp_path / "dataset")
+    expected_keys = [set(entry) for entry in _manifest.read_entries(manifest_path)]
+
+    seen = []
+
+    def predicate(entry):
+        seen.append(entry)
+        return entry["tags"]["split"] == "train" and entry.get("lufs", -np.inf) > -20
+
+    loud = AudioTree.from_manifest(manifest_path, filter_fn=predicate)
+
+    assert [type(entry) for entry in seen] == [dict] * 3
+    assert [set(entry) for entry in seen] == expected_keys
+    assert loud.batch_size == 2
+    np.testing.assert_allclose(loud.lufs, [-18.0, -15.0])
+
+    # The very same predicate must select the very same items in the other reader.
+    source = AudioDataSource(manifest_path, filter_fn=predicate)
+    assert [entry["filename"] for entry in source.get_all_entries()] == [
+        str(seen[1]["filename"]),
+        str(seen[2]["filename"]),
+    ]
+
+
+def test_from_manifest_rejects_a_partly_present_column(tmp_path):
+    """A masked-out cell is not filler to load; it is a hole and must be named."""
+    from audiotree import _manifest
+
+    manifest_path = _write_manifest(tmp_path / "dataset", write_audio=False)
+    _retag_manifest(manifest_path, "lufs", [-30.0, None, -15.0])
+    assert "lufs" in _manifest.read_columns(manifest_path).present
+
+    with pytest.raises(ValueError, match="value for 2 of the 3 selected entries"):
+        AudioTree.from_manifest(manifest_path)
+
+    # Filtering the hole away leaves a loadable manifest.
+    kept = AudioTree.from_manifest(manifest_path, filter_fn=lambda e: "lufs" in e)
+    np.testing.assert_allclose(kept.lufs, [-30.0, -15.0])
+
+
+def test_from_manifest_rejects_a_pickled_manifest(tmp_path):
+    """Reading a manifest never unpickles: that would be code execution."""
+    manifest_path = _write_manifest(tmp_path / "dataset", write_audio=False)
+    with np.load(manifest_path, allow_pickle=False) as npz:
+        payload = dict(npz)
+    # A valid header over a pickled column: exactly what a pre-1.0 manifest, or
+    # a tampered one, looks like.
+    payload["filename"] = np.array(list(payload["filename"]), dtype=object)
+    np.savez(manifest_path, **payload)
+
+    with pytest.raises(ValueError, match="pickled object arrays"):
+        AudioTree.from_manifest(manifest_path)
+
+
+def test_from_manifest_closes_the_npz_handle(tmp_path):
+    """The manifest must not stay open: a leaked handle is a leaked descriptor."""
+    manifest_path = _write_manifest(tmp_path / "dataset", write_audio=False)
+    tree = AudioTree.from_manifest(manifest_path)
+    assert tree.batch_size == 3
+    # An open NpzFile keeps the archive mapped; deletion is the portable check.
+    manifest_path.unlink()
+    assert not manifest_path.exists()
+
+
+# =============================================================================
+# Public guarantees survive ``python -O``
+# =============================================================================
+
+
+def test_shape_guarantees_raise_instead_of_asserting():
+    """These checks are exceptions, not asserts, so ``-O`` cannot delete them."""
+    tree = AudioTree(np.zeros((5, 1, 32), dtype=np.float32), 44100)
+
+    with pytest.raises(ValueError, match="divisible by the number of splits"):
+        tree.split(2)
+    with pytest.raises(ValueError, match="divisible by mini_batch_size"):
+        tree.reshape_mini_batches(2)
+    with pytest.raises(ValueError, match="at least 4 dimensions"):
+        tree.flatten_mini_batches()
+
+
+def test_public_checks_survive_python_O():
+    """Run the same guarantees in a ``python -O`` subprocess.
+
+    An ``assert`` is compiled out entirely under ``-O``, so the failure would be
+    a silently truncated write or a bogus reshape rather than an exception.
+    """
+    import subprocess
+    import sys
+
+    script = """
+import numpy as np
+from audiotree import AudioTree
+
+assert_removed = True
+try:
+    assert False
+except AssertionError:
+    assert_removed = False
+if assert_removed is not True:
+    raise SystemExit("-O did not strip asserts; the test proves nothing")
+
+tree = AudioTree(np.zeros((5, 1, 32), dtype=np.float32), 44100)
+for call, needle in (
+    (lambda: tree.split(2), "divisible"),
+    (lambda: tree.reshape_mini_batches(2), "divisible"),
+    (lambda: tree.flatten_mini_batches(), "4 dimensions"),
+    (lambda: tree.write("/dev/null"), "batch_size == 1"),
+):
+    try:
+        call()
+    except ValueError as exc:
+        if needle not in str(exc):
+            raise SystemExit(f"wrong message: {exc}")
+    else:
+        raise SystemExit(f"no exception for {needle}")
+print("ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-O", "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ok" in result.stdout

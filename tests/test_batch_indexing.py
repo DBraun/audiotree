@@ -125,6 +125,51 @@ def test_batch_round_trips_items():
     np.testing.assert_array_equal(batched.metadata["style"], tree.metadata["style"])
 
 
+def test_batch_keeps_jax_arrays_on_device():
+    """JAX in, JAX out.
+
+    ``AudioTree.batch`` hardcoded ``np.concatenate``, so the function the README
+    tells everyone to pass as ``batch_fn`` turned every device-resident batch
+    into NumPy -- a blocking host sync and a silent type change.
+    """
+    import jax
+    import jax.numpy as jnp
+
+    items = [
+        AudioTree(
+            waveform=jnp.full((1, 2, 16), float(i), dtype=jnp.float32),
+            sample_rate=44_100,
+            codes=jnp.full((1, 4, 3), i, dtype=jnp.int32),
+            metadata={"style": jnp.full((1, 4), i, dtype=jnp.int32)},
+        )
+        for i in range(3)
+    ]
+    batched = AudioTree.batch(items)
+
+    assert isinstance(batched.waveform, jax.Array)
+    assert isinstance(batched.codes, jax.Array)
+    assert isinstance(batched.metadata["style"], jax.Array)
+    assert batched.waveform.shape == (3, 2, 16)
+    np.testing.assert_array_equal(np.asarray(batched.waveform[2]), 2.0)
+
+    # A dict of JAX arrays around the trees stays JAX too.
+    nested = AudioTree.batch(
+        [{"audio": item, "weight": jnp.ones((1,))} for item in items]
+    )
+    assert isinstance(nested["weight"], jax.Array)
+    assert isinstance(nested["audio"].waveform, jax.Array)
+
+    # NumPy items still come back as NumPy.
+    numpy_items = [tree for tree in _tree(batch=2)]
+    assert isinstance(AudioTree.batch(numpy_items).waveform, np.ndarray)
+
+
+def test_batch_rejects_an_empty_sequence():
+    """An empty batch has no structure to infer; say so instead of IndexError."""
+    with pytest.raises(ValueError, match="at least one item"):
+        AudioTree.batch([])
+
+
 def test_batch_token_only_items():
     """Items without a waveform (codes-only training examples) batch fine."""
     items = [

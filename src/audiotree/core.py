@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
-import json
 from pathlib import Path
 from typing import (
     Any,
@@ -29,7 +28,8 @@ import loudness
 import numpy as np
 import soundfile
 
-from . import _format
+from . import _manifest
+from ._fs import safe_join
 from .loudness import (
     _jit_integrated_loudness,
     _jit_windowed_loudness,
@@ -45,7 +45,7 @@ from .resample import resample
 
 if TYPE_CHECKING:
     # An array field that may hold either a NumPy or a JAX array. ``jax`` is
-    # already imported at module top (``replace_lufs(backend=...)`` needs
+    # already imported at module top (``replace_lufs(device=...)`` needs
     # ``jax.devices`` / ``jax.device_put``), so this annotation resolves against
     # it without a duplicate import.
     ArrayLike = Union[np.ndarray, jax.Array]
@@ -264,9 +264,60 @@ def _is_integer_scalar(key) -> bool:
         return False
     if isinstance(key, (int, np.integer)):
         return True
-    if isinstance(key, (np.ndarray, jnp.ndarray)):
+    if isinstance(key, (np.ndarray, jax.Array)):
         return key.ndim == 0 and np.issubdtype(key.dtype, np.integer)
     return False
+
+
+_XLA_PLATFORMS = ("cpu", "gpu", "tpu")
+
+
+def _resolve_device(device) -> tuple[Optional["jax.Device"], Optional[str]]:
+    """Normalize a ``device=`` argument to ``(jax.Device | None, platform | None)``.
+
+    Accepts an XLA platform name (``"cpu"`` / ``"gpu"`` / ``"tpu"``), a concrete
+    :class:`jax.Device`, or ``None`` for "wherever the data already is".
+    """
+    if device is None:
+        return None, None
+    if isinstance(device, str):
+        if device not in _XLA_PLATFORMS:
+            raise ValueError(
+                f"device must be None, one of {_XLA_PLATFORMS}, or a jax.Device, "
+                f"got {device!r}."
+            )
+        return jax.devices(device)[0], device
+    if isinstance(device, jax.Device):
+        return device, device.platform
+    raise TypeError(
+        f"device must be None, one of {_XLA_PLATFORMS}, or a jax.Device, got "
+        f"{type(device).__name__}."
+    )
+
+
+def _resolve_lufs_engine(
+    engine: Optional[str], platform: Optional[str], input_is_numpy: bool
+) -> str:
+    """Pick the loudness kernel from an ``engine=``/``device=`` pair.
+
+    ``engine=None`` follows the waveform's own array library, except on a
+    non-CPU device where only the JAX kernel exists. The NumPy engine is the
+    exact BS.1770 IIR meter and is CPU-only, so pairing it with an accelerator
+    is a contradiction rather than a silent downgrade.
+    """
+    if engine is None:
+        on_accelerator = platform is not None and platform != "cpu"
+        return "jax" if (on_accelerator or not input_is_numpy) else "numpy"
+    if engine not in ("numpy", "jax"):
+        raise ValueError(f"engine must be None, 'numpy', or 'jax', got {engine!r}.")
+    if engine == "numpy" and platform not in (None, "cpu"):
+        raise ValueError(
+            f"engine='numpy' is the exact BS.1770 IIR meter and runs on the CPU "
+            f"only, so it cannot be combined with device={platform!r}. Use "
+            f"engine='jax' for the accelerator, or drop device= to measure on "
+            f"the CPU."
+        )
+    return engine
 
 
 def _leading_axis_size(*candidates) -> Optional[int]:
@@ -279,6 +330,20 @@ def _leading_axis_size(*candidates) -> Optional[int]:
         if value is not None:
             return value.shape[0]
     return None
+
+
+#: Fields whose value describes one particular waveform, at one particular
+#: length, sample rate, channel count and level. Any operation that changes the
+#: audio in one of those ways must clear them, or a downstream consumer reads
+#: loudness or codec tokens that describe the *previous* audio -- silently, and
+#: with nothing downstream able to detect it. See
+#: :meth:`AudioTree._invalidate_derived`.
+DERIVED_FIELDS: tuple = ("lufs", "lufs_windows", "codes", "latents")
+
+#: ``metadata`` keys that are derived in the same way. ``"codec_scale"`` is
+#: written by ``encode_with_codec`` alongside ``codes`` and is meaningless once
+#: those tokens are gone.
+DERIVED_METADATA_KEYS: tuple = ("codec_scale",)
 
 
 class _AudioTreeFields(TypedDict, total=False):
@@ -488,6 +553,53 @@ class AudioTree:
             metadata=metadata,
         )
 
+    def _invalidate_derived(
+        self, *, keep: Sequence[str] = (), **updates: Unpack[_AudioTreeFields]
+    ) -> Self:
+        """Apply *updates* and drop every field derived from the old waveform.
+
+        The single place that decides what "the audio changed" invalidates.
+        ``lufs``, ``lufs_windows``, ``codes``, ``latents`` and
+        ``metadata["codec_scale"]`` (:data:`DERIVED_FIELDS` /
+        :data:`DERIVED_METADATA_KEYS`) all describe one specific waveform; every
+        length-, rate-, channel- or energy-changing operation routes through
+        here so none of them can be forgotten one method at a time.
+
+        Args:
+            keep: Derived field names the caller has itself kept correct, and so
+                does not want cleared -- e.g. :meth:`normalize_lufs` shifts
+                ``lufs``/``lufs_windows`` by the gain it applied rather than
+                discarding them. Keeping ``"codes"`` also keeps
+                ``metadata["codec_scale"]``, which is only meaningful with them.
+            **updates: Forwarded to :meth:`replace`, and applied *after* the
+                invalidation so a caller can supply a fresh value for a derived
+                field.
+
+        Returns:
+            AudioTree: A copy with the stale derived fields set to ``None``,
+            stale derived ``metadata`` keys removed, and ``updates`` applied.
+
+        Raises:
+            ValueError: If ``keep`` names something that is not a derived field.
+        """
+        unknown = sorted(set(keep) - set(DERIVED_FIELDS))
+        if unknown:
+            raise ValueError(
+                f"keep must name derived fields {DERIVED_FIELDS}, got {unknown}."
+            )
+        cleared: dict = {name: None for name in DERIVED_FIELDS if name not in keep}
+
+        if "codes" not in keep:
+            metadata = updates.get("metadata", self.metadata)
+            if any(key in metadata for key in DERIVED_METADATA_KEYS):
+                updates["metadata"] = {
+                    key: value
+                    for key, value in metadata.items()
+                    if key not in DERIVED_METADATA_KEYS
+                }
+
+        return self.replace(**(cleared | dict(updates)))
+
     def replace_metadata(self, **kwargs) -> Self:
         """Return a new ``AudioTree`` with ``kwargs`` merged into ``metadata``.
 
@@ -517,7 +629,8 @@ class AudioTree:
         lufs_window_sec: float = 0.4,
         lufs_hop_sec: float | None = None,
         *,
-        backend: Optional[Literal["cpu", "gpu", "tpu"]] = None,
+        device: Optional[Union[Literal["cpu", "gpu", "tpu"], "jax.Device"]] = None,
+        engine: Optional[Literal["numpy", "jax"]] = None,
     ) -> Self:
         """Compute and set the integrated and per-window loudness (LUFS).
 
@@ -534,7 +647,12 @@ class AudioTree:
           exact IIR biquads (``scipy``); JAX uses ``jaxloudnorm``'s FIR-approximated
           filters on the accelerator.
 
-        The two backends are not bit-identical.
+        The two engines are not bit-identical.
+
+        *Where* the measurement runs and *which* kernel runs are separate
+        choices, so ``device=`` and ``engine=`` are separate arguments: asking
+        for the exact IIR meter does not commit you to a device, and moving the
+        work to an accelerator does not silently swap in the FIR approximation.
 
         Args:
             lufs_window_sec: Length in seconds of each ``lufs_windows`` window.
@@ -543,19 +661,25 @@ class AudioTree:
                 ``lufs_window_sec`` (non-overlapping windows); a smaller value
                 overlaps them. The trailing partial window is dropped, so an
                 excerpt shorter than one window yields an empty ``lufs_windows``.
-            backend: XLA backend for the computation, mirroring ``jax.jit``'s
-                ``backend`` argument. ``None`` (default) uses the waveform's own
-                array library on its current device — the NumPy/CPU path (the
-                ``loudness`` C++ library + ``scipy``, no JAX) for NumPy waveforms,
-                and ``jaxloudnorm`` on the current device for JAX waveforms. A
-                string ``"cpu"`` / ``"gpu"`` / ``"tpu"`` instead forces the vmapped
-                ``jaxloudnorm`` kernel onto that XLA backend even for a NumPy
-                waveform — e.g., ``backend="gpu"`` is much faster for a large batch,
-                since the NumPy ``lufs`` path measures one item at a time. The
-                **returned** ``lufs`` / ``lufs_windows`` always match the waveform's
-                array type (a NumPy waveform yields NumPy loudness regardless of
-                ``backend``), so you never need a manual ``jax.device_put`` /
-                ``jax.device_get`` round-trip.
+            device: *Where* to compute — an XLA platform name (``"cpu"`` /
+                ``"gpu"`` / ``"tpu"``, mirroring ``jax.jit``'s ``backend``) or a
+                :class:`jax.Device`. ``None`` (default) leaves the waveform where
+                it is. ``device="gpu"`` is much faster for a large batch, since
+                the NumPy ``lufs`` path measures one item at a time.
+            engine: *Which* kernel to run. ``"numpy"`` is the exact
+                ITU-R BS.1770 IIR meter (the ``loudness`` C++ library + ``scipy``
+                biquads); it is CPU-only, so it cannot be combined with a
+                non-CPU ``device``. ``"jax"`` is the vmapped ``jaxloudnorm``
+                kernel with FIR-approximated K-weighting, and runs on whatever
+                ``device`` says. ``None`` (default) follows the waveform's own
+                array library — NumPy waveform to ``"numpy"``, JAX waveform to
+                ``"jax"`` — except that a non-CPU ``device`` implies ``"jax"``,
+                the only engine that can run there.
+
+                The **returned** ``lufs`` / ``lufs_windows`` always match the
+                waveform's array type (a NumPy waveform yields NumPy loudness
+                whatever the engine), so you never need a manual
+                ``jax.device_put`` / ``jax.device_get`` round-trip.
 
         Returns:
             AudioTree with ``lufs`` shaped ``(*batch,)`` and ``lufs_windows`` shaped
@@ -579,10 +703,13 @@ class AudioTree:
             lufs_hop_sec = lufs_window_sec
         if lufs_hop_sec <= 0:
             raise ValueError(f"lufs_hop_sec must be positive, got {lufs_hop_sec}.")
-        if backend is not None and backend not in ("cpu", "gpu", "tpu"):
-            raise ValueError(
-                f"backend must be None, 'cpu', 'gpu', or 'tpu', got {backend!r}."
-            )
+        # ``engine`` chooses the kernel and ``device`` chooses where it runs; the
+        # output stays in the waveform's own array library so the tree does not go
+        # heterogeneous. Resolved up front so a bad pairing fails before any work.
+        jax_device, platform = _resolve_device(device)
+        input_is_numpy = isinstance(self.waveform, np.ndarray)
+        engine = _resolve_lufs_engine(engine, platform, input_is_numpy)
+
         # Flatten any leading axes (e.g. after reshape_mini_batches) to a single
         # batch axis, then restore them on the computed loudness.
         leading_shape = self.waveform.shape[:-2]
@@ -591,19 +718,11 @@ class AudioTree:
         hs = _window_samples(lufs_hop_sec, self.sample_rate)
         num_windows = _windowed_num_windows(waveform.shape[-1], ws, hs)
 
-        # ``backend`` chooses the compute kernel/device; the output stays in the
-        # waveform's own array library so the tree does not go heterogeneous. A
-        # ``None`` backend follows the waveform's array type; an explicit XLA
-        # backend forces the ``jaxloudnorm`` kernel onto that device.
-        input_is_numpy = isinstance(waveform, np.ndarray)
-        use_jax = not input_is_numpy if backend is None else True
-        device = None if backend is None else jax.devices(backend)[0]
-
-        if use_jax:
+        if engine == "jax":
             compute_waveform = (
                 jnp.asarray(waveform)
-                if device is None
-                else jax.device_put(waveform, device)
+                if jax_device is None
+                else jax.device_put(waveform, jax_device)
             )
             # ``zeros`` is left to the default so the FIR tap count scales with
             # the sample rate; a fixed 512 cannot realize the 38 Hz high-pass
@@ -636,7 +755,7 @@ class AudioTree:
                 )
 
         # Coerce results back to the waveform's array library (a no-op when the
-        # kernel already ran there; a device transfer when ``backend`` forced the
+        # kernel already ran there; a device transfer when ``engine`` selected the
         # other one).
         out_np = np if input_is_numpy else jnp
         lufs_array = out_np.asarray(lufs_array)
@@ -652,14 +771,17 @@ class AudioTree:
         target_lufs: float,
         *,
         max_gain_db: Optional[float] = None,
-        backend: Optional[Literal["cpu", "gpu", "tpu"]] = None,
+        device: Optional[Union[Literal["cpu", "gpu", "tpu"], "jax.Device"]] = None,
+        engine: Optional[Literal["numpy", "jax"]] = None,
     ) -> Self:
         """Normalize audio to a target LUFS level.
 
         Computes the current loudness (if not already set), then scales the audio
         to achieve the target LUFS. The returned AudioTree has updated
         ``waveform``, ``lufs``, and ``lufs_windows`` fields (a constant gain shifts
-        every window's LUFS by the same amount).
+        every window's LUFS by the same amount). Changing the level invalidates
+        ``codes``, ``latents`` and ``metadata["codec_scale"]``, which describe the
+        audio at its previous level.
 
         Items whose loudness is not finite are **passed through unscaled**. Digital
         silence, and any excerpt below the BS.1770 absolute gate, measure ``-inf``
@@ -673,8 +795,11 @@ class AudioTree:
                 still measurable) item is not amplified without bound. ``None`` (the
                 default) applies whatever gain the target implies; a capped item
                 lands at ``lufs + max_gain_db`` rather than at ``target_lufs``.
-            backend: XLA backend for computing the loudness when it is not already
-                set, forwarded to :meth:`replace_lufs` (see there). Ignored when
+            device: Where to compute the loudness when it is not already set,
+                forwarded to :meth:`replace_lufs` (see there). Ignored when
+                ``lufs`` is already populated.
+            engine: Which loudness kernel to use when it is not already set,
+                forwarded to :meth:`replace_lufs` (see there). Ignored when
                 ``lufs`` is already populated.
 
         Returns:
@@ -696,7 +821,7 @@ class AudioTree:
         """
         # Ensure loudness is computed
         if self.lufs is None:
-            tree = self.replace_lufs(backend=backend)
+            tree = self.replace_lufs(device=device, engine=engine)
         else:
             tree = self
 
@@ -713,8 +838,10 @@ class AudioTree:
         # A constant gain shifts every window's LUFS by the same dB as the
         # integrated value, so both move by ``gain_db`` (kept aligned rather than
         # left stale). Adding the gain rather than assigning ``target_lufs`` is
-        # what keeps a skipped (non-finite) or capped item honest.
-        return tree.replace(
+        # what keeps a skipped (non-finite) or capped item honest. ``codes`` and
+        # ``latents`` have no such closed form, so they are invalidated.
+        return tree._invalidate_derived(
+            keep=("lufs", "lufs_windows"),
             waveform=scaled_waveform,
             lufs=shift_lufs(tree.lufs, gain_db, xp=numpy),
             lufs_windows=shift_lufs_windows(tree.lufs_windows, gain_db, xp=numpy),
@@ -862,7 +989,7 @@ class AudioTree:
             )
 
         def _index(x):
-            if isinstance(x, (np.ndarray, jnp.ndarray)) or _is_string_list(x):
+            if isinstance(x, (np.ndarray, jax.Array)) or _is_string_list(x):
                 return x[key]
             return x
 
@@ -1028,20 +1155,38 @@ class AudioTree:
         manifest_path: Union[str, Path],
         *,
         audio_dir: Optional[Union[str, Path]] = None,
-        filter_fn: Optional[Callable[[Any], bool]] = None,
+        filter_fn: Optional[Callable[[Dict[str, Any]], bool]] = None,
     ) -> Self:
         """Create an AudioTree by loading all items from a manifest file.
 
         This loads all entries from a manifest file created by AudioWriter and
         creates a single AudioTree with all items in the batch dimension.
 
+        Parsing the manifest -- header check, presence masks, string decoding --
+        is :func:`audiotree._manifest.read_entries`, the one reader of that
+        format; nothing here re-derives the file's rules.
+
         Args:
             manifest_path: Path to the manifest file (NPZ format)
             audio_dir: Optional directory containing audio files. If None, uses manifest directory
-            filter_fn: Optional function to filter entries. Should accept a dict entry and return bool.
+            filter_fn: Optional predicate called with one manifest entry, a
+                ``dict`` keyed by column name (``"filename"``, ``"sample_rate"``,
+                the AudioTree label fields, ``"metadata_*"``, plus ``"tags"``);
+                return ``True`` to load that entry. These are the entries of
+                :func:`audiotree._manifest.read_entries`, the same ones
+                :class:`~audiotree.sources.AudioDataSource` passes *its*
+                ``filter_fn``, so one predicate serves both (that source
+                additionally demotes bookkeeping numbers such as
+                ``sample_rate`` to plain Python scalars). A column with no
+                value for an entry is absent from that entry's dict.
 
         Returns:
             AudioTree with all manifest entries concatenated along batch dimension
+
+        Raises:
+            ValueError: If the manifest is unreadable, holds no entries, names an
+                audio file outside ``audio_dir``, or ``filter_fn`` matches
+                nothing.
 
         Example:
             First, write a small manifest with :class:`~audiotree.AudioWriter`
@@ -1074,23 +1219,7 @@ class AudioTree:
             (60, 2, 44100)
         """
         manifest_path = Path(manifest_path)
-
-        # Materialize eagerly and close the handle. `np.load` on an NPZ returns a
-        # lazy NpzFile that holds the archive open; leaving it open leaks a file
-        # descriptor per call, and on Windows it makes the manifest undeletable.
-        with np.load(manifest_path, allow_pickle=True) as npz:
-            manifest_data = dict(npz)
-        _format.check(
-            {
-                key[len(_format.NPZ_HEADER_PREFIX) :]: json.loads(
-                    str(manifest_data[key])
-                )
-                for key in manifest_data
-                if key.startswith(_format.NPZ_HEADER_PREFIX)
-            },
-            _format.MANIFEST,
-            source=str(manifest_path),
-        )
+        entries = _manifest.read_entries(manifest_path)
 
         # Determine audio directory
         if audio_dir is None:
@@ -1098,52 +1227,55 @@ class AudioTree:
         else:
             audio_dir = Path(audio_dir)
 
-        # Convert to list of entry dictionaries for filtering
-        num_entries = len(manifest_data["index"])
-
         if filter_fn is not None:
-            # Create a lazy dict-like object for filtering
-            class LazyEntry:
-                def __init__(self, data, idx):
-                    self.data = data
-                    self.idx = idx
-
-                def get(self, key, default=None):
-                    if key in self.data:
-                        return self.data[key][self.idx]
-                    return default
-
-                def __getitem__(self, key):
-                    return self.data[key][self.idx]
-
-            # Build mask using filter function
-            mask = np.array(
-                [filter_fn(LazyEntry(manifest_data, i)) for i in range(num_entries)]
-            )
-            indices = np.where(mask)[0]
-
-            if len(indices) == 0:
+            entries = [entry for entry in entries if filter_fn(entry)]
+            if not entries:
                 raise ValueError(
                     f"No entries match filter in manifest: {manifest_path}"
                 )
-        else:
-            indices = np.arange(num_entries)
+        elif not entries:
+            raise ValueError(f"Manifest holds no entries: {manifest_path}")
 
-        # Get metadata for reconstruction
-        sample_rate = int(manifest_data["sample_rate"][indices[0]])
-        channels = int(manifest_data["channels"][indices[0]])
-        samples = int(manifest_data["samples"][indices[0]])
-        files_written = manifest_data.get(
-            "files_written", np.ones(num_entries, dtype=bool)
-        )[indices[0]]
+        def stack_column(name: str) -> Optional[np.ndarray]:
+            """Gather one manifest column across the selected entries.
+
+            Returns ``None`` when no selected entry has the column. A column
+            that only *some* of them have is an error rather than a hole filled
+            in with a sentinel: an AudioTree field carries exactly one value per
+            batch item and has no way to say "this item has none".
+            """
+            values = [entry[name] for entry in entries if name in entry]
+            if not values:
+                return None
+            if len(values) != len(entries):
+                raise ValueError(
+                    f"Manifest column {name!r} has a value for {len(values)} of "
+                    f"the {len(entries)} selected entries. An AudioTree field "
+                    f"holds one value per batch item, so a partly-present "
+                    f"column cannot be loaded -- filter out the entries that "
+                    f"lack it."
+                )
+            return np.stack(values)
+
+        # Every item of a manifest shares one sample rate, and a manifest-only
+        # write shares one shape, so the first selected entry describes them all.
+        first = entries[0]
+        sample_rate = int(first["sample_rate"])
+        channels = int(first["channels"])
+        samples = int(first["samples"])
+        files_written = bool(first.get("files_written", True))
 
         # Check if audio files exist
         if files_written:
             # Load audio from files
             waveform = []
-            for idx in indices:
-                filename = manifest_data["filename"][idx]
-                audio_path = audio_dir / filename
+            for entry in entries:
+                # A manifest travels with the data it describes, so its filenames
+                # are untrusted: an absolute path or a `..` would otherwise read
+                # any file this process can, and hand it back as `waveform`.
+                audio_path = safe_join(
+                    audio_dir, str(entry["filename"]), description="audio file"
+                )
 
                 if not audio_path.exists():
                     raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -1160,15 +1292,15 @@ class AudioTree:
             waveform = np.stack(waveform, axis=0)  # (batch, channels, samples)
         else:
             # No audio files - create zeros
-            waveform = np.zeros((len(indices), channels, samples), dtype=np.float32)
+            waveform = np.zeros((len(entries), channels, samples), dtype=np.float32)
 
         # Build metadata dictionary
         metadata = {}
-        for key in manifest_data.keys():
-            if key.startswith("metadata_"):
-                # Extract metadata field
-                metadata_key = key[9:]  # Remove 'metadata_' prefix
-                metadata[metadata_key] = manifest_data[key][indices]
+        metadata_columns = sorted(
+            {key for entry in entries for key in entry if key.startswith("metadata_")}
+        )
+        for key in metadata_columns:
+            metadata[key[len("metadata_") :]] = stack_column(key)
 
         # Build AudioTree kwargs
         tree_kwargs = {
@@ -1180,15 +1312,15 @@ class AudioTree:
         # ``filepath`` column of decoded strings (not under a ``metadata_``
         # prefix), so passing them back through ``filepath=`` re-encodes them
         # into ``metadata['filepath']`` and makes the ``.filepath`` property work.
-        if "filepath" in manifest_data:
-            tree_kwargs["filepath"] = [
-                str(p) for p in manifest_data["filepath"][indices]
-            ]
+        filepaths = stack_column("filepath")
+        if filepaths is not None:
+            tree_kwargs["filepath"] = [str(p) for p in filepaths]
 
         # Add AudioTree fields from manifest
         for field_name in LABEL_FIELDS:
-            if field_name in manifest_data:
-                tree_kwargs[field_name] = manifest_data[field_name][indices]
+            values = stack_column(field_name)
+            if values is not None:
+                tree_kwargs[field_name] = values
 
         return cls.create(waveform, **tree_kwargs)
 
@@ -1336,6 +1468,11 @@ class AudioTree:
     ) -> Self:
         """Reduce the ``waveform`` to mono.
 
+        Changing the channel count changes the audio, so every derived field
+        (``lufs``, ``lufs_windows``, ``codes``, ``latents``,
+        ``metadata["codec_scale"]``) is invalidated. A waveform that is already
+        mono is returned unchanged, derived fields and all.
+
         Args:
             strategy: ``"average"`` mixes all channels down (default);
                 ``"left"`` / ``"right"`` select the corresponding channel of a
@@ -1364,10 +1501,15 @@ class AudioTree:
             raise ValueError(
                 f"Unsupported to_mono strategy {strategy!r} for {C} channels."
             )
-        return self.replace(waveform=waveform, lufs=None, lufs_windows=None)
+        return self._invalidate_derived(waveform=waveform)
 
     def to_stereo(self) -> Self:
         """Make the ``waveform`` stereo.
+
+        Changing the channel count changes the audio, so every derived field
+        (``lufs``, ``lufs_windows``, ``codes``, ``latents``,
+        ``metadata["codec_scale"]``) is invalidated. A waveform that is already
+        stereo is returned unchanged, derived fields and all.
 
         Returns:
             AudioTree: An instance of ``AudioTree``.
@@ -1375,11 +1517,10 @@ class AudioTree:
         waveform = self.waveform
         C = self.num_channels
         if C == 1:
-            numpy = np if isinstance(waveform, np.ndarray) else jnp
-            waveform = numpy.concatenate([waveform, waveform], axis=-2)
+            waveform = _concatenate([waveform, waveform], axis=-2)
             # Duplicating the channel changes the integrated loudness (BS.1770
             # sums per-channel energy), so the cached value is no longer valid.
-            return self.replace(waveform=waveform, lufs=None, lufs_windows=None)
+            return self._invalidate_derived(waveform=waveform)
         elif C == 2:
             return self
         else:
@@ -1415,11 +1556,15 @@ class AudioTree:
 
         Returns:
             Path: The path that was written.
+
+        Raises:
+            ValueError: If ``batch_size != 1``.
         """
-        assert self.batch_size == 1, (
-            f"AudioTree.write requires batch_size == 1, got {self.batch_size}. "
-            f"Index or iterate the batch first (e.g. tree[0])."
-        )
+        if self.batch_size != 1:
+            raise ValueError(
+                f"AudioTree.write requires batch_size == 1, got {self.batch_size}. "
+                f"Index or iterate the batch first (e.g. tree[0])."
+            )
         filepath = Path(filepath)
         # soundfile expects (samples, channels); waveform is (1, channels, samples).
         audio = np.asarray(self.waveform[0].T)
@@ -1466,6 +1611,11 @@ class AudioTree:
             full (bool): return the longest possible output from the input. This can be useful
                 if you chain resampling operations, and want to give the ``output_length`` only
                 for the last one, while passing ``full=True`` to all the other ones. JAX backend only.
+
+        Changing the sample rate changes the audio's length and its samples, so
+        every derived field (``lufs``, ``lufs_windows``, ``codes``, ``latents``,
+        ``metadata["codec_scale"]``) is invalidated. Resampling to the rate the
+        tree already has returns it unchanged, derived fields and all.
 
         Returns:
             AudioTree: A new ``AudioTree`` resampled to ``sample_rate`` (the original is unchanged).
@@ -1514,9 +1664,7 @@ class AudioTree:
                 full=full,
             )
             waveform = waveform.reshape(*leading_shape, *waveform.shape[-2:])
-        return self.replace(
-            waveform=waveform, sample_rate=sample_rate, lufs=None, lufs_windows=None
-        )
+        return self._invalidate_derived(waveform=waveform, sample_rate=sample_rate)
 
     def split(self, n_splits: int) -> List[Self]:
         """Split batch dimension into a list of smaller AudioTree objects.
@@ -1531,6 +1679,9 @@ class AudioTree:
         Returns:
             List of AudioTree objects, each with batch_size = original_batch_size / n_splits.
 
+        Raises:
+            ValueError: If the batch size is not divisible by ``n_splits``.
+
         Example:
             >>> big_tree = AudioTree(np.zeros((12, 1, 44100)), 44100)
             >>> big_tree.waveform.shape
@@ -1542,9 +1693,11 @@ class AudioTree:
             (6, 1, 44100)
         """
         total_batch_size = self.waveform.shape[0]
-        assert total_batch_size % n_splits == 0, (
-            f"Total batch size {total_batch_size} must be divisible by number of splits {n_splits}"
-        )
+        if total_batch_size % n_splits != 0:
+            raise ValueError(
+                f"Total batch size {total_batch_size} must be divisible by the "
+                f"number of splits {n_splits}."
+            )
 
         split_batch_size = total_batch_size // n_splits
 
@@ -1568,6 +1721,9 @@ class AudioTree:
         Returns:
             AudioTree with an additional mini-batch dimension as the first axis.
 
+        Raises:
+            ValueError: If the batch size is not divisible by ``mini_batch_size``.
+
         Example:
             >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
             >>> x_batched = x.reshape_mini_batches(3)
@@ -1576,8 +1732,11 @@ class AudioTree:
         """
         B = self.waveform.shape[0]
 
-        # Calculate number of mini-batches (assuming B is evenly divisible)
-        assert B % mini_batch_size == 0
+        if B % mini_batch_size != 0:
+            raise ValueError(
+                f"Batch size {B} must be divisible by mini_batch_size "
+                f"{mini_batch_size}."
+            )
         num_mini_batches = B // mini_batch_size
 
         # Reshape AudioTree to have leading mini-batch dimension
@@ -1603,6 +1762,10 @@ class AudioTree:
         Returns:
             AudioTree with the mini-batch dimension flattened into the batch dimension.
 
+        Raises:
+            ValueError: If the waveform has fewer than 4 dimensions, i.e. it was
+                never mini-batched.
+
         Example:
             >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
             >>> x_batched = x.reshape_mini_batches(3)
@@ -1619,10 +1782,11 @@ class AudioTree:
         shape = self.waveform.shape
 
         # We expect at least 4 dimensions for mini-batched data
-        assert len(shape) >= 4, (
-            f"Expected at least 4 dimensions for mini-batched data, got {len(shape)}. "
-            f"Shape: {shape}"
-        )
+        if len(shape) < 4:
+            raise ValueError(
+                f"Expected at least 4 dimensions for mini-batched data, got "
+                f"{len(shape)}. Shape: {shape}"
+            )
 
         # Flatten the first two dimensions
         # From (num_mini_batches, mini_batch_size, C, T) to (B, C, T)
@@ -1655,22 +1819,15 @@ class AudioTree:
             >>> loud.batch_size
             1
         """
-        filter_fn = predicate
         B = self.waveform.shape[0]
-        audio_trees = self.split(B)
-        audio_trees = list(filter(filter_fn, audio_trees))
-
-        numpy = np if isinstance(self.waveform, np.ndarray) else jnp
+        audio_trees = [tree for tree in self.split(B) if predicate(tree)]
 
         if len(audio_trees) == 0:
             return tree_util.tree_map(
                 lambda x: x[:0] if hasattr(x, "shape") else x, self
             )
 
-        audio_trees = tree_util.tree_map(
-            lambda *xs: numpy.concatenate(xs, axis=0), *audio_trees
-        )
-        return audio_trees
+        return _batch_audiotrees(audio_trees)
 
     @staticmethod
     def batch(items: Sequence[Any]) -> Any:
@@ -1684,31 +1841,45 @@ class AudioTree:
         (including AudioTrees) are concatenated along axis 0, so data should have
         a leading batch dimension.
 
+        Concatenation dispatches on the leaves' array library, so JAX in gives
+        JAX out: batching a tree of ``jax.Array`` leaves stays on device instead
+        of forcing a blocking host sync and silently returning NumPy.
+
         Args:
             items: Sequence of AudioTree objects, or structures (dicts, lists, etc.)
-                containing AudioTree objects.
+                containing AudioTree objects. Must be non-empty — there is no
+                array library, sample rate or structure to infer from nothing.
 
         Returns:
             Batched structure with the same shape as the input items.
+
+        Raises:
+            ValueError: If ``items`` is empty.
 
         Example:
             >>> a = AudioTree.create(jnp.zeros((1, 1, 16000)), 16000)
             >>> batched = AudioTree.batch([a, a, a])  # concatenate along the batch axis
             >>> batched.waveform.shape
             (3, 1, 16000)
+            >>> isinstance(batched.waveform, jax.Array)  # JAX in, JAX out
+            True
 
             With Grain, pass it as the ``batch_fn`` (each item already has a leading batch axis)::
 
                 ds.to_iter_dataset().batch(32, batch_fn=AudioTree.batch)
         """
         items = list(items)
+        if not items:
+            raise ValueError(
+                "AudioTree.batch needs at least one item; got an empty sequence."
+            )
 
         def batching_function(*args):
             first_arg = args[0]
             if isinstance(first_arg, AudioTree):
                 return _batch_audiotrees(args)
-            elif isinstance(first_arg, (np.ndarray, jnp.ndarray)):
-                return np.concatenate(args, axis=0)
+            elif isinstance(first_arg, (np.ndarray, jax.Array)):
+                return _concatenate(args)
             else:
                 return list(args)
 
@@ -1745,25 +1916,37 @@ ARRAY_FIELDS: tuple = tuple(f for f in PYTREE_FIELDS if f != "metadata")
 LABEL_FIELDS: tuple = tuple(f for f in ARRAY_FIELDS if f != "waveform")
 
 
+def _concatenate(arrays: Sequence[ArrayLike], axis: int = 0) -> ArrayLike:
+    """Concatenate *arrays* with the array library their leaves already use.
+
+    ``np.concatenate`` on JAX arrays is a blocking host sync *and* a silent type
+    change (JAX in, NumPy out), which is exactly what batching a device-resident
+    tree must not do. A single JAX array anywhere in *arrays* makes the whole
+    concatenation JAX -- ``jnp.concatenate`` accepts NumPy operands, so a mixed
+    sequence still works and lands on device.
+    """
+    xp = jnp if any(isinstance(array, jax.Array) for array in arrays) else np
+    return xp.concatenate(arrays, axis=axis)
+
+
 def _batch_audiotrees(audio_trees: Sequence[AudioTree]) -> AudioTree:
     """Batch a list of AudioTrees into a single AudioTree.
 
-    Concatenates all array fields along the batch axis (axis 0) using NumPy.
-    Requires all AudioTrees to have the same sample_rate and compatible shapes.
+    Concatenates all array fields along the batch axis (axis 0), using whichever
+    array library the leaves already use (see :func:`_concatenate`). Requires all
+    AudioTrees to have the same sample_rate and compatible shapes.
 
     Prefer using ``AudioTree.batch`` instead, which handles mixed-type
-    structures (dicts with AudioTrees, arrays, strings, etc.).
+    structures (dicts with AudioTrees, arrays, strings, etc.) and rejects an
+    empty sequence with a message.
 
     Args:
-        audio_trees: List of AudioTree objects to batch together.
+        audio_trees: Non-empty sequence of AudioTree objects to batch together.
 
     Returns:
         Single AudioTree with all items batched along axis 0.
     """
-    if not audio_trees:
-        raise ValueError("Cannot batch empty list of AudioTrees")
-
-    return tree_util.tree_map(lambda *xs: np.concatenate(xs, axis=0), *audio_trees)
+    return tree_util.tree_map(lambda *xs: _concatenate(xs), *audio_trees)
 
 
 def _numpy_integrated_lufs(waveform: np.ndarray, sample_rate: int) -> np.ndarray:
