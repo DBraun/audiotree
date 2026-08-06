@@ -9,7 +9,7 @@
 Introduction to AudioTree
 =========================
 
-This guide covers the fundamentals of working with :class:`~audiotree.core.AudioTree` objects,
+This guide covers the fundamentals of working with :class:`~audiotree.AudioTree` objects,
 including instantiation, manipulation, batching, and integration with JAX's Pytree system.
 
 .. testsetup::
@@ -33,7 +33,7 @@ including instantiation, manipulation, batching, and integration with JAX's Pytr
 Basic Instantiation
 -------------------
 
-The :class:`~audiotree.core.AudioTree` class is the central data structure in the library.
+The :class:`~audiotree.AudioTree` class is the central data structure in the library.
 It stores audio as arrays with a consistent shape convention: ``(Batch, Channels, Samples)``.
 This format is familiar to PyTorch and librosa users.
 Note that JAX and NNX follow a different convention where data is commonly in
@@ -65,7 +65,7 @@ You can create an AudioTree directly from NumPy or JAX NumPy arrays:
 Automatic Dimensionality Handling
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The :meth:`~audiotree.core.AudioTree.create` method automatically handles arrays of different dimensions:
+The :meth:`~audiotree.AudioTree.create` method automatically handles arrays of different dimensions:
 
 .. testcode::
 
@@ -89,7 +89,7 @@ rejected with a ``ValueError`` rather than accepted: ``create`` broadcasts
 ``filepath`` / ``source`` over the leading axis, and at rank 4 there is no single
 right answer for what that axis means. Build the tree at rank 3 and add a
 mini-batch axis afterwards with
-:meth:`~audiotree.core.AudioTree.reshape_mini_batches`.
+:meth:`~audiotree.AudioTree.reshape_mini_batches`.
 
 Loading Audio from Files
 ------------------------
@@ -156,7 +156,7 @@ AudioTree objects have several key properties:
 Creating Modified Copies
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-AudioTree is immutable. Use :meth:`~audiotree.core.AudioTree.replace` to create modified copies:
+AudioTree is immutable. Use :meth:`~audiotree.AudioTree.replace` to create modified copies:
 
 .. testcode::
 
@@ -208,7 +208,7 @@ Choosing a device and an engine
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 *Where* the measurement runs and *which* kernel runs it are separate choices, so
-:meth:`~audiotree.core.AudioTree.replace_lufs` takes two separate keyword-only
+:meth:`~audiotree.AudioTree.replace_lufs` takes two separate keyword-only
 arguments:
 
 * ``device`` — an XLA platform name (``"cpu"``, ``"gpu"``, ``"tpu"``, mirroring
@@ -245,17 +245,17 @@ that work onto an accelerator:
     numpy
     (8,)
 
-:meth:`~audiotree.core.AudioTree.normalize_lufs` computes loudness internally, so
+:meth:`~audiotree.AudioTree.normalize_lufs` computes loudness internally, so
 it accepts the same ``device`` and ``engine`` arguments.
 
 Keeping cached loudness in sync
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Once ``lufs`` (and ``lufs_windows``) are filled they are cached on the tree, so a
-bare :meth:`~audiotree.core.AudioTree.replace` that swaps in a new ``waveform``
+bare :meth:`~audiotree.AudioTree.replace` that swaps in a new ``waveform``
 leaves the *old* loudness in place — it no longer matches the audio. Invalidate
 the cache in the same call (set the fields to ``None``) so the next
-:meth:`~audiotree.core.AudioTree.replace_lufs` recomputes it:
+:meth:`~audiotree.AudioTree.replace_lufs` recomputes it:
 
 .. testcode::
 
@@ -284,7 +284,7 @@ channel-changing transforms invalidate it.
 Resampling Audio
 ~~~~~~~~~~~~~~~~
 
-To change the sample rate of audio, use the :meth:`~audiotree.core.AudioTree.resample` method:
+To change the sample rate of audio, use the :meth:`~audiotree.AudioTree.resample` method:
 
 .. testcode::
 
@@ -307,7 +307,7 @@ To change the sample rate of audio, use the :meth:`~audiotree.core.AudioTree.res
 Converting Channels
 ~~~~~~~~~~~~~~~~~~~
 
-Use :meth:`~audiotree.core.AudioTree.to_mono` and :meth:`~audiotree.core.AudioTree.to_stereo`
+Use :meth:`~audiotree.AudioTree.to_mono` and :meth:`~audiotree.AudioTree.to_stereo`
 to change the channel layout. ``to_mono`` takes a ``strategy``:
 
 .. testcode::
@@ -336,7 +336,7 @@ to change the channel layout. ``to_mono`` takes a ``strategy``:
 .. note::
    Changing the channel layout changes the integrated loudness, so ``to_mono`` and
    the mono→stereo path of ``to_stereo`` clear any cached ``lufs``. It is
-   recomputed on the next :meth:`~audiotree.core.AudioTree.replace_lufs`.
+   recomputed on the next :meth:`~audiotree.AudioTree.replace_lufs`.
 
 Indexing and Iterating Batches
 ------------------------------
@@ -390,7 +390,7 @@ dependency, so this snippet is illustrative rather than executed):
         ...
 
 To reassemble a batch from individual items, use
-:meth:`~audiotree.core.AudioTree.batch`:
+:meth:`~audiotree.AudioTree.batch`:
 
 .. testcode::
 
@@ -410,8 +410,8 @@ AudioTree provides several methods for working with batches of audio.
 Creating Mini-Batches
 ~~~~~~~~~~~~~~~~~~~~~
 
-The :meth:`~audiotree.core.AudioTree.reshape_mini_batches` method adds a mini-batch axis,
-and :meth:`~audiotree.core.AudioTree.flatten_mini_batches` removes it again:
+The :meth:`~audiotree.AudioTree.reshape_mini_batches` method adds a mini-batch axis,
+and :meth:`~audiotree.AudioTree.flatten_mini_batches` removes it again:
 
 .. testcode::
 
@@ -435,30 +435,30 @@ and :meth:`~audiotree.core.AudioTree.flatten_mini_batches` removes it again:
 
 .. note::
    AudioTree methods operate on mini-batched trees directly. Methods like
-   :meth:`~audiotree.core.AudioTree.replace_lufs`,
-   :meth:`~audiotree.core.AudioTree.normalize_lufs`,
-   :meth:`~audiotree.core.AudioTree.to_mono`, :meth:`~audiotree.core.AudioTree.to_stereo`,
-   and :meth:`~audiotree.core.AudioTree.resample` treat *all* leading axes as batch
+   :meth:`~audiotree.AudioTree.replace_lufs`,
+   :meth:`~audiotree.AudioTree.normalize_lufs`,
+   :meth:`~audiotree.AudioTree.to_mono`, :meth:`~audiotree.AudioTree.to_stereo`,
+   and :meth:`~audiotree.AudioTree.resample` treat *all* leading axes as batch
    axes, so you can call them on a ``(num_mini_batches, mini_batch_size, C, T)`` tree
    without flattening first. Per-item results follow the leading shape — e.g.,
    ``lufs`` comes back shaped ``(num_mini_batches, mini_batch_size)``.
 
    The methods whose contract is *per item* refuse a mini-batched tree instead
-   of quietly reinterpreting the leading axis. :meth:`~audiotree.core.AudioTree.filter`,
-   :meth:`~audiotree.core.AudioTree.write`, and
-   :meth:`~audiotree.core.AudioTree.reshape_mini_batches` itself all raise
+   of quietly reinterpreting the leading axis. :meth:`~audiotree.AudioTree.filter`,
+   :meth:`~audiotree.AudioTree.write`, and
+   :meth:`~audiotree.AudioTree.reshape_mini_batches` itself all raise
    ``ValueError`` at rank 4; call
-   :meth:`~audiotree.core.AudioTree.flatten_mini_batches` first. The provenance
+   :meth:`~audiotree.AudioTree.flatten_mini_batches` first. The provenance
    properties do keep working: at rank 4,
-   :attr:`~audiotree.core.AudioTree.filepath` and
-   :attr:`~audiotree.core.AudioTree.source` return one list per mini-batch —
+   :attr:`~audiotree.AudioTree.filepath` and
+   :attr:`~audiotree.AudioTree.source` return one list per mini-batch —
    ``[["0.wav", "1.wav", "2.wav"], ["3.wav", …], …]`` — rather than one flat
    list.
 
 Splitting into Multiple Trees
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The :meth:`~audiotree.core.AudioTree.split` method splits a batch into separate AudioTree objects:
+The :meth:`~audiotree.AudioTree.split` method splits a batch into separate AudioTree objects:
 
 .. testcode::
 
@@ -480,7 +480,7 @@ The :meth:`~audiotree.core.AudioTree.split` method splits a batch into separate 
 Filtering Batch Items
 ~~~~~~~~~~~~~~~~~~~~~
 
-The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively keep batch items based on a condition:
+The :meth:`~audiotree.AudioTree.filter` method allows you to selectively keep batch items based on a condition:
 
 .. testcode::
 
@@ -524,7 +524,7 @@ The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively ke
 The predicate is called with one batch item at a time, so ``filter`` requires a
 rank-3 tree; on a mini-batched one it raises ``ValueError`` rather than filtering
 whole mini-batches. Call
-:meth:`~audiotree.core.AudioTree.flatten_mini_batches` first.
+:meth:`~audiotree.AudioTree.flatten_mini_batches` first.
 
 Processing Mini-Batches with nnx.scan
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -602,7 +602,7 @@ You can use :func:`jax.tree.map` to combine multiple AudioTree objects:
     (12, 1, 44100)
 
 This concatenating ``tree.map`` is exactly what
-:meth:`~audiotree.core.AudioTree.batch` does for you: it concatenates every leaf
+:meth:`~audiotree.AudioTree.batch` does for you: it concatenates every leaf
 along axis 0 (treating each AudioTree as one leaf), so a list of trees collapses
 into the identical batched tree. The array library is preserved — NumPy leaves in,
 NumPy leaves out; JAX in, JAX out — so batching never forces a device round-trip.
@@ -708,6 +708,28 @@ are left untouched.
     True
     44100
 
+``device_put`` and ``device_get`` move a tree; :attr:`~audiotree.AudioTree.backend`
+and :attr:`~audiotree.AudioTree.device` ask where it currently *is*, without
+reaching into a leaf and hoping the rest agree:
+
+.. testcode::
+
+    print(audio_tree.backend, audio_tree.device)
+    print(device_tree.backend, device_tree.device is not None)
+
+.. testoutput::
+
+    numpy None
+    jax True
+
+That matters more than it looks, because a tree does not stay homogeneous by
+itself. A transform from the NumPy namespace applied to a JAX tree converts the
+fields it touches, so ``audiotree.transforms.trim`` on a JAX tree hands back a
+NumPy ``waveform`` — which is then re-uploaded on every ``jax.jit`` call, quietly
+costing a host round trip per step. ``backend`` reports ``"mixed"`` when the
+leaves disagree, so it is safe to log; ``device`` raises instead, because there is
+no honest single answer.
+
 When you're feeding a Grain data loader rather than moving a single tree, keep the
 transfers off the training thread with :func:`grain.experimental.device_put`, which
 prefetches whole batches onto the accelerator as you iterate — see
@@ -715,8 +737,8 @@ prefetches whole batches onto the accelerator as you iterate — see
 
 .. tip::
    You rarely need to ``device_put`` a tree just to compute loudness on an
-   accelerator: :meth:`~audiotree.core.AudioTree.replace_lufs` and
-   :meth:`~audiotree.core.AudioTree.normalize_lufs` take ``device=`` and
+   accelerator: :meth:`~audiotree.AudioTree.replace_lufs` and
+   :meth:`~audiotree.AudioTree.normalize_lufs` take ``device=`` and
    ``engine=`` arguments (see `Choosing a device and an engine`_) that run the
    kernel where you ask and return loudness in the waveform's own array library.
 
@@ -802,7 +824,7 @@ Adding Metadata to an Existing Tree
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ``AudioTree`` is immutable, so you can't assign into ``metadata`` in place. Use
-:meth:`~audiotree.core.AudioTree.replace_metadata` to merge new entries — it's
+:meth:`~audiotree.AudioTree.replace_metadata` to merge new entries — it's
 syntactic sugar for ``tree.replace(metadata={**tree.metadata, **kwargs})``. Keys
 you pass overwrite same-named existing keys, everything else is kept, and the
 original tree is untouched:
@@ -830,12 +852,12 @@ Writing Audio to Disk
 Writing a Single File
 ~~~~~~~~~~~~~~~~~~~~~~
 
-:meth:`~audiotree.core.AudioTree.write` saves one item to an audio file via
+:meth:`~audiotree.AudioTree.write` saves one item to an audio file via
 `soundfile <https://python-soundfile.readthedocs.io/>`_ — the inverse of
-:meth:`~audiotree.core.AudioTree.from_file`. The tree must contain exactly one item
+:meth:`~audiotree.AudioTree.from_file`. The tree must contain exactly one item
 (``batch_size == 1``), so index or iterate a batch first. There is no sample-rate
 argument: it uses ``self.sample_rate``, so call
-:meth:`~audiotree.core.AudioTree.resample` beforehand to change it.
+:meth:`~audiotree.AudioTree.resample` beforehand to change it.
 
 .. testcode::
 
@@ -881,4 +903,4 @@ AudioTrees straight from your audio files:
 - :ref:`sources` - Load audio from directories into Grain data pipelines
 - :ref:`transform_chaining` - Chain augmentations onto a data pipeline
 - :ref:`writer` - Write prepared AudioTrees back to disk
-- :class:`~audiotree.core.AudioTree` - Full API reference
+- :class:`~audiotree.AudioTree` - Full API reference

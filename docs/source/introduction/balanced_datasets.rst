@@ -153,7 +153,7 @@ All files from the three speech datasets are aggregated as one "speech" group.
 Source Tracking
 ---------------
 
-Each loaded :class:`~audiotree.core.AudioTree` has a ``source`` property indicating which group it came from:
+Each loaded :class:`~audiotree.AudioTree` has a ``source`` property indicating which group it came from:
 
 .. testcode::
 
@@ -314,5 +314,5 @@ See Also
 --------
 
 - :func:`~audiotree.sources.create_audio_dataset` - For simple, unbalanced loading
-- :class:`~audiotree.core.ExcerptConfig` - For saliency-based excerpt selection
+- :class:`~audiotree.ExcerptConfig` - For saliency-based excerpt selection
 - :ref:`multiprocessing` - For parallel data loading

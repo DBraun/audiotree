@@ -12,7 +12,7 @@ AudioTree can be installed with pip:
 
    pip install audiotree
 
-The namesake class :class:`~audiotree.core.AudioTree` is a `flax.struct.dataclass`_
+The namesake class :class:`~audiotree.AudioTree` is a `flax.struct.dataclass`_
 that holds a batch of audio under one shape convention: every array carries the
 batch as its leading axis, so items stay aligned as you index, slice, batch, and
 transform them.
@@ -88,7 +88,7 @@ they are also configurable from the command line and YAML:
     python train.py --volume_norm.min_db=-25 --volume_norm.max_db=-15
 
 The guides are meant to be read in order. **Getting started** walks the main path —
-the :class:`~audiotree.core.AudioTree` object, loading audio, augmenting it, and
+the :class:`~audiotree.AudioTree` object, loading audio, augmenting it, and
 writing datasets back to disk — and **Going further** collects the deeper topics
 (balanced and windowed sampling, dict batches, neural codecs, command-line
 configuration, and multiprocessing).

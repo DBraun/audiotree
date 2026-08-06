@@ -2,10 +2,13 @@
 
 from pathlib import Path
 
+import grain
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from audiotree import transforms
 from audiotree.core import AudioTree
 
 
@@ -1393,3 +1396,49 @@ print("ok")
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ok" in result.stdout
+
+
+class TestBackendAndDevice:
+    """`.backend` / `.device` answer "where is this tree?" without leaf-poking."""
+
+    def _tree(self, xp):
+        waveform = xp.zeros((2, 1, 800), dtype=xp.float32)
+        return AudioTree.create(waveform, 16000).replace_lufs()
+
+    def test_reports_the_array_library(self):
+        assert self._tree(np).backend == "numpy"
+        assert self._tree(jnp).backend == "jax"
+
+    def test_device_is_none_on_numpy_and_a_device_on_jax(self):
+        assert self._tree(np).device is None
+        device = self._tree(jnp).device
+        assert device is not None and device == jnp.zeros(1).device
+
+    def test_round_trips_through_jax_device_put_and_get(self):
+        numpy_tree = self._tree(np)
+        moved = jax.device_put(numpy_tree)
+        assert moved.backend == "jax" and moved.device is not None
+        assert jax.device_get(moved).backend == "numpy"
+
+    def test_mixed_tree_is_reported_not_raised(self):
+        """A NumPy-namespace transform on a JAX tree converts what it touches."""
+        tree = self._tree(jnp)
+        mixed = tree.replace(lufs=np.asarray(tree.lufs))
+        assert mixed.backend == "mixed"
+        with pytest.raises(ValueError, match="more than one device"):
+            _ = mixed.device
+
+    def test_numpy_transform_on_a_jax_tree_is_visible(self):
+        """The case the property exists for, end to end through grain."""
+        tree = self._tree(jnp)
+        assert tree.backend == "jax"
+        dataset = (
+            grain.MapDataset.source([tree]).seed(0).apply([transforms.trim(length=400)])
+        )
+        assert dataset[0].backend == "numpy"
+
+    def test_waveformless_tree_does_not_crash(self):
+        codes = np.zeros((2, 4, 10), dtype=np.int32)
+        assert (
+            AudioTree(waveform=None, sample_rate=16000, codes=codes).backend == "numpy"
+        )

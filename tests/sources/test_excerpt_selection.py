@@ -399,3 +399,72 @@ def test_excerpt_config_is_not_a_pytree():
 
     config = ExcerptConfig()
     assert jax.tree.leaves(config) == [config]
+
+
+class TestAlignedStemExcerpts:
+    """The recipe documented in ``dict_batches.rst`` under "Loading Aligned Stems".
+
+    Source separation and effect modelling need several files per track excerpted
+    at the *same* offset. Nothing in the API enforces that; it falls out of
+    ``excerpt`` being a pure function of the generator it is handed. These tests
+    pin both halves, because the working version and the broken one differ by a
+    single line and the failure is silent -- misaligned stems still train.
+    """
+
+    STEMS = ("bass", "drums", "other", "vocals")
+    SR = 16000
+
+    @pytest.fixture
+    def track(self, tmp_path):
+        """One track whose stems are ramps, so a sample value encodes its offset."""
+        import soundfile
+
+        ramp = (np.arange(self.SR * 4, dtype=np.float32) / (self.SR * 4)).copy()
+        for stem in self.STEMS:
+            # FLOAT: the default PCM_16 would clip a ramp and destroy the encoding.
+            soundfile.write(
+                str(tmp_path / f"{stem}.wav"), ramp, self.SR, subtype="FLOAT"
+            )
+        return tmp_path
+
+    def _first_samples(self, track, make_rng):
+        return [
+            float(
+                AudioTree.excerpt(
+                    track / f"{stem}.wav",
+                    make_rng(),
+                    duration=0.5,
+                    sample_rate=self.SR,
+                ).waveform[0, 0, 0]
+            )
+            for stem in self.STEMS
+        ]
+
+    @pytest.mark.parametrize("trial", range(4))
+    def test_one_seed_per_track_aligns_every_stem(self, track, trial):
+        seed = np.random.default_rng(trial).integers(2**63)
+        offsets = self._first_samples(track, lambda: np.random.default_rng(seed))
+        assert len(set(offsets)) == 1, f"stems drifted apart: {offsets}"
+
+    def test_a_shared_generator_does_not_align_them(self, track):
+        """The trap: one generator advances on every call, so each stem differs."""
+        shared = np.random.default_rng(0)
+        offsets = self._first_samples(track, lambda: shared)
+        assert len(set(offsets)) == len(self.STEMS), (
+            "expected a shared generator to misalign the stems; if this now "
+            "aligns them, excerpt() stopped consuming the generator and the "
+            "guidance in dict_batches.rst should be revisited"
+        )
+
+    def test_different_tracks_get_different_offsets(self, track):
+        """Alignment within a track must not mean the same offset for every track."""
+        draws = [
+            self._first_samples(
+                track,
+                lambda s=np.random.default_rng(t).integers(2**63): (
+                    np.random.default_rng(s)
+                ),
+            )[0]
+            for t in range(6)
+        ]
+        assert len(set(draws)) > 1, f"every track drew the same offset: {draws}"

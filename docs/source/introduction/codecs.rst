@@ -9,7 +9,7 @@
 Neural Codecs
 =============
 
-Two transforms hand an :class:`~audiotree.core.AudioTree` to a *neural audio
+Two transforms hand an :class:`~audiotree.AudioTree` to a *neural audio
 codec* and store what comes back on the tree itself:
 
 - :func:`~audiotree.transforms.encode_with_codec` — discrete tokens, stored on
@@ -316,7 +316,7 @@ Two consequences follow:
   side, give each its own dict leaf with ``scope`` / ``output_key`` and let each
   leaf carry its own ``codes``.
 - **``output_key`` needs a dict element.** Passing it while mapping over a bare
-  :class:`~audiotree.core.AudioTree` is an error — there is no dict to add a key
+  :class:`~audiotree.AudioTree` is an error — there is no dict to add a key
   to. Use it only on the dict-of-AudioTree elements of :ref:`dict_batches`.
 
 Both backends, one codec

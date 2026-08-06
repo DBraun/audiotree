@@ -619,7 +619,7 @@ costs almost nothing on disk:
 
     ['manifest.npz']
 
-To read the set back for analysis, :meth:`~audiotree.core.AudioTree.from_manifest`
+To read the set back for analysis, :meth:`~audiotree.AudioTree.from_manifest`
 loads the **entire** manifest into a single batched AudioTree — so every item's
 embedding lands in one array rather than a stream. An optional ``filter_fn``
 predicate (evaluated per manifest entry) selects a subset at load time:
@@ -643,7 +643,7 @@ predicate (evaluated per manifest entry) selects a subset at load time:
     (10, 128)
 
 .. note::
-   **Two readers, two shapes.** :meth:`~audiotree.core.AudioTree.from_manifest`
+   **Two readers, two shapes.** :meth:`~audiotree.AudioTree.from_manifest`
    returns *one* batched AudioTree with the whole manifest stacked along the batch
    axis — ideal for a one-shot analysis pass over saved embeddings.
    :class:`~audiotree.sources.AudioDataSource` (above) is instead a Grain

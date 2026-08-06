@@ -117,6 +117,82 @@ Audio effect modeling often uses dry (original) and wet (processed) pairs:
     )
     batch = transform.random_map(batch, np.random.default_rng(42))
 
+.. _loading_aligned_stems:
+
+Loading Aligned Stems
+---------------------
+
+The patterns above assume the dict already exists. Building one from a corpus of
+*stems* — several files per track that must be excerpted at the **same offset**,
+as in source separation or effect modelling — needs one trick, and it is easy to
+get subtly wrong.
+
+:meth:`~audiotree.AudioTree.excerpt` picks its offset from the ``rng`` you hand
+it. So give every stem of a track a generator seeded identically and they line
+up; hand them all *one* generator and they do not, because each call advances it.
+Draw one seed per track, then build a fresh generator per stem from it:
+
+.. skip-snippet-exec: needs a stem corpus on disk; the mechanism is exercised by the runnable example below.
+
+.. code-block:: python
+
+    from pathlib import Path
+
+    import grain
+    import numpy as np
+    from audiotree import AudioTree
+
+    STEMS = ("bass", "drums", "other", "vocals")
+
+
+    class PickStems(grain.transforms.RandomMap):
+        """Load the same time window from every stem of one track."""
+
+        def __init__(self, duration: float = 5.0, sample_rate: int = 44_100):
+            self.duration = duration
+            self.sample_rate = sample_rate
+
+        def random_map(self, track_dir: Path, rng: np.random.Generator):
+            # One seed for the track, re-used per stem. `AudioTree.excerpt` is a
+            # pure function of the generator it is given, so identically seeded
+            # generators choose identical offsets -- and the stems stay aligned.
+            seed = rng.integers(2**63)
+            return {
+                stem: AudioTree.excerpt(
+                    track_dir / f"{stem}.wav",
+                    np.random.default_rng(seed),
+                    duration=self.duration,
+                    sample_rate=self.sample_rate,
+                )
+                for stem in STEMS
+            }
+
+
+    tracks = [p for p in sorted(Path("/data/musdb18hq/train").iterdir()) if p.is_dir()]
+    ds = (
+        grain.MapDataset.source(tracks)
+        .shuffle(seed=0)
+        .seed(0)
+        .apply([PickStems(duration=5.0)])
+    )
+    stems = ds[0]  # {"bass": AudioTree, "drums": AudioTree, ...}
+
+Three things worth knowing before relying on this:
+
+- **The stems of a track must be equally long.** The offset is drawn per stem
+  from the same seed, but each call clamps it to *that file's* duration, so a
+  short stem silently lands somewhere else. Datasets that guarantee equal-length
+  stems (MUSDB18-HQ, Slakh2100) are fine; a directory of loose files is not.
+- **Sum the stems to get the mixture**, rather than reading a distributed mixture
+  file, if the target must be exactly the sum of the inputs. A released mixture
+  is mastered and will not be.
+- **Batch with** ``batch_fn=AudioTree.batch``. It maps over the dict, so a list
+  of stem dicts collapses into one dict of batched trees with no per-key
+  handling.
+
+Once loaded, ``scope`` selects which stems an augmentation touches, exactly as in
+the patterns above.
+
 Using Scope
 -----------
 

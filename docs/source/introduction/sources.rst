@@ -98,7 +98,7 @@ found, even if still below ``lufs_cutoff``. To *guarantee* the floor (dropping
 files that never clear it), filter on ``lufs`` afterward; see :ref:`balanced_datasets`.
 
 The same saliency search is available as a classmethod,
-:meth:`~audiotree.core.AudioTree.loudest_excerpt`, for pulling a single loud
+:meth:`~audiotree.AudioTree.loudest_excerpt`, for pulling a single loud
 excerpt straight from a file path without building a dataset:
 
 .. code-block:: python
@@ -115,9 +115,9 @@ excerpt straight from a file path without building a dataset:
         duration=3.0,          # required
     )
 
-It takes the same :class:`~audiotree.core.ExcerptConfig` as the dataset loaders and
+It takes the same :class:`~audiotree.ExcerptConfig` as the dataset loaders and
 forwards ``sample_rate`` / ``duration`` / ``mono`` to
-:meth:`~audiotree.core.AudioTree.from_file`.
+:meth:`~audiotree.AudioTree.from_file`.
 
 **File Extensions**
 
@@ -277,7 +277,7 @@ before batching.
 
 .. important::
    The marker is written on **every** item, good ones included, because
-   :meth:`~audiotree.core.AudioTree.batch` requires all items in a batch to
+   :meth:`~audiotree.AudioTree.batch` requires all items in a batch to
    carry the same metadata keys. The policy is therefore a property of the whole
    dataset: items from a ``"skip"``/``"warn"`` dataset cannot be batched
    together with items from a ``"raise"`` one.
@@ -377,7 +377,7 @@ In this example each ``<name>.wav`` has a sibling ``<name>.npy`` holding a
     aligned: True
 
 Because ``pianoroll`` lives in ``metadata`` — an active pytree node, not just
-static description — :meth:`~audiotree.core.AudioTree.batch` stacks the
+static description — :meth:`~audiotree.AudioTree.batch` stacks the
 per-excerpt pianorolls into ``(batch, 128, frames)`` right alongside the
 waveform, and indexing or slicing the batch keeps them aligned.
 

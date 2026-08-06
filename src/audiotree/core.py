@@ -995,6 +995,76 @@ class AudioTree:
         return self.waveform.shape[-1]
 
     @property
+    def backend(self) -> str:
+        """Which array library this tree's arrays belong to.
+
+        One of ``"numpy"``, ``"jax"``, or ``"mixed"``. A tree is not required to
+        be homogeneous and quietly stops being so more often than you would
+        expect: applying a NumPy-namespace transform to a JAX tree converts the
+        fields it touches, so ``audiotree.transforms.trim`` on a JAX tree hands
+        back a NumPy ``waveform``. Nothing is wrong with that until something
+        downstream assumes otherwise -- ``jax.jit`` on a NumPy leaf silently
+        re-uploads it every call -- which is what this property is for.
+
+        ``"mixed"`` is reported rather than raised, so it is safe to log.
+        Convert with :func:`jax.device_put` / :func:`jax.device_get`.
+
+        Examples:
+            >>> import numpy as np, jax.numpy as jnp
+            >>> from audiotree import AudioTree
+            >>> AudioTree.create(np.zeros((1, 1, 8)), 16000).backend
+            'numpy'
+            >>> AudioTree.create(jnp.zeros((1, 1, 8)), 16000).backend
+            'jax'
+        """
+        kinds = {
+            "numpy" if isinstance(leaf, np.ndarray) else "jax"
+            for leaf in self._array_leaves()
+        }
+        if not kinds:
+            return "numpy"  # nothing to disagree about
+        return kinds.pop() if len(kinds) == 1 else "mixed"
+
+    @property
+    def device(self) -> Optional["jax.Device"]:
+        """The device this tree's arrays live on, or ``None`` on NumPy.
+
+        ``jax.device_put`` and ``jax.device_get`` already move a tree; this is
+        the missing half -- asking where it currently is without reaching into a
+        leaf and hoping the rest agree.
+
+        Returns:
+            The :class:`jax.Device` shared by every array leaf, or ``None`` if
+            the tree is NumPy-backed (host memory, no JAX device).
+
+        Raises:
+            ValueError: If the leaves do not agree on one device -- a mixed
+                NumPy/JAX tree, or JAX arrays committed to different devices.
+                Unlike :attr:`backend` this raises, because there is no honest
+                single answer and returning one of them would be a guess.
+        """
+        leaves = list(self._array_leaves())
+        if not leaves:
+            return None
+        devices = {
+            None if isinstance(leaf, np.ndarray) else leaf.device for leaf in leaves
+        }
+        if len(devices) == 1:
+            return devices.pop()
+        raise ValueError(
+            f"AudioTree spans more than one device: {sorted(map(str, devices))}. "
+            f"Move it with jax.device_put(tree, device) or jax.device_get(tree) "
+            f"before asking."
+        )
+
+    def _array_leaves(self):
+        """Every non-``None`` array field, waveform first. Skips ``metadata``."""
+        for name in ARRAY_FIELDS:
+            value = getattr(self, name, None)
+            if value is not None:
+                yield value
+
+    @property
     def batch_size(self) -> int:
         """Return the size of the leading (batch) axis.
 
