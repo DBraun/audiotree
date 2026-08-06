@@ -292,7 +292,11 @@ def test_default_excerpt_varies_the_offset(tmp_path):
 
     def offsets(**kwargs):
         ds = create_audio_dataset(
-            sources=str(tmp_path), duration=1.0, sample_rate=sr, repeat=True, **kwargs
+            sources=str(tmp_path),
+            duration=1.0,
+            sample_rate=sr,
+            num_epochs=None,
+            **kwargs,
         )
         return [float(ds[i].metadata["offset"][0]) for i in range(6)]
 

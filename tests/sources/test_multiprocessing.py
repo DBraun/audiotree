@@ -44,7 +44,7 @@ class TestMultithreading:
             ds = create_audio_dataset(
                 sources=audio_dir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=0.5,
             )
@@ -132,7 +132,7 @@ class TestMultiprocessing:
             ds = create_audio_dataset(
                 sources=audio_dir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=0.5,
             )

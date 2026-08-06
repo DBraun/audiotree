@@ -1,8 +1,10 @@
 """Tests for create_audio_dataset function."""
 
+import sys
 import tempfile
 from pathlib import Path
 
+import grain
 import numpy as np
 import pytest
 import soundfile as sf
@@ -10,6 +12,7 @@ import soundfile as sf
 from audiotree import AudioTree
 from audiotree.core import ExcerptConfig
 from audiotree.sources import create_audio_dataset, find_audio_files
+from audiotree.sources.core import _derive_seed_pair
 
 
 def _create_test_audio_files(tmpdir, num_files, sample_rate=44100, duration=1.0):
@@ -120,41 +123,137 @@ def test_shuffle():
         assert different, "Different seeds should produce different orderings"
 
 
-def test_repeat_mode():
-    """Test repeat mode for training datasets."""
+def test_num_epochs_none_repeats_forever():
+    """`num_epochs=None` is genuinely infinite, not a large finite count."""
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_dir = _create_test_audio_files(tmpdir, 5)
 
-        # With repeat=True, should repeat files; use slice to limit to 20
         ds = create_audio_dataset(
             sources=audio_dir,
-            repeat=True,
+            num_epochs=None,
             sample_rate=44100,
             duration=0.5,
-        ).slice(slice(0, 20))
+        )
+        # grain spells "infinite" as sys.maxsize.
+        assert len(ds) == sys.maxsize
 
-        assert len(ds) == 20
-
-        # All items should load successfully
-        for i in range(20):
-            item = ds[i]
-            assert isinstance(item, AudioTree)
+        # Indices far past the corpus still resolve.
+        for i in (0, 19, 10_000_000):
+            assert isinstance(ds[i], AudioTree)
 
 
-def test_no_repeat_uses_all_files():
-    """Test that without repeat, uses all available files."""
+def test_num_epochs_one_uses_all_files_once():
+    """A single pass covers every file exactly once."""
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_dir = _create_test_audio_files(tmpdir, 8)
 
-        # Without num_records and repeat=False, should use all files
         ds = create_audio_dataset(
             sources=audio_dir,
-            repeat=False,
+            num_epochs=1,
             sample_rate=44100,
             duration=0.5,
         )
 
         assert len(ds) == 8
+        # The default is a single pass.
+        assert len(create_audio_dataset(sources=audio_dir, duration=0.5)) == 8
+
+
+def test_num_epochs_finite_count():
+    """`num_epochs=n` yields exactly n passes -- what `repeat: bool` could not say."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 4)
+
+        ds = create_audio_dataset(
+            sources=audio_dir,
+            num_epochs=3,
+            shuffle=False,
+            sample_rate=44100,
+            duration=0.5,
+        )
+
+        assert len(ds) == 12
+        # Every file is visited three times.
+        counts: dict[str, int] = {}
+        for i in range(len(ds)):
+            path = ds[i].filepath[0]
+            counts[path] = counts.get(path, 0) + 1
+        assert sorted(counts.values()) == [3, 3, 3, 3]
+
+
+@pytest.mark.parametrize("bad", [0, -1, -10])
+def test_num_epochs_rejects_non_positive_counts(bad):
+    """Zero and negatives are mistakes, not silent no-ops."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 2)
+
+        with pytest.raises(ValueError, match="num_epochs must be >= 1"):
+            create_audio_dataset(sources=audio_dir, num_epochs=bad, duration=0.5)
+
+
+@pytest.mark.parametrize("bad", [True, False, 1.0, "3"])
+def test_num_epochs_rejects_non_integers(bad):
+    """The old boolean spelling (and other junk) must fail loudly."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 2)
+
+        with pytest.raises(TypeError, match="num_epochs must be an int or None"):
+            create_audio_dataset(sources=audio_dir, num_epochs=bad, duration=0.5)
+
+
+def test_repeat_keyword_is_gone():
+    """`repeat=` was deleted outright; it must not be silently accepted."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 2)
+
+        with pytest.raises(TypeError, match="repeat"):
+            create_audio_dataset(sources=audio_dir, repeat=True, duration=0.5)
+
+
+def test_shuffle_and_excerpt_seeds_are_derived_independently():
+    """One `shuffle_seed` must not drive both the file order and the excerpts.
+
+    `excerpt_seed` falls back to `shuffle_seed`, and both integers used to reach
+    grain verbatim, so the shuffle stream and the excerpt stream were built from
+    the same number. They are now two draws of one `SeedSequence`.
+    """
+    shuffle_stream, excerpt_stream = _derive_seed_pair(42)
+    assert shuffle_stream != excerpt_stream
+    # A pure function of the caller's seed, so runs stay reproducible.
+    assert _derive_seed_pair(42) == (shuffle_stream, excerpt_stream)
+    assert _derive_seed_pair(43) != (shuffle_stream, excerpt_stream)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 10)
+        files = find_audio_files(audio_dir)
+
+        ds = create_audio_dataset(
+            sources=audio_dir,
+            shuffle=True,
+            shuffle_seed=42,
+            sample_rate=44100,
+            duration=0.5,
+        )
+        order = [ds[i].filepath[0] for i in range(len(ds))]
+
+        # grain shuffles with the derived seed, not the caller's raw integer.
+        derived = list(grain.MapDataset.source(files).seed(shuffle_stream).shuffle())
+        raw = list(grain.MapDataset.source(files).seed(42).shuffle())
+        assert order == derived
+        assert order != raw
+
+        # An explicit excerpt_seed equal to shuffle_seed reproduces the default,
+        # so the fallback is not a second, different code path.
+        pinned = create_audio_dataset(
+            sources=audio_dir,
+            shuffle=True,
+            shuffle_seed=42,
+            excerpt_seed=42,
+            sample_rate=44100,
+            duration=0.5,
+        )
+        for i in range(len(ds)):
+            np.testing.assert_array_equal(ds[i].waveform, pinned[i].waveform)
 
 
 def test_with_saliency():

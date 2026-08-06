@@ -41,7 +41,7 @@ class TestBasicChaining:
             ds = create_audio_dataset(
                 sources=audio_dir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=5.0,
             )
@@ -65,7 +65,7 @@ class TestBasicChaining:
             ds = create_audio_dataset(
                 sources=audio_dir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=5.0,
             )
@@ -88,7 +88,7 @@ class TestBasicChaining:
             ds = create_audio_dataset(
                 sources=audio_dir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=5.0,
             )
@@ -159,7 +159,7 @@ class TestBalancedDatasetChaining:
             base_ds = create_audio_dataset(
                 sources=audio_dir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=5.0,
             )
@@ -202,7 +202,7 @@ class TestProbabilisticTransforms:
             ds = create_audio_dataset(
                 sources=audio_dir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=3.0,
             )
@@ -235,7 +235,7 @@ class TestLazyEvaluation:
             ds = create_audio_dataset(
                 sources=audio_dir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=3.0,
             )
@@ -269,7 +269,7 @@ class TestStereoMonoChaining:
             ds = create_audio_dataset(
                 sources=audio_dir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=3.0,
                 mono=False,  # Keep original channels

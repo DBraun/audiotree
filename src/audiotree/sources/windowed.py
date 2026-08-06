@@ -37,7 +37,12 @@ from audiotree import AudioTree, _format
 from audiotree._bagz import require_bagz
 from audiotree._fs import safe_join, write_json_atomic
 
-from .core import _default_extensions, find_audio_files
+from .core import (
+    _default_extensions,
+    _derive_seed_pair,
+    _validate_num_epochs,
+    find_audio_files,
+)
 
 _LUFS_BAGZ = "lufs.bagz"
 _LUFS_MANIFEST = "manifest.json"
@@ -480,7 +485,7 @@ def create_windowed_audio_dataset(
     lufs_window_sec: float | None = None,
     lufs_cutoff: float = -40.0,
     shuffle: bool = True,
-    repeat: bool = False,
+    num_epochs: int | None = 1,
     shuffle_seed: int = 0,
     excerpt_seed: int | None = None,
     sample_rate: int = 44_100,
@@ -531,9 +536,16 @@ def create_windowed_audio_dataset(
             Required when ``lufs_per_file`` is given without a ``lufs_cache``.
         lufs_cutoff: Minimum per-window LUFS to keep a slot.
         shuffle: Whether to globally shuffle slots (required for batch diversity).
-        repeat: Whether to repeat infinitely (True for training).
-        shuffle_seed: Seed for the global slot shuffle.
-        excerpt_seed: Seed for jitter. Defaults to ``shuffle_seed``.
+        num_epochs: How many passes over the slot index the dataset yields.
+            ``None`` repeats forever (training); an integer ``n >= 1`` yields
+            exactly ``n`` passes; ``0`` or a negative count raises. Defaults to
+            a single finite pass, which covers every slot exactly once.
+        shuffle_seed: Seed for the global slot shuffle. Derived, not used
+            verbatim; see ``excerpt_seed``.
+        excerpt_seed: Seed for jitter. Defaults to ``shuffle_seed``. The shuffle
+            and jitter streams come from two different draws of one
+            :class:`numpy.random.SeedSequence`, so slot order and jitter offsets
+            stay independent even when a single seed feeds both.
         sample_rate: Target sample rate for loaded audio.
         mono: Whether to convert audio to mono.
         pad_mode: Padding mode for files shorter than ``duration`` (numpy.pad
@@ -546,8 +558,13 @@ def create_windowed_audio_dataset(
     """
     if hop is None:
         hop = duration
-    if excerpt_seed is None:
-        excerpt_seed = shuffle_seed
+    num_epochs = _validate_num_epochs(num_epochs)
+    shuffle_stream_seed, derived_excerpt_seed = _derive_seed_pair(shuffle_seed)
+    excerpt_stream_seed = (
+        derived_excerpt_seed
+        if excerpt_seed is None
+        else _derive_seed_pair(excerpt_seed)[1]
+    )
     if hop <= 0:
         raise ValueError(f"hop must be positive, got {hop}.")
     if not 0.0 <= alpha <= 1.0:
@@ -622,9 +639,8 @@ def create_windowed_audio_dataset(
     ds = grain.MapDataset.source(range(len(file_idx)))
 
     if shuffle:
-        ds = ds.seed(shuffle_seed).shuffle()
-    if repeat:
-        ds = ds.repeat()
+        ds = ds.seed(shuffle_stream_seed).shuffle()
+    ds = ds.repeat() if num_epochs is None else ds.repeat(num_epochs)
 
     load_fn = functools.partial(
         _load_slot,
@@ -640,6 +656,6 @@ def create_windowed_audio_dataset(
         pad_mode=pad_mode,
         source=source,
     )
-    ds = ds.seed(excerpt_seed).random_map(load_fn)
+    ds = ds.seed(excerpt_stream_seed).random_map(load_fn)
 
     return ds

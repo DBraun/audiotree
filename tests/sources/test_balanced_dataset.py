@@ -1,5 +1,6 @@
 """Tests for create_balanced_audio_dataset function."""
 
+import sys
 import tempfile
 import warnings
 from pathlib import Path
@@ -279,7 +280,7 @@ class TestCreateBalancedAudioDataset:
             preprocessed_ds = create_audio_dataset(
                 sources=group2_dir,
                 shuffle=True,
-                repeat=True,
+                num_epochs=None,
                 sample_rate=44100,
                 duration=0.5,
                 shuffle_seed=999,
@@ -310,10 +311,10 @@ class TestCreateBalancedAudioDataset:
             group2_dir = _create_test_audio_files(tmpdir, "group2", 5)
 
             ds1 = create_audio_dataset(
-                sources=group1_dir, repeat=True, sample_rate=44100, duration=0.5
+                sources=group1_dir, num_epochs=None, sample_rate=44100, duration=0.5
             )
             ds2 = create_audio_dataset(
-                sources=group2_dir, repeat=True, sample_rate=44100, duration=0.5
+                sources=group2_dir, num_epochs=None, sample_rate=44100, duration=0.5
             )
 
             # Mix only datasets, no file sources
@@ -421,6 +422,50 @@ class TestBalancedDatasetValidation:
         assert _derive_group_seed(7, "music", "shuffle") == _derive_group_seed(
             7, "music", "shuffle"
         )
+
+    def test_num_epochs_replaces_the_repeat_flag(self):
+        """`num_epochs` counts passes per group; None (the default) is infinite."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            small_dir = _create_test_audio_files(tmpdir, "small", 3)
+            large_dir = _create_test_audio_files(tmpdir, "large", 7)
+            sources = {"small": [small_dir], "large": [large_dir]}
+
+            # The default repeats forever, so the mixture is unbounded.
+            infinite = create_balanced_audio_dataset(
+                sources=sources, sample_rate=44100, duration=0.5
+            )
+            assert len(infinite) == sys.maxsize
+            explicit = create_balanced_audio_dataset(
+                sources=sources, num_epochs=None, sample_rate=44100, duration=0.5
+            )
+            assert len(explicit) == len(infinite)
+
+            # A finite count bounds the mixture by the smallest group, as
+            # documented for grain.MapDataset.mix.
+            one = create_balanced_audio_dataset(
+                sources=sources, num_epochs=1, sample_rate=44100, duration=0.5
+            )
+            three = create_balanced_audio_dataset(
+                sources=sources, num_epochs=3, sample_rate=44100, duration=0.5
+            )
+            assert len(one) < sys.maxsize
+            assert len(three) == 3 * len(one)
+            assert isinstance(three[0], AudioTree)
+
+    def test_num_epochs_validation(self):
+        """Zero, negative, and the old boolean spelling must all fail loudly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            group_dir = _create_test_audio_files(tmpdir, "group1", 2)
+            sources = {"group1": [group_dir]}
+
+            with pytest.raises(ValueError, match="num_epochs must be >= 1"):
+                create_balanced_audio_dataset(sources=sources, num_epochs=0)
+            with pytest.raises(ValueError, match="num_epochs must be >= 1"):
+                create_balanced_audio_dataset(sources=sources, num_epochs=-2)
+            with pytest.raises(TypeError, match="num_epochs must be an int or None"):
+                create_balanced_audio_dataset(sources=sources, num_epochs=True)
+            with pytest.raises(TypeError, match="repeat"):
+                create_balanced_audio_dataset(sources=sources, repeat=True)
 
     def test_duration_with_window_params_raises(self):
         """`duration` is meaningless under windowed sampling, so it must not be ignored."""

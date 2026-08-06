@@ -185,12 +185,72 @@ def _probe_channels(file_path: str) -> Optional[int]:
 _DEFAULT_EXCERPT = ExcerptConfig()
 
 
+def _validate_num_epochs(num_epochs: int | None) -> int | None:
+    """Check a ``num_epochs`` argument, returning it normalized.
+
+    ``None`` means "repeat forever" and is passed straight through to grain's
+    own infinite repeat, so an infinite dataset really is infinite rather than a
+    large finite count. Anything else must be a positive integer: zero or a
+    negative count would otherwise silently produce an empty dataset (or be
+    quietly rounded up to one pass), which is never what the caller meant.
+
+    Args:
+        num_epochs: The caller's value.
+
+    Returns:
+        ``None``, or the count as a plain ``int``.
+
+    Raises:
+        TypeError: If ``num_epochs`` is neither ``None`` nor an integer.
+        ValueError: If ``num_epochs`` is zero or negative.
+    """
+    if num_epochs is None:
+        return None
+    if isinstance(num_epochs, bool) or not isinstance(num_epochs, (int, np.integer)):
+        raise TypeError(
+            f"num_epochs must be an int or None, got {num_epochs!r}. Pass None "
+            "to repeat forever, or a positive integer for that many passes."
+        )
+    if num_epochs < 1:
+        raise ValueError(
+            f"num_epochs must be >= 1, got {num_epochs}. Pass None to repeat "
+            "forever; there is no way to ask for an empty dataset."
+        )
+    return int(num_epochs)
+
+
+def _derive_seed_pair(base_seed: int) -> tuple[int, int]:
+    """Split one user-facing seed into independent shuffle and excerpt seeds.
+
+    ``excerpt_seed`` falls back to ``shuffle_seed``, so a caller who sets a
+    single seed used to hand grain the *same* integer for the file-order stream
+    and for the excerpt-offset stream, tying the two together: re-seeding a run
+    moved both in lockstep instead of independently. Drawing two states from one
+    :class:`numpy.random.SeedSequence` decorrelates them while keeping the whole
+    thing a pure function of the caller's seed.
+
+    Both streams are derived, never used verbatim, so the two roles stay
+    symmetric -- the same reason :func:`_derive_group_seed` folds a ``role``
+    string into its entropy.
+
+    Args:
+        base_seed: The caller's seed.
+
+    Returns:
+        ``(shuffle_seed, excerpt_seed)``, each in ``[0, 2**31)``.
+    """
+    state = np.random.SeedSequence(int(base_seed) & 0xFFFFFFFF).generate_state(
+        2, dtype=np.uint32
+    )
+    return int(state[0]) & 0x7FFFFFFF, int(state[1]) & 0x7FFFFFFF
+
+
 def create_audio_dataset(
     sources: str | Path | List[str | Path] | None = None,
     filepaths: List[str | Path] | None = None,
     *,
     shuffle: bool = True,
-    repeat: bool = False,
+    num_epochs: int | None = 1,
     shuffle_seed: int = 0,
     excerpt_seed: int | None = None,
     sample_rate: int = 44_100,
@@ -221,12 +281,22 @@ def create_audio_dataset(
             reorganizing it on disk. The given order is preserved (then shuffled if
             ``shuffle=True``).
         shuffle: Whether to shuffle files.
-        repeat: Whether to repeat the dataset infinitely. Set to True for training,
-            False for validation/testing.
-        shuffle_seed: Random seed for shuffling file order.
-        excerpt_seed: Random seed for excerpt selection (random_map). If None, defaults
-            to shuffle_seed. Use different values to create datasets that visit files
-            in the same order but load different random excerpts.
+        num_epochs: How many passes over the corpus the dataset yields. ``None``
+            repeats forever -- what training wants -- and makes ``len(ds)``
+            report ``sys.maxsize``, grain's spelling of "infinite". An integer
+            ``n >= 1`` yields exactly ``n`` passes, so ``len(ds)`` is ``n``
+            times the file count; ``0`` or a negative count raises. Defaults to
+            a single finite pass.
+        shuffle_seed: Random seed for shuffling file order. The stream grain
+            shuffles with is *derived* from this value, not used verbatim; see
+            ``excerpt_seed``.
+        excerpt_seed: Random seed for excerpt selection (random_map). If None,
+            defaults to ``shuffle_seed``. The shuffle and excerpt streams are
+            taken from two different draws of one
+            :class:`numpy.random.SeedSequence`, so the file order and the
+            excerpt offsets stay independent even when one seed feeds both. Use
+            different values to create datasets that visit files in the same
+            order but load different random excerpts.
         sample_rate: Target sample rate for audio files.
         mono: Whether to convert audio to mono.
         duration: Duration in seconds to load from each file.
@@ -272,25 +342,32 @@ def create_audio_dataset(
         >>> ds[0].waveform.shape
         (1, 1, 44100)
 
-        Training dataset (shuffle and repeat infinitely):
+        Training dataset (shuffled, repeating forever):
 
         >>> train_ds = create_audio_dataset(
         ...     sources=data_dir,
         ...     shuffle=True,
-        ...     repeat=True,
+        ...     num_epochs=None,
         ...     sample_rate=44100,
         ...     duration=1.0,
         ... )
 
-        Validation dataset (deterministic, no repeat):
+        Validation dataset (deterministic, a single pass):
 
         >>> val_ds = create_audio_dataset(
         ...     sources=data_dir,
         ...     shuffle=False,
-        ...     repeat=False,
+        ...     num_epochs=1,
         ...     sample_rate=44100,
         ...     duration=1.0,
         ... )
+        >>> len(val_ds)
+        2
+
+        Any finite number of passes, which a boolean could not express:
+
+        >>> len(create_audio_dataset(sources=data_dir, num_epochs=3))
+        6
 
         Two datasets that visit files in the same order but load different
         random excerpts (same ``shuffle_seed``, different ``excerpt_seed``):
@@ -298,8 +375,16 @@ def create_audio_dataset(
         >>> ds1 = create_audio_dataset(sources=data_dir, shuffle_seed=42, excerpt_seed=100)
         >>> ds2 = create_audio_dataset(sources=data_dir, shuffle_seed=42, excerpt_seed=200)
     """
-    if excerpt_seed is None:
-        excerpt_seed = shuffle_seed
+    num_epochs = _validate_num_epochs(num_epochs)
+
+    # Both streams are derived, so a lone `shuffle_seed` no longer drives the
+    # file order and the excerpt offsets off one and the same integer.
+    shuffle_stream_seed, derived_excerpt_seed = _derive_seed_pair(shuffle_seed)
+    excerpt_stream_seed = (
+        derived_excerpt_seed
+        if excerpt_seed is None
+        else _derive_seed_pair(excerpt_seed)[1]
+    )
 
     if (sources is None) == (filepaths is None):
         raise ValueError(
@@ -334,10 +419,9 @@ def create_audio_dataset(
     ds = grain.MapDataset.source(filepaths)
 
     if shuffle:
-        ds = ds.seed(shuffle_seed).shuffle()
+        ds = ds.seed(shuffle_stream_seed).shuffle()
 
-    if repeat:
-        ds = ds.repeat()
+    ds = ds.repeat() if num_epochs is None else ds.repeat(num_epochs)
 
     # Apply random_map so each index gets its own excerpt RNG
     load_fn = functools.partial(
@@ -350,7 +434,7 @@ def create_audio_dataset(
         source=source,
         channels=channels,
     )
-    ds = ds.seed(excerpt_seed).random_map(load_fn)
+    ds = ds.seed(excerpt_stream_seed).random_map(load_fn)
 
     return ds
 
@@ -389,7 +473,7 @@ def create_balanced_audio_dataset(
     datasets: Optional[Mapping[str, grain.MapDataset]] = None,
     *,
     shuffle: bool = True,
-    repeat: bool = True,
+    num_epochs: int | None = None,
     shuffle_seed: int = 0,
     excerpt_seed: int | None = None,
     sample_rate: int = 44_100,
@@ -426,8 +510,16 @@ def create_balanced_audio_dataset(
             grain.MapDataset.mix will truncate the mixed output to the shortest dataset length.
         shuffle: Whether to shuffle files within each file-based group. Set to False for
             deterministic iteration (e.g., pre-rendering). Does not affect pre-constructed datasets.
-        repeat: Whether to repeat the dataset. If False, then the overall length is limited by smallest of the
-            underlying datasets. See ``grain.MapDataset.mix``
+        num_epochs: How many passes each *file-based* group makes before it runs
+            dry. ``None`` (the default) repeats every group forever, which is
+            what balanced mixing normally wants: ``grain.MapDataset.mix``
+            truncates its output to the shortest input, so any finite group caps
+            the whole mixture. An integer ``n >= 1`` gives each group ``n``
+            passes and therefore a finite mixture bounded by the smallest of
+            them; ``0`` or a negative count raises. Note the default differs
+            from :func:`create_audio_dataset`'s single pass -- there one pass
+            over the corpus is exactly one epoch, whereas here a finite group
+            silently truncates every other group.
         shuffle_seed: Random seed for shuffling file order. Each group's own seed is
             derived from this and the group's *name*, so adding or reordering
             groups leaves the other groups' streams untouched.
@@ -459,8 +551,9 @@ def create_balanced_audio_dataset(
             :func:`create_audio_dataset`.
 
     Returns:
-        An infinite grain.MapDataset that interleaves items from source groups
-        according to the specified weights.
+        A grain.MapDataset that interleaves items from source groups according
+        to the specified weights -- infinite unless ``num_epochs`` is an integer
+        or a finite dataset was passed in ``datasets``.
 
     Example:
         Set up two small groups of ``.wav`` files in temporary directories:
@@ -510,13 +603,15 @@ def create_balanced_audio_dataset(
 
         Mix file sources with a pre-constructed (already repeated) dataset:
 
-        >>> preprocessed_ds = create_audio_dataset(sources=music_dir, repeat=True)
+        >>> preprocessed_ds = create_audio_dataset(sources=music_dir, num_epochs=None)
         >>> ds = create_balanced_audio_dataset(
         ...     sources={"speech": [speech_dir]},
         ...     datasets={"preprocessed": preprocessed_ds},
         ...     weights={"speech": 0.7, "preprocessed": 0.3},
         ... )
     """
+    num_epochs = _validate_num_epochs(num_epochs)
+
     if sources is None and datasets is None:
         raise ValueError("At least one of 'sources' or 'datasets' must be provided")
 
@@ -575,7 +670,7 @@ def create_balanced_audio_dataset(
                 lufs_cutoff=window_params.lufs_cutoff,
                 lufs_window_sec=window_params.lufs_window_sec,
                 shuffle=shuffle,
-                repeat=repeat,
+                num_epochs=num_epochs,
                 shuffle_seed=_derive_group_seed(shuffle_seed, group_name, "shuffle"),
                 excerpt_seed=_derive_group_seed(excerpt_seed, group_name, "excerpt"),
                 sample_rate=sample_rate,
@@ -588,7 +683,7 @@ def create_balanced_audio_dataset(
             ds = create_audio_dataset(
                 sources=folders,
                 shuffle=shuffle,
-                repeat=repeat,
+                num_epochs=num_epochs,
                 shuffle_seed=_derive_group_seed(shuffle_seed, group_name, "shuffle"),
                 excerpt_seed=_derive_group_seed(excerpt_seed, group_name, "excerpt"),
                 sample_rate=sample_rate,

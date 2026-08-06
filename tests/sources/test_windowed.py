@@ -1,6 +1,7 @@
 """Tests for length-aware windowed audio sampling (audiotree.sources.windowed)."""
 
 import importlib.util
+import sys
 import tempfile
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from audiotree.sources import (
     save_window_lufs,
     scan_durations,
 )
+from audiotree.sources.core import _derive_seed_pair
 from audiotree.sources.windowed import _build_slot_index
 
 requires_bagz = pytest.mark.skipif(
@@ -150,7 +152,7 @@ def test_dataset_loads_fixed_shape():
             sample_rate=8000,
             mono=True,
             shuffle=False,
-            repeat=False,
+            num_epochs=1,
         )
         item = ds[0]
         assert isinstance(item, AudioTree)
@@ -158,7 +160,7 @@ def test_dataset_loads_fixed_shape():
 
 
 def test_one_epoch_covers_every_slot_once():
-    """Without repeat, the dataset length equals the slot count (exact coverage)."""
+    """With one epoch the dataset length equals the slot count (exact coverage)."""
     with tempfile.TemporaryDirectory() as tmp:
         fps = _mixed_corpus(tmp, {"a": 4.0, "b": 12.0})
         durations = scan_durations(fps)
@@ -170,7 +172,7 @@ def test_one_epoch_covers_every_slot_once():
             alpha=1.0,
             sample_rate=8000,
             shuffle=True,
-            repeat=False,
+            num_epochs=1,
         )
         assert len(ds) == int(counts.sum())
 
@@ -231,6 +233,73 @@ def test_alpha_out_of_range_raises():
         fps = _mixed_corpus(tmp, {"a": 2.0})
         with pytest.raises(ValueError):
             create_windowed_audio_dataset(filepaths=fps, alpha=1.5)
+
+
+def test_num_epochs_replaces_the_repeat_flag():
+    """`num_epochs` counts passes over the slot index; None is truly infinite."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fps = _mixed_corpus(tmp, {"a": 4.0, "b": 12.0})
+        common = dict(
+            filepaths=fps,
+            duration=1.0,
+            hop=1.0,
+            alpha=1.0,
+            sample_rate=8000,
+            shuffle=False,
+        )
+        slots = len(create_windowed_audio_dataset(num_epochs=1, **common))
+
+        assert len(create_windowed_audio_dataset(num_epochs=3, **common)) == 3 * slots
+        assert len(create_windowed_audio_dataset(num_epochs=None, **common)) == (
+            sys.maxsize
+        )
+        # The default is a single pass over every slot.
+        assert len(create_windowed_audio_dataset(**common)) == slots
+
+        with pytest.raises(ValueError, match="num_epochs must be >= 1"):
+            create_windowed_audio_dataset(num_epochs=0, **common)
+        with pytest.raises(TypeError, match="num_epochs must be an int or None"):
+            create_windowed_audio_dataset(num_epochs=True, **common)
+        with pytest.raises(TypeError, match="repeat"):
+            create_windowed_audio_dataset(repeat=True, **common)
+
+
+def test_slot_shuffle_uses_a_derived_seed():
+    """Slot order and jitter must not both come from the raw `shuffle_seed`."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fps = _mixed_corpus(tmp, {"a": 20.0, "b": 20.0})
+        durations = scan_durations(fps)
+        file_idx, *_ = _build_slot_index(
+            filepaths=fps,
+            durations=durations,
+            duration=1.0,
+            hop=1.0,
+            alpha=1.0,
+            lufs_per_file=None,
+            lufs_window_sec=1.0,
+            lufs_cutoff=-40.0,
+        )
+        shuffle_stream, excerpt_stream = _derive_seed_pair(7)
+        assert shuffle_stream != excerpt_stream
+
+        ds = create_windowed_audio_dataset(
+            filepaths=fps,
+            duration=1.0,
+            hop=1.0,
+            alpha=1.0,
+            sample_rate=8000,
+            shuffle=True,
+            shuffle_seed=7,
+            num_epochs=1,
+        )
+        order = [ds[i].filepath[0] for i in range(len(ds))]
+
+        def slot_order(seed):
+            ids = grain.MapDataset.source(range(len(file_idx))).seed(seed).shuffle()
+            return [fps[int(file_idx[sid])] for sid in ids]
+
+        assert order == slot_order(shuffle_stream)
+        assert order != slot_order(7)
 
 
 # --------------------------------------------------------------------------- #
@@ -348,7 +417,7 @@ def test_lufs_cache_path_filters_dataset():
             lufs_cache=cache_dir,
             lufs_cutoff=-200.0,
             shuffle=False,
-            repeat=False,
+            num_epochs=1,
         )
         # With a permissive cutoff, all noise slots survive.
         assert len(ds) == int(
