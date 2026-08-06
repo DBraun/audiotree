@@ -1,6 +1,8 @@
 """Tests for TreeDataSource."""
 
 import importlib.util
+import json
+import locale
 import tempfile
 from pathlib import Path
 
@@ -217,7 +219,7 @@ def test_rejects_headerless_manifest():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         manifest = {"version": "2.0", "num_samples": 5, "leaves": {}}
-        with open(output_dir / "manifest.json", "w") as f:
+        with open(output_dir / "manifest.json", "w", encoding="utf-8") as f:
             json.dump(manifest, f)
 
         with pytest.raises(ValueError, match="re-render the dataset"):
@@ -247,9 +249,9 @@ def test_format_header_dispatch(override, match):
             writer.write(AudioTree.create(np.zeros((1, 1, 8), np.float32), 16000))
 
         path = output_dir / "manifest.json"
-        manifest = json.loads(path.read_text())
+        manifest = json.loads(path.read_text(encoding="utf-8"))
         manifest.update(override)
-        path.write_text(json.dumps(manifest))
+        path.write_text(json.dumps(manifest), encoding="utf-8")
 
         with pytest.raises(ValueError, match=match):
             TreeDataSource(output_dir)
@@ -508,10 +510,10 @@ def test_backward_compat_no_string_leaves():
         import json
 
         manifest_path = output_dir / "manifest.json"
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             manifest = json.load(f)
         manifest.pop("string_leaves", None)
-        with open(manifest_path, "w") as f:
+        with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f)
 
         source = TreeDataSource(output_dir)
@@ -830,3 +832,31 @@ def test_excluding_string_leaves_works_without_bagz(tmp_path, monkeypatch):
     sample = source[0]
     assert sample["audio"].waveform.shape == (1, 1, 16)
     assert "caption" not in sample
+
+
+def test_manifest_json_is_utf8_regardless_of_locale(tmp_path, monkeypatch):
+    """``manifest.json`` is UTF-8 on every platform, not whatever the locale says.
+
+    ``write_json_atomic`` and the two manifest readers used the default encoding,
+    which is UTF-8 on Linux and macOS but cp1252 on Windows. A manifest carrying
+    a non-ASCII character -- an accented leaf name, a CJK metadata key -- was
+    therefore written on one platform and unreadable on another, and a
+    Windows-written manifest was not valid UTF-8 JSON for anyone else. The
+    Windows CI leg caught this on its first run.
+    """
+    from audiotree._fs import write_json_atomic
+
+    payload = {"note": "Frédéric — 練習曲", "leaves": ["café.bin"]}
+    path = tmp_path / "manifest.json"
+    write_json_atomic(path, payload)
+
+    # Bytes on disk are UTF-8 whatever the interpreter's locale encoding is.
+    assert json.loads(path.read_bytes().decode("utf-8")) == payload
+
+    # And the read side does not consult the locale either. cp1252 cannot decode
+    # the UTF-8 encoding of "é", so a locale-dependent reader raises here.
+    monkeypatch.setattr(
+        locale, "getpreferredencoding", lambda do_setlocale=True: "cp1252"
+    )
+    with open(path, encoding="utf-8") as f:
+        assert json.load(f) == payload

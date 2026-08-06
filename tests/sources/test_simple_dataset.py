@@ -268,7 +268,9 @@ def test_find_audio_files_sorted_recursive_and_filtered():
         (root / ".hidden").mkdir()
         sf.write(str(root / ".hidden" / "d.wav"), wav, sr)  # hidden directory
         sf.write(str(root / ".e.wav"), wav, sr)  # hidden file
-        (root / "notes.txt").write_text("not audio")  # wrong extension
+        (root / "notes.txt").write_text(
+            "not audio", encoding="utf-8"
+        )  # wrong extension
 
         found = find_audio_files(str(root))
 

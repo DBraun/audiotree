@@ -17,6 +17,7 @@ def test_main2_with_config():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=300,
     )
 
@@ -37,6 +38,7 @@ def test_main2_different_train_val_configs():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=300,
     )
 
@@ -145,6 +147,7 @@ print("SUCCESS")
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=300,
     )
 

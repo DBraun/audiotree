@@ -31,9 +31,9 @@ def dataset(tmp_path):
 
 
 def _retamper(data_dir: Path, mutate) -> None:
-    manifest = json.loads((data_dir / "manifest.json").read_text())
+    manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
     mutate(copy.deepcopy(manifest), manifest)
-    (data_dir / "manifest.json").write_text(json.dumps(manifest))
+    (data_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def test_absolute_leaf_path_is_refused(dataset):

@@ -103,6 +103,11 @@ jobs:
       run: uv sync --extra all
 
     - name: Run tests
+      # PYTHONWARNDEFAULTENCODING turns locale-dependent text I/O into an
+      # EncodingWarning, which pyproject.toml escalates to an error. Without it
+      # the Windows leg is the only thing that catches an unencoded open().
+      env:
+        PYTHONWARNDEFAULTENCODING: "1"
       run: uv run pytest
 
   test_lowest_direct:

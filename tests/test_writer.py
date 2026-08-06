@@ -1489,6 +1489,7 @@ def test_manifest_bytes_are_deterministic_across_hash_seeds():
             [sys.executable, "-c", _DETERMINISM_SCRIPT],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
             check=True,
         )

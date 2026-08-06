@@ -234,7 +234,7 @@ class TreeDataSource(RandomAccessDataSource):
         self.exclude_prefixes: List[str] = exclude_prefixes or []
         self.load_into_memory = load_into_memory
 
-        with open(self.manifest_path) as f:
+        with open(self.manifest_path, encoding="utf-8") as f:
             self.manifest = json.load(f)
 
         _format.check(self.manifest, _format.TREE, source=str(self.manifest_path))

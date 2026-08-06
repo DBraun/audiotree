@@ -24,6 +24,7 @@ def test_main_with_config():
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=str(cwd),
         timeout=300,
     )
@@ -40,7 +41,9 @@ def test_main_with_custom_yaml():
     cwd = Path(__file__).parent.parent.parent
 
     # Create a temporary config file with custom values
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", suffix=".yml", delete=False
+    ) as f:
         config = {
             "volume_norm.min_db": -30,
             "volume_norm.max_db": -10,
@@ -58,6 +61,7 @@ def test_main_with_custom_yaml():
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(cwd),
             timeout=300,
         )

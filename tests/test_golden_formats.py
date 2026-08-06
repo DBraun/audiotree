@@ -39,7 +39,7 @@ def test_golden_fixtures_are_present():
 
 
 def test_golden_tree_header():
-    manifest = json.loads((TREE_DIR / "manifest.json").read_text())
+    manifest = json.loads((TREE_DIR / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["format"] == _format.TREE
     assert manifest["format_version"] == [1, 0]
     assert manifest["min_reader_version"] == [1, 0]

@@ -30,7 +30,7 @@ def test_basic_write_audiotree():
         assert (output_dir / "waveform.bin").exists()
         assert (output_dir / "manifest.json").exists()
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
         assert manifest["format"] == "audiotree-tree"
         assert manifest["format_version"] == [1, 0]
@@ -52,7 +52,7 @@ def test_manifest_structure_audiotree():
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
 
         structure = manifest["structure"]
@@ -79,7 +79,7 @@ def test_write_audiotree_with_metadata():
 
         assert (output_dir / "metadata.mel.bin").exists()
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
         assert "metadata.mel" in manifest["leaves"]
 
@@ -141,7 +141,7 @@ def test_write_plain_dict():
         assert (output_dir / "x.bin").exists()
         assert (output_dir / "y.bin").exists()
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
         assert manifest["structure"]["type"] == "dict"
 
@@ -181,7 +181,7 @@ def test_multiple_writes():
             w.write(tree1)
             w.write(tree2)
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
         assert manifest["num_samples"] == 5
 
@@ -216,7 +216,7 @@ def test_overflow_trimming():
             n = w.write(tree)
             assert n == 2  # trimmed from 3 to 2
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
         assert manifest["num_samples"] == 2
 
@@ -254,7 +254,7 @@ def test_undershoot_truncates_memmaps():
         with TreeWriter(output_dir, expected_samples=100) as w:
             w.write(tree)  # write only 2 of 100
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
         assert manifest["num_samples"] == 2
         assert manifest["expected_samples"] == 100
@@ -341,7 +341,7 @@ def test_different_dtypes():
         with TreeWriter(output_dir, expected_samples=2) as w:
             w.write(data)
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
         assert manifest["leaves"]["float32"]["dtype"] == "float32"
         assert manifest["leaves"]["float16"]["dtype"] == "float16"
@@ -361,7 +361,7 @@ def test_empty_metadata():
         with TreeWriter(output_dir, expected_samples=2) as w:
             w.write(tree)
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
 
         structure = manifest["structure"]
@@ -382,7 +382,7 @@ def test_user_metadata_in_manifest():
         ) as w:
             w.write({"x": np.zeros((2,), dtype=np.float32)})
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
         assert manifest["metadata"]["description"] == "test dataset"
         assert manifest["metadata"]["version"] == 1
@@ -419,7 +419,7 @@ def test_write_string_list_with_audiotree():
         assert (output_dir / "labels.bagz").exists()
         assert (output_dir / "audio.waveform.bin").exists()
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
         assert "labels" in manifest["string_leaves"]
         assert manifest["string_leaves"]["labels"]["file"] == "labels.bagz"
@@ -443,7 +443,7 @@ def test_write_multiple_string_leaves():
         assert (output_dir / "labels.bagz").exists()
         assert (output_dir / "source.bagz").exists()
 
-        with open(output_dir / "manifest.json") as f:
+        with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
         assert "labels" in manifest["string_leaves"]
         assert "source" in manifest["string_leaves"]
@@ -558,7 +558,9 @@ def test_manifest_is_readable_before_close():
         writer.flush()
 
         # Simulate a reader arriving while the writer is still alive.
-        manifest = json.loads((Path(tmpdir) / "manifest.json").read_text())
+        manifest = json.loads(
+            (Path(tmpdir) / "manifest.json").read_text(encoding="utf-8")
+        )
         assert manifest["num_samples"] == 50
         source = TreeDataSource(tmpdir)
         assert len(source) == 50
@@ -595,7 +597,9 @@ def test_non_native_endian_leaf_round_trips():
         with TreeWriter(tmpdir, expected_samples=3) as writer:
             writer.write({"x": values})
 
-        manifest = json.loads((Path(tmpdir) / "manifest.json").read_text())
+        manifest = json.loads(
+            (Path(tmpdir) / "manifest.json").read_text(encoding="utf-8")
+        )
         assert manifest["leaves"]["x"]["dtype"] == "float32"
 
         source = TreeDataSource(tmpdir)
@@ -663,7 +667,9 @@ def test_manifest_sample_count_is_refreshed_while_writing():
             writer.write({"x": np.full((10, 2), float(i), dtype=np.float32)})
 
         # No flush(), no close() -- exactly what a SIGKILL would leave behind.
-        manifest = json.loads((Path(tmpdir) / "manifest.json").read_text())
+        manifest = json.loads(
+            (Path(tmpdir) / "manifest.json").read_text(encoding="utf-8")
+        )
         assert manifest["num_samples"] == 50
         assert len(TreeDataSource(tmpdir)) == 50
         np.testing.assert_array_equal(
@@ -691,6 +697,8 @@ def test_close_is_terminal():
         with pytest.raises(RuntimeError, match="closed"):
             writer.write({"x": np.ones((2, 3), dtype=np.float32)})
 
-        manifest = json.loads((Path(tmpdir) / "manifest.json").read_text())
+        manifest = json.loads(
+            (Path(tmpdir) / "manifest.json").read_text(encoding="utf-8")
+        )
         assert manifest["num_samples"] == 2
         assert (Path(tmpdir) / "x.bin").stat().st_size == 2 * 3 * 4

@@ -68,6 +68,6 @@ def write_json_atomic(path: Path, payload: Any, *, indent: int = 2) -> None:
     dataset they describe is still being written.
     """
     tmp = path.with_name(f".{path.name}.tmp")
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=indent)
     os.replace(tmp, path)

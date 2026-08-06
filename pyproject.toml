@@ -145,6 +145,13 @@ markers = [
     "slow: doc checks that build Sphinx or execute snippets/examples end to end.",
 ]
 filterwarnings = [
+    # Text I/O without an explicit `encoding` follows the locale, which is UTF-8
+    # on Linux and macOS but cp1252 on Windows -- so a manifest written on one
+    # platform can be unreadable on another. Only emitted under
+    # PYTHONWARNDEFAULTENCODING=1, which CI sets; harmless locally without it.
+    "ignore::EncodingWarning",
+    "error::EncodingWarning:audiotree",
+    "error::EncodingWarning:tests",
     "ignore:.*aifc.*:DeprecationWarning:audioread.rawread",
     "ignore:.*audioop.*:DeprecationWarning:audioread.rawread",
     "ignore:.*sunau.*:DeprecationWarning:audioread.rawread",

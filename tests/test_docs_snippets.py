@@ -111,7 +111,7 @@ def _preceding_marker(lines: typing.List[str], index: int, pattern: re.Pattern):
 
 
 def _extract(path: pathlib.Path) -> typing.List[Snippet]:
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     snippets = []
     for i, line in enumerate(lines):
         directive = _DIRECTIVE.match(line)
@@ -308,7 +308,7 @@ def test_rst_cross_references_resolve(rst: pathlib.Path):
     dead = sorted(
         {
             match.group("target")
-            for match in _ROLE.finditer(rst.read_text())
+            for match in _ROLE.finditer(rst.read_text(encoding="utf-8"))
             if not _resolves(match.group("target"))
         }
     )
@@ -346,6 +346,7 @@ def test_docs_build_resolves_audiotree_references(tmp_path):
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=REPO_ROOT / "docs",
     )
     assert result.returncode == 0, f"docs build failed:\n{result.stderr}"
@@ -457,6 +458,7 @@ def test_rst_python_blocks_execute(page: pathlib.Path, corpus):
         [sys.executable, str(pathlib.Path(__file__).resolve()), str(page), str(corpus)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=_PAGE_TIMEOUT_SECONDS,
         cwd=REPO_ROOT,
     )
@@ -478,6 +480,7 @@ def test_example_scripts_run(script: pathlib.Path):
         [sys.executable, str(script)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=script.parent,
     )
     assert result.returncode == 0, f"{script.name} failed:\n{result.stderr}"

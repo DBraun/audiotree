@@ -285,7 +285,7 @@ def load_window_lufs(cache_dir: str | Path) -> WindowLufsCache:
         durations, and the analysis window length.
     """
     cache_dir = Path(cache_dir)
-    with open(cache_dir / _LUFS_MANIFEST) as f:
+    with open(cache_dir / _LUFS_MANIFEST, encoding="utf-8") as f:
         manifest = json.load(f)
     _format.check(
         manifest, _format.LUFS_WINDOWS_CACHE, source=str(cache_dir / _LUFS_MANIFEST)

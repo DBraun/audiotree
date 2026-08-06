@@ -37,7 +37,9 @@ with argbind.scope(args):
     print("SUCCESS")
 """
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".py", delete=False
+        ) as f:
             f.write(script)
             script_path = f.name
 
@@ -46,6 +48,7 @@ with argbind.scope(args):
                 [sys.executable, script_path, "--trim.length=4.0"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=300,
             )
 
@@ -82,7 +85,9 @@ with argbind.scope(args):
     print("SUCCESS")
 """
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".py", delete=False
+        ) as f:
             f.write(script)
             script_path = f.name
 
@@ -96,6 +101,7 @@ with argbind.scope(args):
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=300,
             )
 
@@ -139,7 +145,9 @@ with argbind.scope(args):
     print("SUCCESS")
 """
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".py", delete=False
+        ) as f:
             f.write(script)
             script_path = f.name
 
@@ -154,6 +162,7 @@ with argbind.scope(args):
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=300,
             )
 
@@ -172,7 +181,9 @@ class TestArgBindYAML:
             "trim.length": 4.0,
         }
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".yml", delete=False
+        ) as f:
             yaml.dump(config, f)
             config_path = f.name
 
@@ -197,7 +208,9 @@ with argbind.scope(args):
     print("SUCCESS")
 """
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".py", delete=False
+        ) as f:
             f.write(script)
             script_path = f.name
 
@@ -206,6 +219,7 @@ with argbind.scope(args):
                 [sys.executable, script_path, f"--args.load={config_path}"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=300,
             )
 
@@ -223,7 +237,9 @@ with argbind.scope(args):
             "volume_norm.prob": 0.9,
         }
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".yml", delete=False
+        ) as f:
             yaml.dump(config, f)
             config_path = f.name
 
@@ -253,7 +269,9 @@ with argbind.scope(args):
     print("SUCCESS")
 """
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".py", delete=False
+        ) as f:
             f.write(script)
             script_path = f.name
 
@@ -262,6 +280,7 @@ with argbind.scope(args):
                 [sys.executable, script_path, f"--args.load={config_path}"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=300,
             )
 
@@ -280,7 +299,9 @@ with argbind.scope(args):
             "val/volume_norm.max_db": -20,
         }
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".yml", delete=False
+        ) as f:
             yaml.dump(config, f)
             config_path = f.name
 
@@ -322,7 +343,9 @@ assert abs(train_loudness - val_loudness) > 1.0, "Train and val should use diffe
 print("SUCCESS")
 """
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", suffix=".py", delete=False
+        ) as f:
             f.write(script)
             script_path = f.name
 
@@ -331,6 +354,7 @@ print("SUCCESS")
                 [sys.executable, script_path, f"--args.load={config_path}"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=300,
             )
 
