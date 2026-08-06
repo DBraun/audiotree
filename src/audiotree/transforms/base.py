@@ -1,13 +1,12 @@
 """Base classes for transforms."""
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
-import warnings
 
 from grain.transforms import Map as MapTransform, RandomMap as RandomMapTransform
 import jax
 from jax import random
 from jax.tree import map_with_path
-from jax.tree_util import DictKey
+from jax.tree_util import DictKey, SequenceKey
 import numpy as np
 
 from audiotree import AudioTree
@@ -20,10 +19,51 @@ from audiotree.core import ARRAY_FIELDS
 # these annotations.
 KeyPath = Sequence[Any]
 KeyLeafPairs = Sequence[tuple[KeyPath, Any]]
+# A config entry: where in the element it applies, which parameter it sets, and
+# the value. The value is opaque -- see ``flatten_config``.
+ConfigEntries = Sequence[tuple[KeyPath, str, Any]]
+
+
+def flatten_config(config: Dict[str, Any], parameters: Sequence[str]) -> ConfigEntries:
+    """Flatten a nested config dict into ``(path, parameter, value)`` entries.
+
+    A config mixes two kinds of keys: the names of the transform's parameters,
+    and the keys of the element being transformed (which scope a parameter to a
+    subtree). Recursion therefore stops as soon as a key names a parameter --
+    the value under it is opaque, so a parameter whose value is a dict, a list
+    or ``None`` survives intact instead of being flattened into (or erased
+    from) the surrounding namespace.
+
+    :param config: The user's nested configuration dictionary.
+    :param parameters: The transform's parameter names.
+    :return: One entry per configured parameter.
+    """
+    entries: List[tuple[KeyPath, str, Any]] = []
+
+    def walk(node: Any, path: tuple) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in parameters:
+                    entries.append((path, key, value))
+                else:
+                    walk(value, path + (DictKey(key),))
+        elif isinstance(node, (list, tuple)):
+            for index, value in enumerate(node):
+                walk(value, path + (SequenceKey(index),))
+        else:
+            location = "".join(str(key) for key in path)
+            raise ValueError(
+                f"config{location} is not a parameter of this transform and not "
+                f"a path into the element. Valid parameters: "
+                f"{', '.join(sorted(parameters)) or '(none)'}."
+            )
+
+    walk(config, ())
+    return entries
 
 
 def _get_config_val(
-    config: KeyLeafPairs,
+    config: ConfigEntries,
     lookup_path: KeyPath,
     lookup_key: str,
     default: Any,
@@ -31,18 +71,21 @@ def _get_config_val(
     """
     Retrieve the configuration value for a given key and path.
 
-    :param config: A list of key-leaf pairs from `tree_util.tree_flatten_with_path`.
+    The most specific entry wins: an entry applies when its path is a prefix of
+    the element's path, and the longest such path is used.
+
+    :param config: Entries from `flatten_config`.
     :param lookup_path: Path of the current element.
     :param lookup_key: Configuration key to look up
     :param default: Default value if key is not found
     :return: Configuration value
     """
-    longest_len = 0
+    longest_len = -1
     matched_value = default
-    for config_path, value in config:
-        if config_path[-1].key == lookup_key:
-            L = len(config_path)
-            if config_path[:-1] == lookup_path[: L - 1] and L > longest_len:
+    for config_path, key, value in config:
+        L = len(config_path)
+        if key == lookup_key and L > longest_len:
+            if tuple(config_path) == tuple(lookup_path[:L]):
                 longest_len = L
                 matched_value = value
     return matched_value
@@ -196,6 +239,41 @@ def _select_transformed(new_leaf, old_leaf, mask, xp):
     return old_leaf.replace(**updates)
 
 
+def _mask_transformed(element, new_tree, rngs, draw_mask, xp, is_leaf):
+    """Blend ``new_tree`` back into ``element``, one batch item at a time.
+
+    ``element`` is flattened first so that a leaf the transform dropped (``None``,
+    which is how an out-of-scope leaf is marked when ``output_key`` is set) is
+    carried through untouched rather than exploding as a structure mismatch.
+    """
+
+    def select(old_leaf, new_leaf, leaf_rng):
+        if not isinstance(old_leaf, AudioTree) or not isinstance(new_leaf, AudioTree):
+            return new_leaf
+        mask = draw_mask(leaf_rng, _leaf_batch_size(old_leaf))
+        return _select_transformed(new_leaf, old_leaf, mask, xp)
+
+    return jax.tree.map(select, element, new_tree, rngs, is_leaf=is_leaf)
+
+
+def _spawn_numpy_rngs(
+    rng: np.random.Generator, length: int, split_seed: bool
+) -> List[np.random.Generator]:
+    """One child generator per leaf, drawn from ``rng``.
+
+    With ``split_seed=False`` every child is seeded identically, so all leaves
+    draw the same numbers. Sharing the parent generator itself would not do
+    that: ``np.random.Generator`` is stateful, so each leaf would advance the
+    stream and get a *different* draw — the opposite of what the flag means on
+    the JAX backend, where an immutable key is shared.
+    """
+    if split_seed:
+        seeds = [rng.integers(2**63) for _ in range(length)]
+    else:
+        seeds = [rng.integers(2**63)] * length
+    return [np.random.Generator(np.random.PCG64(seed)) for seed in seeds]
+
+
 def merge_pytree(tree1, tree2):
     """Order matters!"""
 
@@ -301,7 +379,8 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
 
         Args:
             config (Dict[str, Any]): Configuration dictionary for the transform
-            split_seed (bool, optional): Whether to split the seed for each leaf. Defaults to True.
+            split_seed (bool, optional): Whether to give each leaf its own RNG split. When False, every leaf draws
+                identically, which keeps a dry/wet (or input/target) pair in lockstep. Defaults to True.
             prob (float, optional): Probability of applying the transform. Defaults to 1.0.
             scope (Dict[str, Any], optional): Dictionary indicating which modalities to apply the transform to
             output_key (Union[str, Callable[[List[str]], str]], optional): Key under which to store the transformed
@@ -309,7 +388,7 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         """
         assert 0 <= prob <= 1
         self.default_config = self.get_default_config()
-        self.config = jax.tree_util.tree_flatten_with_path(config or {})[0]
+        self.config = flatten_config(config or {}, self.default_config)
         self.split_seed = split_seed
         self.prob = prob
         self.scope = normalize_scope(scope)
@@ -318,10 +397,6 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
             self.output_key = lambda _: output_key
         else:
             self.output_key = output_key
-        if output_key is not None and prob < 1.0:
-            warnings.warn(
-                "You have set a custom `output_key`, but `prob` is less than one. This may result in missing leaves."
-            )
 
     def random_map(
         self, element: Any, rng: Union[np.random.Generator, jax.Array]
@@ -381,24 +456,28 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         config = map_with_path(map_use_default_config_val, element, is_leaf=is_leaf)
 
         new_tree = map_with_path(map_func, element, subkeys, config, is_leaf=is_leaf)
-        new_tree = self._post_process(element, new_tree)
 
-        if self.prob == 1:
-            return new_tree
-
-        # One Bernoulli draw per batch item, per leaf, so a batch is a mixture of
-        # transformed and untransformed items rather than all-or-nothing.
-        prob_keys = jax.tree.unflatten(treedef, random.split(prob_key, length))
-
-        def select(new_leaf, old_leaf, leaf_key):
-            if not isinstance(old_leaf, AudioTree):
-                return old_leaf
-            mask = random.bernoulli(
-                leaf_key, p=self.prob, shape=(_leaf_batch_size(old_leaf),)
+        if self.prob < 1:
+            # One Bernoulli draw per batch item, per leaf, so a batch is a
+            # mixture of transformed and untransformed items rather than
+            # all-or-nothing. `split_seed=False` locks the leaves together here
+            # too, otherwise a dry/wet pair would be decorrelated by the mask
+            # even though both leaves drew the same transform parameters.
+            prob_keys = (
+                random.split(prob_key, length)
+                if self.split_seed
+                else [prob_key] * length
             )
-            return _select_transformed(new_leaf, old_leaf, mask, jax.numpy)
+            prob_keys = jax.tree.unflatten(treedef, prob_keys)
 
-        return jax.tree.map(select, new_tree, element, prob_keys, is_leaf=is_leaf)
+            def draw_mask(leaf_key, batch_size: int):
+                return random.bernoulli(leaf_key, p=self.prob, shape=(batch_size,))
+
+            new_tree = _mask_transformed(
+                element, new_tree, prob_keys, draw_mask, jax.numpy, is_leaf
+            )
+
+        return self._post_process(element, new_tree)
 
     def _random_map_numpy(self, element: Any, rng: np.random.Generator) -> Any:
         """NumPy implementation of random_map."""
@@ -428,39 +507,29 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
 
         element = map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
 
-        # Create separate RNGs for each leaf if split_seed is True
         treedef = jax.tree.flatten(element, is_leaf=is_leaf)[1]
         length = treedef.num_leaves
-        if self.split_seed:
-            sub_rngs = [
-                np.random.Generator(np.random.PCG64(rng.integers(2**63)))
-                for _ in range(length)
-            ]
-        else:
-            sub_rngs = [rng] * length
-        sub_rngs = jax.tree.unflatten(treedef, sub_rngs)
+        sub_rngs = jax.tree.unflatten(
+            treedef, _spawn_numpy_rngs(rng, length, self.split_seed)
+        )
 
         config = map_with_path(map_use_default_config_val, element, is_leaf=is_leaf)
 
         new_tree = map_with_path(map_func, element, sub_rngs, config, is_leaf=is_leaf)
-        new_tree = self._post_process(element, new_tree)
 
-        if self.prob == 1:
-            return new_tree
+        if self.prob < 1:
+            prob_rngs = jax.tree.unflatten(
+                treedef, _spawn_numpy_rngs(rng, length, self.split_seed)
+            )
 
-        def select(new_leaf, old_leaf):
-            if not isinstance(old_leaf, AudioTree):
-                return old_leaf
-            batch_size = _leaf_batch_size(old_leaf)
-            mask = rng.random(batch_size) < self.prob
-            if batch_size == 1:
-                # Per-item and per-batch coincide, so select wholesale. This is
-                # the grain data-loader case, and unlike the masked path it also
-                # works for transforms that change the waveform's length.
-                return new_leaf if bool(mask[0]) else old_leaf
-            return _select_transformed(new_leaf, old_leaf, mask, np)
+            def draw_mask(leaf_rng: np.random.Generator, batch_size: int):
+                return leaf_rng.random(batch_size) < self.prob
 
-        return jax.tree.map(select, new_tree, element, is_leaf=is_leaf)
+            new_tree = _mask_transformed(
+                element, new_tree, prob_rngs, draw_mask, np, is_leaf
+            )
+
+        return self._post_process(element, new_tree)
 
 
 class BaseMapTransform(BaseTransformMixIn, MapTransform):
@@ -481,7 +550,7 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
                 value. By default, the values will be transformed in-place.
         """
         self.default_config = self.get_default_config()
-        self.config = jax.tree_util.tree_flatten_with_path(config or {})[0]
+        self.config = flatten_config(config or {}, self.default_config)
         self.scope = normalize_scope(scope)
         if isinstance(output_key, str):
             # redefine it as a function

@@ -361,6 +361,25 @@ class TestCommonTrainingPipelinePattern:
         # Verify reference was not transformed
         assert np.array_equal(result["reference"].lufs, original_ref_loudness)
 
+    def test_split_seed_false_keeps_the_pair_aligned(self):
+        """`split_seed=False` normalizes dry and wet to the *same* loudness.
+
+        The NumPy backend shared one stateful Generator across leaves, so each
+        leaf advanced the stream and drew its own target -- decorrelating the
+        pair the flag is meant to lock together.
+        """
+        waveform = np.random.randn(4, 1, 44100).astype(np.float32) * 0.1
+        batch = {
+            "dry": AudioTree(waveform, 44100).replace_lufs(),
+            "wet": AudioTree(waveform, 44100).replace_lufs(),
+        }
+
+        transform = volume_norm(min_db=-30, max_db=-10, split_seed=False)
+        result = transform.random_map(batch, np.random.default_rng(0))
+
+        np.testing.assert_allclose(result["dry"].lufs, result["wet"].lufs)
+        np.testing.assert_allclose(result["dry"].waveform, result["wet"].waveform)
+
 
 # === scope spellings ===
 

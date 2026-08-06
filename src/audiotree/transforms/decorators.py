@@ -2,7 +2,8 @@
 
 import difflib
 import inspect
-from typing import Any, Callable, Dict, Optional
+import textwrap
+from typing import Any, Callable, Dict, Optional, Sequence
 
 from audiotree.transforms.base import BaseMapTransform, BaseRandomTransform
 
@@ -15,24 +16,59 @@ _RESERVED = ("prob", "split_seed", "scope", "output_key")
 # reject `prob` rather than silently defaulting it.
 _UNSET = object()
 
-_RESERVED_DOCS = """
-    prob: Probability of applying the transform, drawn independently per batch
-        item. Defaults to ``1.0`` (always).
-    split_seed: Give each AudioTree leaf its own RNG split. Defaults to ``True``.
-    scope: Which leaves of a dict-of-AudioTree element to transform. Defaults to
-        ``None`` (all of them). See :ref:`dict_batches`.
-    output_key: Write the result under a new key instead of replacing the input.
-"""
 
-_MAP_RESERVED_DOCS = """
-    scope: Which leaves of a dict-of-AudioTree element to transform. Defaults to
-        ``None`` (all of them). See :ref:`dict_batches`.
-    output_key: Write the result under a new key instead of replacing the input.
-"""
+class _Required:
+    """Placeholder default for a parameter the caller must supply."""
+
+    def __repr__(self) -> str:
+        return "<required>"
+
+
+#: Stands in for a decorated function's no-default parameters in the config, so
+#: they are still advertised, still accepted, and still checked for.
+_REQUIRED = _Required()
+
+#: Google-style ``Args:`` entries for the parameters the decorators add, keyed
+#: by name. Written unindented; ``_reserved_docs`` indents them to match the
+#: docstring they are spliced into.
+_RESERVED_DOC_ENTRIES = {
+    "prob": (
+        "prob: Probability of applying the transform, drawn independently per\n"
+        "    batch item. Defaults to ``1.0`` (always)."
+    ),
+    "split_seed": (
+        "split_seed: Give each AudioTree leaf its own RNG split. With ``False``\n"
+        "    every leaf draws identically, which keeps a dry/wet pair in\n"
+        "    lockstep. Defaults to ``True``."
+    ),
+    "scope": (
+        "scope: Which leaves of a dict-of-AudioTree element to transform.\n"
+        "    Defaults to ``None`` (all of them). See :ref:`dict_batches`."
+    ),
+    "output_key": (
+        "output_key: Write the result under a new key instead of replacing the\n"
+        "    input."
+    ),
+}
+
+
+def _reserved_docs(names: Sequence[str], indent: int) -> str:
+    """Render the reserved ``Args:`` entries at the given indentation."""
+    entries = "\n".join(_RESERVED_DOC_ENTRIES[name] for name in names)
+    return textwrap.indent(entries, " " * indent)
 
 
 def _transform_parameters(fn: Callable, drop: tuple) -> Dict[str, Any]:
-    """The decorated function's own parameters and their defaults."""
+    """The decorated function's own parameters and their defaults.
+
+    A parameter without a default is recorded as ``_REQUIRED`` rather than
+    skipped: it is part of the signature the wrapper publishes, so it has to be
+    accepted, and the wrapper checks that the sentinel was replaced.
+    """
+    variadic = {
+        inspect.Parameter.VAR_POSITIONAL: "*",
+        inspect.Parameter.VAR_KEYWORD: "**",
+    }
     parameters = {}
     for name, param in inspect.signature(fn).parameters.items():
         if name in drop:
@@ -42,7 +78,17 @@ def _transform_parameters(fn: Callable, drop: tuple) -> Dict[str, Any]:
                 f"{fn.__name__} declares a parameter named {name!r}, which the "
                 f"transform decorator reserves. Rename it."
             )
-        if param.default is not inspect.Parameter.empty:
+        if param.kind in variadic:
+            # A transform's parameters are configured by name, so a variadic
+            # one could never receive anything.
+            raise TypeError(
+                f"{fn.__name__} declares {variadic[param.kind]}{name}, which a "
+                f"transform cannot have: its parameters are configured by name. "
+                f"Declare them explicitly."
+            )
+        if param.default is inspect.Parameter.empty:
+            parameters[name] = _REQUIRED
+        else:
             parameters[name] = param.default
     return parameters
 
@@ -68,12 +114,50 @@ def _check_parameter_names(fn_name: str, given, known) -> None:
     )
 
 
-def _synthesize_doc(fn: Callable, drop: tuple, reserved_docs: str) -> Optional[str]:
+#: Google-style section headers, used to find where the ``Args:`` block ends.
+_SECTION_HEADERS = frozenset(
+    (
+        "args",
+        "arguments",
+        "attributes",
+        "example",
+        "examples",
+        "note",
+        "notes",
+        "parameters",
+        "raises",
+        "references",
+        "returns",
+        "see also",
+        "todo",
+        "warning",
+        "warnings",
+        "warns",
+        "yields",
+    )
+)
+
+
+def _header_name(line: str) -> Optional[str]:
+    """The section name if ``line`` is a Google-style header, else ``None``."""
+    stripped = line.strip()
+    if not stripped.endswith(":"):
+        return None
+    name = stripped.rstrip(":").strip().lower()
+    return name if name in _SECTION_HEADERS else None
+
+
+def _synthesize_doc(
+    fn: Callable, drop: tuple, reserved: Sequence[str]
+) -> Optional[str]:
     """Adapt the function's docstring to the constructor it becomes.
 
     The decorated function documents ``audio_tree``/``rng``, which the
     constructor does not accept, and cannot document ``prob``/``scope``/... ,
-    which it does. Drop the former and append the latter.
+    which it does. Drop the former and splice the latter into the ``Args:``
+    block — appending them to the end of the docstring instead put them after
+    ``Returns:`` and ``Example:``, where Napoleon reads them as prose glued to
+    the example rather than as parameters.
     """
     doc = fn.__doc__
     if not doc:
@@ -97,20 +181,51 @@ def _synthesize_doc(fn: Callable, drop: tuple, reserved_docs: str) -> Optional[s
         skipping = False
         kept.append(line)
 
-    doc = "\n".join(kept)
-    if "Args:" in doc:
-        head, _, tail = doc.partition("Args:")
-        return f"{head}Args:{tail.rstrip()}\n{reserved_docs}"
-    return f"{doc.rstrip()}\n\n    Args:\n{reserved_docs}"
+    # Python 3.13 dedents docstrings at compile time and earlier versions do
+    # not, so the indentation of the sections has to be measured, not assumed.
+    body = [line for line in kept[1:] if line.strip()]
+    indent = min((len(line) - len(line.lstrip()) for line in body), default=4)
+
+    args_index = next(
+        (i for i, line in enumerate(kept) if _header_name(line) == "args"), None
+    )
+    if args_index is None:
+        # No Args block of its own: open one just before the first other
+        # section, or at the end if there is none.
+        args_index = next(
+            (i for i, line in enumerate(kept) if _header_name(line) is not None),
+            len(kept),
+        )
+        kept[args_index:args_index] = ["", " " * indent + "Args:"]
+        args_index += 1
+        end = args_index + 1
+    else:
+        # The Args block runs until the next section header.
+        end = next(
+            (
+                i
+                for i in range(args_index + 1, len(kept))
+                if _header_name(kept[i]) is not None
+            ),
+            len(kept),
+        )
+        while end > args_index + 1 and not kept[end - 1].strip():
+            end -= 1
+
+    entries = _reserved_docs(reserved, indent + 4).splitlines()
+    tail = kept[end:]
+    # A section header needs a blank line before it, but not two.
+    separator = [] if (tail and not tail[0].strip()) else [""]
+    return "\n".join(kept[:end] + entries + separator + tail).rstrip() + "\n"
 
 
-def _build_wrapper(fn, base_class, drop, reserved_docs, make_transform):
+def _build_wrapper(fn, base_class, drop, make_transform):
     """Shared machinery for both decorators."""
     param_defaults = _transform_parameters(fn, drop)
     own_parameters = [
         param
         for param in inspect.signature(fn).parameters.values()
-        if param.name not in drop
+        if param.name in param_defaults
     ]
 
     # Defined once, at decoration time. Building it inside the wrapper minted a
@@ -172,6 +287,15 @@ def _build_wrapper(fn, base_class, drop, reserved_docs, make_transform):
 
         _check_parameter_names(fn.__name__, kwargs, param_defaults)
         config = {**param_defaults, **kwargs}
+        # A parameter with no default has to be supplied here; leaving the
+        # sentinel in the config would defer the failure to the first batch,
+        # inside a grain worker.
+        missing = [name for name, value in config.items() if value is _REQUIRED]
+        if missing:
+            raise TypeError(
+                f"{fn.__name__}() missing required parameter(s): "
+                f"{', '.join(repr(name) for name in missing)}."
+            )
 
         instance = FunctionBasedTransform.__new__(FunctionBasedTransform)
         _init_transform(
@@ -194,7 +318,7 @@ def _build_wrapper(fn, base_class, drop, reserved_docs, make_transform):
     wrapper.__name__ = fn.__name__
     wrapper.__qualname__ = fn.__qualname__
     wrapper.__module__ = fn.__module__
-    wrapper.__doc__ = _synthesize_doc(fn, drop, reserved_docs)
+    wrapper.__doc__ = _synthesize_doc(fn, drop, accepted_reserved)
     wrapper.Transform = FunctionBasedTransform
     wrapper.__wrapped__ = fn
     return wrapper
@@ -231,7 +355,9 @@ def random_transform(fn: Callable) -> Callable:
     The returned callable constructs the transform. It takes the function's own
     parameters (positionally or by keyword) plus the keyword-only ``prob``,
     ``split_seed``, ``scope`` and ``output_key``. A misspelled parameter raises
-    ``TypeError`` rather than being silently ignored.
+    ``TypeError`` rather than being silently ignored, as does omitting one that
+    has no default. Parameter values are opaque, so a dict, a list or ``None``
+    is passed through to the function unchanged.
 
     Usage::
 
@@ -247,7 +373,6 @@ def random_transform(fn: Callable) -> Callable:
         fn,
         BaseRandomTransform,
         drop=("audio_tree", "rng"),
-        reserved_docs=_RESERVED_DOCS,
         make_transform=lambda cls, f: setattr(
             cls,
             "_apply_transform",
@@ -268,7 +393,9 @@ def map_transform(fn: Callable) -> Callable:
     The returned callable constructs the transform. It takes the function's own
     parameters (positionally or by keyword) plus the keyword-only ``scope`` and
     ``output_key``. A misspelled parameter raises ``TypeError`` rather than
-    being silently ignored.
+    being silently ignored, as does omitting one that has no default. Parameter
+    values are opaque, so a dict, a list or ``None`` is passed through to the
+    function unchanged.
 
     Usage::
 
@@ -284,7 +411,6 @@ def map_transform(fn: Callable) -> Callable:
         fn,
         BaseMapTransform,
         drop=("audio_tree",),
-        reserved_docs=_MAP_RESERVED_DOCS,
         make_transform=lambda cls, f: setattr(
             cls,
             "_apply_transform",

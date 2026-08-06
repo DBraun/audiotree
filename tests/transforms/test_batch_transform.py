@@ -192,6 +192,39 @@ def test_batch_with_dict_elements():
     assert batch_count == 3
 
 
+def test_prob_lt_one_elements_still_collate():
+    """`prob` < 1 must not make the per-element pytree structure random.
+
+    In a grain pipeline every element is B=1, and the NumPy backend used to
+    shortcut that case by returning the transformed or the original tree
+    wholesale. `volume_norm` populates `lufs`, so the coin flip decided whether
+    the element had one -- and `AudioTree.batch` then died on a mixed batch with
+    an error naming neither the field nor `prob`.
+    """
+    sample_rate = 16000
+    audio_trees = [
+        AudioTree.create(
+            waveform=np.random.randn(1, sample_rate // 10).astype(np.float32) * 0.1,
+            sample_rate=sample_rate,
+            filepath=f"/fake/path/audio_{i:04d}.wav",
+        )
+        for i in range(8)
+    ]
+
+    transform = audiotree.transforms.volume_norm(min_db=-20, max_db=-20, prob=0.5)
+    ds = (
+        grain.MapDataset.source(audio_trees)
+        .random_map(transform, seed=0)
+        .to_iter_dataset()
+        .batch(4, batch_fn=AudioTree.batch)
+    )
+
+    batches = list(ds)
+    assert len(batches) == 2
+    for batch in batches:
+        assert batch.waveform.shape[0] == 4
+
+
 if __name__ == "__main__":
     test_batch_transform_with_dataloader()
     test_batch_with_iter_dataset()

@@ -12,6 +12,7 @@ import pytest
 import audiotree.transforms
 from audiotree import AudioTree
 from audiotree.transforms.base import BaseRandomTransform, BaseMapTransform
+from audiotree.transforms.decorators import map_transform, random_transform
 from audiotree.transforms import (
     identity,
     volume_change,
@@ -62,7 +63,6 @@ class AddSomethingTransform(BaseMapTransform):
 
 @pytest.mark.parametrize("split_seed", [False, True])
 def test_config_001(split_seed: bool):
-
     def make_tree(v: float):
         return AudioTree(np.full(shape=(1, 1, 44_100), fill_value=v), 44_100)
 
@@ -99,7 +99,6 @@ def test_config_001(split_seed: bool):
 
 
 def test_scope():
-
     def make_tree(v: float):
         return AudioTree(np.full(shape=(1, 1, 44_100), fill_value=v), 44_100)
 
@@ -736,21 +735,205 @@ def test_prob_is_drawn_per_batch_item(backend):
     np.testing.assert_allclose(total / (40 * batch_size), 0.5, atol=0.08)
 
 
-def test_prob_lt_one_keeps_one_structure(backend="jax"):
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+@pytest.mark.parametrize("batch_size", [1, 4])
+def test_prob_lt_one_keeps_one_structure(backend, batch_size):
     """The output treedef must not depend on how the coin fell.
 
     A transform that nulls ``lufs`` produces a different structure than the
     input; mixing them per item has to canonicalize, or the results cannot be
-    batched, scanned, or jitted together.
+    batched, scanned, or jitted together. The NumPy backend used to shortcut
+    ``batch_size == 1`` by returning one branch or the other wholesale, which
+    made the structure of every grain element a coin flip.
     """
-    tree = _prob_test_tree("jax", 4)
-    treedefs = {
-        jax.tree.structure(
-            jax_transforms.shift_phase(prob=0.5).random_map(tree, jax.random.key(s))
-        )
-        for s in range(12)
+    lib = jax_transforms if backend == "jax" else audiotree.transforms
+    tree = _prob_test_tree(backend, batch_size)
+
+    def structure(s):
+        seed = jax.random.key(s) if backend == "jax" else np.random.default_rng(s)
+        return jax.tree.structure(lib.shift_phase(prob=0.5).random_map(tree, seed))
+
+    assert len({structure(s) for s in range(12)}) == 1
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_prob_lt_one_with_output_key(backend):
+    """``prob`` < 1 and ``output_key`` together used to be an unconditional crash.
+
+    Masking now happens before the renamed subtree is merged back in, so the
+    new key holds a per-item mixture and the original is left alone.
+    """
+    lib = jax_transforms if backend == "jax" else audiotree.transforms
+    batch_size = 16
+    element = {"src": _prob_test_tree(backend, batch_size)}
+    seed = jax.random.key(0) if backend == "jax" else np.random.default_rng(0)
+
+    out = lib.volume_change(
+        min_db=20, max_db=20, prob=0.5, output_key="modified"
+    ).random_map(element, seed)
+
+    assert set(out) == {"src", "modified"}
+    original = np.asarray(element["src"].waveform)
+    np.testing.assert_allclose(np.asarray(out["src"].waveform), original)
+    # Every item of the new leaf is either transformed (+20 dB) or untouched.
+    ratio = np.asarray(out["modified"].waveform) / original
+    per_item = ratio.reshape(batch_size, -1)[:, 0]
+    assert np.all(np.isclose(per_item, 10.0) | np.isclose(per_item, 1.0))
+    assert 0 < np.isclose(per_item, 10.0).sum() < batch_size
+
+
+# =============================================================================
+# split_seed
+# =============================================================================
+
+
+def _pair_element(backend, batch_size=1):
+    """A ``{"dry": ..., "wet": ...}`` element whose two leaves start identical."""
+    waveform = np.ones((batch_size, 1, 8), dtype=np.float32)
+    if backend == "jax":
+        waveform = jnp.asarray(waveform)
+    return {
+        "dry": AudioTree(waveform, 16000),
+        "wet": AudioTree(waveform, 16000),
     }
-    assert len(treedefs) == 1
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+@pytest.mark.parametrize("split_seed", [False, True])
+def test_split_seed_false_locks_leaves_together(backend, split_seed):
+    """``split_seed=False`` must mean "every leaf draws the same" on both backends.
+
+    The NumPy path shared one *stateful* ``np.random.Generator`` across leaves,
+    so each leaf advanced the stream and drew a different gain -- silently
+    decorrelating the dry/wet pair the flag exists to keep locked.
+    """
+    lib = jax_transforms if backend == "jax" else audiotree.transforms
+    seed = jax.random.key(0) if backend == "jax" else np.random.default_rng(0)
+
+    out = lib.volume_change(min_db=-12, max_db=12, split_seed=split_seed).random_map(
+        _pair_element(backend), seed
+    )
+
+    dry = np.asarray(out["dry"].waveform)
+    wet = np.asarray(out["wet"].waveform)
+    assert np.allclose(dry, wet) == (not split_seed)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_split_seed_false_locks_the_prob_mask(backend):
+    """The Bernoulli mask honors ``split_seed`` too, not just the transform draw.
+
+    Otherwise a locked dry/wet pair is re-decorrelated by the mask as soon as
+    ``prob`` drops below one.
+    """
+    lib = jax_transforms if backend == "jax" else audiotree.transforms
+    batch_size = 16
+    element = _pair_element(backend, batch_size)
+    seed = jax.random.key(0) if backend == "jax" else np.random.default_rng(0)
+
+    out = lib.invert_phase(prob=0.5, split_seed=False).random_map(element, seed)
+
+    dry = np.asarray(out["dry"].waveform)
+    wet = np.asarray(out["wet"].waveform)
+    np.testing.assert_array_equal(dry, wet)
+    # And the mask really is a mixture, so the equality above is not vacuous.
+    flipped = (dry.reshape(batch_size, -1)[:, 0] < 0).sum()
+    assert 0 < flipped < batch_size
+
+
+# =============================================================================
+# transform parameters
+# =============================================================================
+
+
+def test_container_valued_parameters_survive():
+    """Dict/list/None parameter values used to be flattened away or crash.
+
+    ``_get_config_val`` matched on the last key of the flattened config path, so
+    a dict parameter's *inner* key was compared against the parameter name (and
+    leaked into the sibling parameters' namespace), a list parameter crashed on
+    ``SequenceKey.key``, and ``None`` vanished entirely because it is not a
+    pytree leaf.
+    """
+    seen = {}
+
+    @map_transform
+    def withopts(audio_tree, opts={"a": 1}, bands=[200.0, 4000.0], a=99, opt=7):
+        seen.update(opts=opts, bands=bands, a=a, opt=opt)
+        return audio_tree
+
+    tree = AudioTree(np.ones((1, 1, 4), dtype=np.float32), 16000)
+    withopts(opts={"a": 2}, bands=[100.0, 900.0], opt=None).map(tree)
+    assert seen == {"opts": {"a": 2}, "bands": [100.0, 900.0], "a": 99, "opt": None}
+
+    # The inner key of a dict parameter must not leak onto a sibling parameter
+    # of the same name, even when the element has a leaf keyed 'a'.
+    seen.clear()
+    withopts().map({"a": tree})
+    assert seen == {"opts": {"a": 1}, "bands": [200.0, 4000.0], "a": 99, "opt": 7}
+
+
+def test_config_rejects_unknown_leaf():
+    """A config entry that is neither a parameter nor a path is a typo."""
+    with pytest.raises(ValueError, match="not a parameter of this transform"):
+        ReturnConfigTransform(config={"b": {"minvla": -1}})
+
+
+def test_required_parameters_are_supported():
+    """A decorated function may declare parameters with no default.
+
+    They used to be dropped from the allow-list, so passing one raised
+    "unexpected parameter" while omitting it deferred a ``TypeError`` to the
+    first batch -- both contradicting the signature the decorator publishes.
+    """
+
+    @random_transform
+    def myfx(audio_tree, rng, amount, gain=1.0):
+        return audio_tree.replace(waveform=audio_tree.waveform * amount * gain)
+
+    tree = AudioTree(np.full((1, 1, 4), 2.0, dtype=np.float32), 16000)
+    for transform in (myfx(0.5), myfx(amount=0.5)):
+        out = transform.random_map(tree, np.random.default_rng(0))
+        np.testing.assert_allclose(out.waveform, 1.0)
+
+    with pytest.raises(TypeError, match="missing required parameter.*'amount'"):
+        myfx()
+
+    # Keyword-only required parameters work the same way.
+    @random_transform
+    def kwonly(audio_tree, rng, *, amount):
+        return audio_tree.replace(waveform=audio_tree.waveform * amount)
+
+    out = kwonly(amount=0.5).random_map(tree, np.random.default_rng(0))
+    np.testing.assert_allclose(out.waveform, 1.0)
+
+
+def test_variadic_parameters_are_rejected_at_decoration():
+    """`**kwargs` can never be configured, so say so where it is written."""
+    with pytest.raises(TypeError, match=r"declares \*\*extra"):
+
+        @map_transform
+        def variadic(audio_tree, **extra):
+            return audio_tree
+
+
+@pytest.mark.parametrize("name", ["volume_norm", "roll", "mono", "identity"])
+def test_reserved_parameters_are_documented_in_args(name):
+    """The shared parameters belong in the Args block, not after the Example.
+
+    They used to be appended to the very end of the docstring, so Napoleon read
+    them as prose glued to the example and no transform documented them.
+    """
+    transform = getattr(audiotree.transforms, name)
+    doc = transform.__doc__
+    expected = ["scope:", "output_key:"]
+    if issubclass(transform.Transform, BaseRandomTransform):
+        expected = ["prob:", "split_seed:"] + expected
+
+    args_at = doc.index("Args:")
+    example_at = doc.index("Example:")
+    for entry in expected:
+        assert args_at < doc.index(entry) < example_at, entry
 
 
 def test_prob_lt_one_is_jittable():
