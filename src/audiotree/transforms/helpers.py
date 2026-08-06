@@ -168,14 +168,36 @@ def _invert_phase_np(audio_tree: AudioTree) -> AudioTree:
 # =============================================================================
 
 
+def _check_swappable(audio_tree: AudioTree) -> None:
+    """Reject audio with more channels than a swap is defined for.
+
+    Exchanging left and right is defined for stereo, and is the identity for
+    mono (there is only one channel, so the only permutation of the channels is
+    the trivial one). For three or more channels there is no such thing as
+    "the" swap: reversing the channel order, which is what this used to do,
+    turns 5.1 into nonsense rather than swapping its front pair. The channel
+    count is static under ``jax.jit``, so this raises at trace time on either
+    backend.
+    """
+    channels = audio_tree.waveform.shape[1]
+    if channels > 2:
+        raise ValueError(
+            f"swap_stereo is defined for mono (no-op) and stereo audio, but got "
+            f"{channels} channels: which channels to exchange is undefined. Use "
+            f"`mono()` or `stereo()` first if a swap is what you want."
+        )
+
+
 def _swap_stereo_jax(audio_tree: AudioTree) -> AudioTree:
     """JAX implementation of stereo swap."""
+    _check_swappable(audio_tree)
     waveform = jnp.flip(audio_tree.waveform, axis=1)
     return audio_tree.replace(waveform=waveform)
 
 
 def _swap_stereo_np(audio_tree: AudioTree) -> AudioTree:
     """NumPy implementation of stereo swap."""
+    _check_swappable(audio_tree)
     waveform = np.flip(audio_tree.waveform, axis=1)
     return audio_tree.replace(waveform=waveform)
 

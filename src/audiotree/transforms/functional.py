@@ -280,17 +280,24 @@ def swap_stereo(
     audio_tree: AudioTree,
     rng: np.random.Generator,
 ) -> AudioTree:
-    """Swap the channels of stereo audio.
+    """Exchange the left and right channels of stereo audio.
+
+    Mono audio passes through unchanged: with one channel the only possible
+    permutation is the identity. Audio with three or more channels raises,
+    because which pair to exchange is undefined.
 
     For data augmentation, it's common to use prob=0.5 to apply this transform
     probabilistically.
 
     Args:
-        audio_tree: Input audio (must be stereo)
+        audio_tree: Input audio, mono or stereo
         rng: numpy random Generator (unused but required for random_transform)
 
     Returns:
         AudioTree with swapped channels
+
+    Raises:
+        ValueError: If the audio has more than two channels.
 
     Example:
         transform = swap_stereo(prob=0.5)
@@ -409,11 +416,24 @@ class choose(grain.transforms.RandomMap):
     ``audiotree.transforms.jax.choose``. Compose JAX transforms explicitly
     instead.
 
+    This is a hand-written ``grain.transforms.RandomMap``, not a decorated
+    transform, so it does **not** take ``split_seed``, ``scope`` or
+    ``output_key``; scope the transforms handed to it instead. Its ``prob`` is
+    also a single draw for the whole element, not one per batch item as it is
+    for a decorated transform.
+
     Args:
-        \*transforms: Variable number of transforms to choose from
+        \*transforms: Transforms to choose from. Each must be a
+            ``grain.transforms.Map`` or ``grain.transforms.RandomMap`` — which
+            is what every ``audiotree`` transform constructor returns.
         c: Number of transforms to choose
-        weights: Optional probability weights for each transform
+        weights: Optional probability weights for each transform. Must be one
+            weight per transform and sum to 1.
         prob: Probability of applying any transforms at all
+
+    Raises:
+        TypeError: If a positional argument is not a grain transform.
+        ValueError: If ``c``, ``weights`` or ``prob`` are out of range.
 
     Example::
 
@@ -429,34 +449,48 @@ class choose(grain.transforms.RandomMap):
     """
 
     def __init__(self, *transforms, c: int = 1, weights=None, prob: float = 1.0):
-        if weights is not None:
-            assert len(weights) == len(transforms)
-
-        assert c <= len(transforms)
+        for index, transform in enumerate(transforms):
+            if not isinstance(
+                transform, (grain.transforms.Map, grain.transforms.RandomMap)
+            ):
+                raise TypeError(
+                    f"choose() argument {index} is a {type(transform).__name__}, "
+                    f"not a grain Map/RandomMap transform. Pass a constructed "
+                    f"transform, e.g. choose(invert_phase(), swap_stereo())."
+                )
+        if weights is not None and len(weights) != len(transforms):
+            raise ValueError(
+                f"choose() got {len(weights)} weights for {len(transforms)} "
+                f"transforms; there must be exactly one weight per transform."
+            )
+        if not 0 <= c <= len(transforms):
+            raise ValueError(
+                f"choose() cannot pick c={c} of {len(transforms)} transforms."
+            )
+        if not 0 <= prob <= 1:
+            raise ValueError(f"choose() got prob={prob}, which is not in [0, 1].")
 
         self.c = c
         self.weights = weights
-        assert 0 <= prob <= 1
         self.prob = prob
-
         self.transforms = transforms
 
     def random_map(self, element, rng: np.random.Generator):
         if rng.random() >= self.prob:
             return element
 
-        transforms = rng.choice(
-            self.transforms, size=(self.c,), replace=False, p=self.weights
+        # Draw indices rather than letting numpy build an object array out of
+        # the transforms themselves: the transforms stay exactly the objects
+        # that were passed in.
+        indices = rng.choice(
+            len(self.transforms), size=(self.c,), replace=False, p=self.weights
         )
 
-        for transform in transforms:
+        for index in indices:
+            transform = self.transforms[index]
             if isinstance(transform, grain.transforms.Map):
                 element = transform.map(element)
-            elif isinstance(transform, grain.transforms.RandomMap):
-                element = transform.random_map(element, rng)
-            elif hasattr(transform, "np_random_map"):
-                element = transform.np_random_map(element, rng)
             else:
-                element = transform(element, rng)
+                element = transform.random_map(element, rng)
 
         return element

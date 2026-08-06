@@ -5,17 +5,26 @@ from pathlib import Path
 
 import argbind
 import numpy as np
+import pytest
 import soundfile as sf
 
 from audiotree import AudioTree
 from audiotree.sources import create_audio_dataset
+from audiotree.transforms.codec import (
+    AudioCodec,
+    LatentAudioCodec,
+    encode_latents,
+    encode_with_codec,
+)
 from audiotree.transforms.functional import (
+    choose,
     volume_norm,
     volume_change,
     trim,
     invert_phase,
     mono,
     stereo,
+    swap_stereo,
 )
 
 
@@ -194,7 +203,7 @@ class TestDatasetChaining:
             ds = create_audio_dataset(
                 sources=tmpdir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=5.0,
             ).slice(slice(0, 5))
@@ -221,7 +230,7 @@ class TestDatasetChaining:
             ds = create_audio_dataset(
                 sources=tmpdir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=3.0,
             ).slice(slice(0, 5))
@@ -306,7 +315,7 @@ class TestArgBindIntegration:
             ds = create_audio_dataset(
                 sources=tmpdir,
                 shuffle=False,
-                repeat=False,
+                num_epochs=1,
                 sample_rate=44100,
                 duration=5.0,
             ).slice(slice(0, 5))
@@ -369,3 +378,162 @@ class TestDefaultParameters:
         # Verify default length was used
         expected_length = int(1.0 * 44100)
         assert result.waveform.shape[-1] == expected_length
+
+
+def _tree(channels: int = 2, samples: int = 16, sample_rate: int = 16000) -> AudioTree:
+    """A small deterministic AudioTree whose channel ``c`` is filled with ``c + 1``."""
+    values = np.arange(1, channels + 1, dtype=np.float32)
+    waveform = np.tile(values[None, :, None], (1, 1, samples))
+    return AudioTree(waveform=waveform, sample_rate=sample_rate)
+
+
+class TestSwapStereo:
+    """``swap_stereo`` is defined for mono (no-op) and stereo, and nothing else."""
+
+    def test_swaps_stereo(self):
+        result = swap_stereo().random_map(_tree(2), np.random.default_rng(0))
+        np.testing.assert_array_equal(
+            np.asarray(result.waveform), _tree(2).waveform[:, ::-1]
+        )
+
+    def test_mono_passes_through(self):
+        """One channel has only the identity permutation, so this is not an error."""
+        result = swap_stereo().random_map(_tree(1), np.random.default_rng(0))
+        np.testing.assert_array_equal(np.asarray(result.waveform), _tree(1).waveform)
+
+    def test_rejects_more_than_two_channels(self):
+        """Reversing the channel order of a 5.1 mix is not a stereo swap."""
+        with pytest.raises(ValueError, match="4 channels"):
+            swap_stereo().random_map(_tree(4), np.random.default_rng(0))
+
+
+class TestChoose:
+    """``choose`` picks ``c`` of its transforms and applies them."""
+
+    # x10 and x0.1 gains: deterministic (min_db == max_db) and order-independent.
+    def _louder(self):
+        return volume_change(min_db=20.0, max_db=20.0)
+
+    def _quieter(self):
+        return volume_change(min_db=-20.0, max_db=-20.0)
+
+    def test_applies_every_transform_when_c_equals_all(self):
+        audio_tree = _tree()
+        transform = choose(self._louder(), invert_phase(), c=2)
+        result = transform.random_map(audio_tree, np.random.default_rng(0))
+        np.testing.assert_allclose(
+            np.asarray(result.waveform), -10.0 * audio_tree.waveform, rtol=1e-5
+        )
+
+    def test_weights_select_a_transform(self):
+        """A weight of 1.0 pins the choice, so every seed gives the same result."""
+        audio_tree = _tree()
+        transform = choose(self._louder(), self._quieter(), c=1, weights=[1.0, 0.0])
+        for seed in range(5):
+            result = transform.random_map(audio_tree, np.random.default_rng(seed))
+            np.testing.assert_allclose(
+                np.asarray(result.waveform), 10.0 * audio_tree.waveform, rtol=1e-5
+            )
+
+    def test_mixes_map_and_random_map_transforms(self):
+        """A ``Map`` goes through ``.map()``, a ``RandomMap`` through ``.random_map()``."""
+        audio_tree = _tree(samples=16000)
+        transform = choose(trim(length=0.5), invert_phase(), c=2)
+        result = transform.random_map(audio_tree, np.random.default_rng(0))
+        assert result.waveform.shape[-1] == 8000
+        np.testing.assert_allclose(
+            np.asarray(result.waveform), -audio_tree.waveform[..., :8000], rtol=1e-5
+        )
+
+    def test_prob_zero_returns_the_element_untouched(self):
+        audio_tree = _tree()
+        transform = choose(invert_phase(), c=1, prob=0.0)
+        result = transform.random_map(audio_tree, np.random.default_rng(0))
+        assert result is audio_tree
+
+    def test_same_seed_gives_the_same_choice(self):
+        audio_tree = _tree()
+        transform = choose(self._louder(), self._quieter(), c=1)
+        first = transform.random_map(audio_tree, np.random.default_rng(7))
+        second = transform.random_map(audio_tree, np.random.default_rng(7))
+        np.testing.assert_array_equal(
+            np.asarray(first.waveform), np.asarray(second.waveform)
+        )
+
+    def test_rejects_a_non_transform(self):
+        with pytest.raises(TypeError, match="not a grain Map/RandomMap"):
+            choose(invert_phase(), lambda x: x, c=1)
+
+    def test_rejects_choosing_more_transforms_than_it_has(self):
+        with pytest.raises(ValueError, match="c=3"):
+            choose(invert_phase(), c=3)
+
+    def test_rejects_mismatched_weights(self):
+        with pytest.raises(ValueError, match="one weight per transform"):
+            choose(invert_phase(), swap_stereo(), c=1, weights=[1.0])
+
+    def test_rejects_out_of_range_prob(self):
+        with pytest.raises(ValueError, match=r"prob=1.5"):
+            choose(invert_phase(), c=1, prob=1.5)
+
+
+class _EncodeOnlyCodec:
+    """A codec that can only produce codes — it has no latent representation."""
+
+    def encode(self, audio_tree: AudioTree):
+        batch = audio_tree.waveform.shape[0]
+        return np.zeros((batch, 2, 4), dtype=np.int32), None
+
+
+class _LatentOnlyCodec:
+    """A codec that can only produce latents."""
+
+    def encode_to_latent(self, audio_tree: AudioTree):
+        return np.zeros((audio_tree.waveform.shape[0], 8), dtype=np.float32)
+
+
+class TestCodecProtocols:
+    """The codec protocols are runtime-checkable and independent of each other."""
+
+    def test_encode_only_codec_satisfies_audio_codec(self):
+        codec = _EncodeOnlyCodec()
+        assert isinstance(codec, AudioCodec)
+        assert not isinstance(codec, LatentAudioCodec)
+
+    def test_latent_only_codec_satisfies_latent_audio_codec(self):
+        codec = _LatentOnlyCodec()
+        assert isinstance(codec, LatentAudioCodec)
+        assert not isinstance(codec, AudioCodec)
+
+    def test_a_plain_object_satisfies_neither(self):
+        assert not isinstance(object(), AudioCodec)
+        assert not isinstance(object(), LatentAudioCodec)
+
+    def test_encode_only_codec_works_with_its_transform(self):
+        """An encode-only codec is usable, not just expressible."""
+        result = encode_with_codec(_EncodeOnlyCodec()).map(_tree())
+        assert result.codes.shape == (1, 2, 4)
+
+
+class TestCodecTransformScopeAndOutputKey:
+    """``encode_with_codec``/``encode_latents`` take ``scope`` and ``output_key``."""
+
+    def test_scope_limits_which_leaves_are_encoded(self):
+        element = {"dry": _tree(), "wet": _tree()}
+        result = encode_with_codec(_EncodeOnlyCodec(), scope=["wet"]).map(element)
+        assert result["wet"].codes is not None
+        assert result["dry"].codes is None
+
+    def test_output_key_writes_a_new_leaf(self):
+        element = {"dry": _tree()}
+        result = encode_latents(
+            _LatentOnlyCodec(), scope=["dry"], output_key="dry_latents"
+        ).map(element)
+        assert result["dry"].latents is None
+        assert result["dry_latents"].latents.shape == (1, 8)
+
+    def test_defaults_still_encode_everything(self):
+        element = {"dry": _tree(), "wet": _tree()}
+        result = encode_latents(_LatentOnlyCodec()).map(element)
+        assert result["dry"].latents is not None
+        assert result["wet"].latents is not None

@@ -1,49 +1,75 @@
 """Transforms that encode audio with a neural audio codec.
 
 These transforms take a *codec object* — any object implementing the relevant
-part of the :class:`AudioCodec` protocol — rather than a bare function. The
-codec owns its input conventions (resampling to its own rate, channel
-handling) and its output shapes; the transforms simply store what the codec
-returns on the :class:`~audiotree.AudioTree`.
+protocol (:class:`AudioCodec` or :class:`LatentAudioCodec`) — rather than a
+bare function. The codec owns its input conventions (resampling to its own
+rate, channel handling) and its output shapes; the transforms simply store what
+the codec returns on the :class:`~audiotree.AudioTree`.
 
 Both transforms are deterministic ``Map`` transforms intended for on-device
 (JIT) pipelines. They call the codec directly with no internal ``jax.jit``:
 the caller decides where the JIT boundary is.
 """
 
-from typing import Optional, Protocol, Tuple
+from typing import Callable, List, Optional, Protocol, Tuple, Union, runtime_checkable
 
 from jax.typing import ArrayLike
 
 from audiotree import AudioTree
 from audiotree.transforms.decorators import map_transform
 
+#: A ``scope`` argument: a list of paths into a dict element (``["wet"]``,
+#: ``["input.dry"]``) or the nested-dict spelling. See
+#: :func:`~audiotree.transforms.base.normalize_scope`.
+Scope = Optional[Union[list, tuple, dict]]
 
+#: An ``output_key`` argument: a literal key, or a function from the leaf's
+#: full path to the key to write it under.
+OutputKey = Optional[Union[str, Callable[[List[str]], str]]]
+
+
+@runtime_checkable
 class AudioCodec(Protocol):
-    """Structural protocol for neural audio codecs used by these transforms.
+    """Structural protocol for codecs that encode audio to discrete codes.
 
-    A codec may implement either capability (or both); each transform only
-    calls the method it needs:
-
-    - :meth:`encode` — discrete tokens: takes an :class:`~audiotree.AudioTree`
-      and returns ``(codes, scale)``. ``codes`` is an integer array whose
-      shape convention (e.g. ``(batch, codebooks, frames)``) is defined by the
-      codec; ``scale`` is an optional loudness-normalization factor (or
-      ``None`` for codecs that don't rescale).
-    - :meth:`encode_to_latent` — continuous latents: takes an
-      :class:`~audiotree.AudioTree` and returns a latent array.
+    :meth:`encode` takes an :class:`~audiotree.AudioTree` and returns
+    ``(codes, scale)``. ``codes`` is an integer array whose shape convention
+    (e.g. ``(batch, codebooks, frames)``) is defined by the codec; ``scale`` is
+    an optional loudness-normalization factor (or ``None`` for codecs that
+    don't rescale).
 
     The codec is responsible for resampling the input to its own sample rate
     and for its channel handling (e.g. folding stereo into the batch for a
     mono encoder).
+
+    This protocol is ``runtime_checkable``, so ``isinstance(codec, AudioCodec)``
+    reports whether an object supplies ``encode``. It is deliberately separate
+    from :class:`LatentAudioCodec`: a codec that only produces codes satisfies
+    this protocol on its own, and one that does both satisfies both.
     """
 
     def encode(self, audio: AudioTree) -> Tuple[ArrayLike, Optional[ArrayLike]]: ...
 
+
+@runtime_checkable
+class LatentAudioCodec(Protocol):
+    """Structural protocol for codecs that encode audio to continuous latents.
+
+    :meth:`encode_to_latent` takes an :class:`~audiotree.AudioTree` and returns
+    a latent array, whose shape convention is defined by the codec. As with
+    :class:`AudioCodec`, the codec owns resampling and channel handling, and
+    the protocol is ``runtime_checkable``.
+    """
+
     def encode_to_latent(self, audio: AudioTree) -> ArrayLike: ...
 
 
-def encode_with_codec(codec: AudioCodec):
+def encode_with_codec(
+    codec: AudioCodec,
+    *,
+    scope: Scope = None,
+    output_key: OutputKey = None,
+):
     """Create a transform that encodes audio to discrete codes.
 
     Calls ``codec.encode(audio_tree)`` and stores the returned ``codes`` on
@@ -56,10 +82,13 @@ def encode_with_codec(codec: AudioCodec):
     Args:
         codec: Object implementing ``encode(AudioTree) -> (codes, scale)``
             (see :class:`AudioCodec`).
+        scope: Which leaves of a dict-of-AudioTree element to transform.
+            Defaults to ``None`` (all of them).
+        output_key: Write the result under a new key instead of replacing the
+            input.
 
     Returns:
-        Transform for use with ``.map()``, supporting ``scope`` and
-        ``output_key``.
+        Transform for use with ``.map()``.
 
     Example:
         transform = encode_with_codec(codec)
@@ -76,10 +105,15 @@ def encode_with_codec(codec: AudioCodec):
             metadata = {**metadata, "codec_scale": scale}
         return audio_tree.replace(codes=codes, metadata=metadata)
 
-    return _encode_with_codec_transform()
+    return _encode_with_codec_transform(scope=scope, output_key=output_key)
 
 
-def encode_latents(codec: AudioCodec):
+def encode_latents(
+    codec: LatentAudioCodec,
+    *,
+    scope: Scope = None,
+    output_key: OutputKey = None,
+):
     """Create a transform that encodes audio to continuous latents.
 
     Calls ``codec.encode_to_latent(audio_tree)`` and stores the result on
@@ -88,11 +122,14 @@ def encode_latents(codec: AudioCodec):
 
     Args:
         codec: Object implementing ``encode_to_latent(AudioTree) -> latents``
-            (see :class:`AudioCodec`).
+            (see :class:`LatentAudioCodec`).
+        scope: Which leaves of a dict-of-AudioTree element to transform.
+            Defaults to ``None`` (all of them).
+        output_key: Write the result under a new key instead of replacing the
+            input.
 
     Returns:
-        Transform for use with ``.map()``, supporting ``scope`` and
-        ``output_key``.
+        Transform for use with ``.map()``.
 
     Example:
         transform = encode_latents(codec)
@@ -106,4 +143,4 @@ def encode_latents(codec: AudioCodec):
         latents = codec.encode_to_latent(audio_tree)
         return audio_tree.replace(latents=latents)
 
-    return _encode_latents_transform()
+    return _encode_latents_transform(scope=scope, output_key=output_key)

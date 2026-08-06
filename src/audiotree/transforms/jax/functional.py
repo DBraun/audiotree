@@ -168,14 +168,21 @@ def peak_norm(audio_tree: AudioTree) -> AudioTree:
 
 @random_transform
 def swap_stereo(audio_tree: AudioTree, rng: jax.Array) -> AudioTree:
-    """Swap the channels of stereo audio.
+    """Exchange the left and right channels of stereo audio.
+
+    Mono audio passes through unchanged: with one channel the only possible
+    permutation is the identity. Audio with three or more channels raises,
+    because which pair to exchange is undefined.
 
     Args:
-        audio_tree: Input audio (must be stereo)
+        audio_tree: Input audio, mono or stereo
         rng: JAX random key (unused but required for random_transform)
 
     Returns:
         AudioTree with swapped channels
+
+    Raises:
+        ValueError: If the audio has more than two channels.
     """
     return _swap_stereo_jax(audio_tree)
 
