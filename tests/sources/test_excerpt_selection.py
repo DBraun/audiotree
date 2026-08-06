@@ -402,69 +402,134 @@ def test_excerpt_config_is_not_a_pytree():
 
 
 class TestAlignedStemExcerpts:
-    """The recipe documented in ``dict_batches.rst`` under "Loading Aligned Stems".
+    """The recipe in ``dict_batches.rst`` under "Loading Aligned Stems".
 
     Source separation and effect modelling need several files per track excerpted
-    at the *same* offset. Nothing in the API enforces that; it falls out of
-    ``excerpt`` being a pure function of the generator it is handed. These tests
-    pin both halves, because the working version and the broken one differ by a
-    single line and the failure is silent -- misaligned stems still train.
+    at the *same* offset. The guide draws one offset per track, clamps it to the
+    shortest stem, and passes it explicitly to ``from_file`` -- so alignment is a
+    property of the code rather than of the corpus. These tests pin that, and pin
+    the failure of the tempting alternative the guide warns against, because the
+    two differ by a couple of lines and the failure is silent: misaligned stems
+    train perfectly happily and yield a model that cannot separate anything.
     """
 
     STEMS = ("bass", "drums", "other", "vocals")
     SR = 16000
+    DURATION = 0.5
 
-    @pytest.fixture
-    def track(self, tmp_path):
-        """One track whose stems are ramps, so a sample value encodes its offset."""
+    def _write(self, directory, lengths):
+        """Stems as ramps in [0, 1), so a sample's value encodes its offset."""
         import soundfile
 
-        ramp = (np.arange(self.SR * 4, dtype=np.float32) / (self.SR * 4)).copy()
-        for stem in self.STEMS:
-            # FLOAT: the default PCM_16 would clip a ramp and destroy the encoding.
-            soundfile.write(
-                str(tmp_path / f"{stem}.wav"), ramp, self.SR, subtype="FLOAT"
-            )
-        return tmp_path
+        for stem, seconds in lengths.items():
+            ramp = np.arange(int(self.SR * seconds), dtype=np.float32) / (self.SR * 4.0)
+            # FLOAT: the default PCM_16 would clip the ramp and destroy the encoding.
+            soundfile.write(str(directory / f"{stem}.wav"), ramp, self.SR, "FLOAT")
+        return directory
 
-    def _first_samples(self, track, make_rng):
-        return [
+    @pytest.fixture
+    def equal_stems(self, tmp_path):
+        return self._write(tmp_path, {stem: 4.0 for stem in self.STEMS})
+
+    @pytest.fixture
+    def ragged_stems(self, tmp_path):
+        """One stem trimmed short -- a clipped tail, a different encoder."""
+        lengths = dict.fromkeys(self.STEMS, 4.0) | {"vocals": 2.5}
+        return self._write(tmp_path, lengths)
+
+    def _documented_recipe(self, track, rng):
+        """Exactly what the guide tells the reader to write."""
+        import soundfile
+
+        paths = {stem: track / f"{stem}.wav" for stem in self.STEMS}
+        shortest = min(soundfile.info(str(p)).duration for p in paths.values())
+        offset = float(rng.uniform(0.0, max(0.0, shortest - self.DURATION)))
+        return {
+            stem: AudioTree.from_file(
+                path, offset=offset, duration=self.DURATION, sample_rate=self.SR
+            )
+            for stem, path in paths.items()
+        }
+
+    @staticmethod
+    def _starts(stems):
+        return [float(tree.waveform[0, 0, 0]) for tree in stems.values()]
+
+    @pytest.mark.parametrize("trial", range(4))
+    def test_recipe_aligns_equal_length_stems(self, equal_stems, trial):
+        starts = self._starts(
+            self._documented_recipe(equal_stems, np.random.default_rng(trial))
+        )
+        assert len(set(starts)) == 1, f"stems drifted apart: {starts}"
+
+    @pytest.mark.parametrize("trial", range(8))
+    def test_recipe_aligns_ragged_stems_too(self, ragged_stems, trial):
+        """The case the shared-seed shortcut gets silently wrong."""
+        starts = self._starts(
+            self._documented_recipe(ragged_stems, np.random.default_rng(trial))
+        )
+        assert len(set(starts)) == 1, f"stems drifted apart on a ragged track: {starts}"
+
+    def test_recipe_never_reads_past_the_shortest_stem(self, ragged_stems):
+        """Clamping to the shortest stem is what keeps the short one in range."""
+        for trial in range(32):
+            stems = self._documented_recipe(ragged_stems, np.random.default_rng(trial))
+            for name, tree in stems.items():
+                assert tree.samples == int(self.SR * self.DURATION)
+                # A read past end-of-file is zero-padded; the ramp never is.
+                assert float(tree.waveform[0, 0, -1]) > 0.0, (
+                    f"{name} was padded, so its window ran past the end"
+                )
+
+    def test_recipe_still_varies_between_draws(self, equal_stems):
+        """Alignment within a track must not collapse to one offset for all."""
+        starts = [
+            self._starts(
+                self._documented_recipe(equal_stems, np.random.default_rng(trial))
+            )[0]
+            for trial in range(8)
+        ]
+        assert len(set(starts)) > 1, f"every draw gave the same offset: {starts}"
+
+    def test_shared_seed_shortcut_breaks_on_ragged_stems(self, ragged_stems):
+        """Why the guide warns against it: silent misalignment, nothing raised.
+
+        If this ever fails, ``excerpt`` has changed how it clamps and the warning
+        should be revisited -- the recipe above stays correct either way, which is
+        the point of preferring it.
+        """
+        drifted = 0
+        for trial in range(16):
+            seed = np.random.default_rng(trial).integers(2**63)
+            starts = self._starts(
+                {
+                    stem: AudioTree.excerpt(
+                        ragged_stems / f"{stem}.wav",
+                        np.random.default_rng(seed),
+                        duration=self.DURATION,
+                        sample_rate=self.SR,
+                    )
+                    for stem in self.STEMS
+                }
+            )
+            drifted += len(set(starts)) != 1
+        assert drifted > 0, (
+            "expected the shared-seed shortcut to misalign a ragged track; it did "
+            "not, so the warning in dict_batches.rst may be stale"
+        )
+
+    def test_shared_generator_misaligns_even_equal_stems(self, equal_stems):
+        """The worse variant: one generator, advanced by every call."""
+        shared = np.random.default_rng(0)
+        starts = [
             float(
                 AudioTree.excerpt(
-                    track / f"{stem}.wav",
-                    make_rng(),
-                    duration=0.5,
+                    equal_stems / f"{stem}.wav",
+                    shared,
+                    duration=self.DURATION,
                     sample_rate=self.SR,
                 ).waveform[0, 0, 0]
             )
             for stem in self.STEMS
         ]
-
-    @pytest.mark.parametrize("trial", range(4))
-    def test_one_seed_per_track_aligns_every_stem(self, track, trial):
-        seed = np.random.default_rng(trial).integers(2**63)
-        offsets = self._first_samples(track, lambda: np.random.default_rng(seed))
-        assert len(set(offsets)) == 1, f"stems drifted apart: {offsets}"
-
-    def test_a_shared_generator_does_not_align_them(self, track):
-        """The trap: one generator advances on every call, so each stem differs."""
-        shared = np.random.default_rng(0)
-        offsets = self._first_samples(track, lambda: shared)
-        assert len(set(offsets)) == len(self.STEMS), (
-            "expected a shared generator to misalign the stems; if this now "
-            "aligns them, excerpt() stopped consuming the generator and the "
-            "guidance in dict_batches.rst should be revisited"
-        )
-
-    def test_different_tracks_get_different_offsets(self, track):
-        """Alignment within a track must not mean the same offset for every track."""
-        draws = [
-            self._first_samples(
-                track,
-                lambda s=np.random.default_rng(t).integers(2**63): (
-                    np.random.default_rng(s)
-                ),
-            )[0]
-            for t in range(6)
-        ]
-        assert len(set(draws)) > 1, f"every track drew the same offset: {draws}"
+        assert len(set(starts)) == len(self.STEMS), starts

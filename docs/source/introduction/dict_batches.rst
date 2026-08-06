@@ -124,15 +124,13 @@ Loading Aligned Stems
 
 The patterns above assume the dict already exists. Building one from a corpus of
 *stems* — several files per track that must be excerpted at the **same offset**,
-as in source separation or effect modelling — needs one trick, and it is easy to
-get subtly wrong.
+as in source separation or effect modelling — is where alignment is won or lost.
 
-:meth:`~audiotree.AudioTree.excerpt` picks its offset from the ``rng`` you hand
-it. So give every stem of a track a generator seeded identically and they line
-up; hand them all *one* generator and they do not, because each call advances it.
-Draw one seed per track, then build a fresh generator per stem from it:
+Draw the offset **once per track** and pass it explicitly to every stem. Clamp it
+against the *shortest* stem, so no stem can be asked for a window that runs past
+its end:
 
-.. skip-snippet-exec: needs a stem corpus on disk; the mechanism is exercised by the runnable example below.
+.. skip-snippet-exec: needs a stem corpus on disk; the mechanism is tested in tests/sources/test_excerpt_selection.py.
 
 .. code-block:: python
 
@@ -140,6 +138,7 @@ Draw one seed per track, then build a fresh generator per stem from it:
 
     import grain
     import numpy as np
+    import soundfile
     from audiotree import AudioTree
 
     STEMS = ("bass", "drums", "other", "vocals")
@@ -153,18 +152,24 @@ Draw one seed per track, then build a fresh generator per stem from it:
             self.sample_rate = sample_rate
 
         def random_map(self, track_dir: Path, rng: np.random.Generator):
-            # One seed for the track, re-used per stem. `AudioTree.excerpt` is a
-            # pure function of the generator it is given, so identically seeded
-            # generators choose identical offsets -- and the stems stay aligned.
-            seed = rng.integers(2**63)
+            paths = {stem: track_dir / f"{stem}.wav" for stem in STEMS}
+
+            # One offset for the track, clamped to the shortest stem. `.info`
+            # reads the header only (~35 us/file), so this costs nothing next to
+            # decoding the audio -- and it is what makes alignment a property of
+            # the code rather than of the corpus.
+            shortest = min(soundfile.info(str(p)).duration for p in paths.values())
+            latest_start = max(0.0, shortest - self.duration)
+            offset = float(rng.uniform(0.0, latest_start))
+
             return {
-                stem: AudioTree.excerpt(
-                    track_dir / f"{stem}.wav",
-                    np.random.default_rng(seed),
+                stem: AudioTree.from_file(
+                    path,
+                    offset=offset,
                     duration=self.duration,
                     sample_rate=self.sample_rate,
                 )
-                for stem in STEMS
+                for stem, path in paths.items()
             }
 
 
@@ -177,12 +182,42 @@ Draw one seed per track, then build a fresh generator per stem from it:
     )
     stems = ds[0]  # {"bass": AudioTree, "drums": AudioTree, ...}
 
-Three things worth knowing before relying on this:
+Every stem gets the same number, so they are aligned by construction — no
+assumption that the stems are equally long, and no dependence on how any
+randomness is threaded.
 
-- **The stems of a track must be equally long.** The offset is drawn per stem
-  from the same seed, but each call clamps it to *that file's* duration, so a
-  short stem silently lands somewhere else. Datasets that guarantee equal-length
-  stems (MUSDB18-HQ, Slakh2100) are fine; a directory of loose files is not.
+.. warning::
+
+   **Do not align stems by re-seeding** :meth:`~audiotree.AudioTree.excerpt`.
+   It is tempting, because ``excerpt`` is a pure function of the generator it is
+   given, so handing each stem a generator built from one shared seed does
+   produce one shared offset:
+
+   .. skip-snippet-exec: deliberately wrong; its failure mode is pinned by tests/sources/test_excerpt_selection.py instead.
+
+   .. code-block:: python
+
+       seed = rng.integers(2**63)                       # DON'T
+       stems = {
+           stem: AudioTree.excerpt(
+               track_dir / f"{stem}.wav", np.random.default_rng(seed), duration=5.0
+           )
+           for stem in STEMS
+       }
+
+   It works only while every stem is exactly as long as the others. ``excerpt``
+   clamps the offset it draws against *that file's* duration, so the moment one
+   stem is shorter — a trailing silence trimmed, a different encoder, a stem
+   rendered a few samples short — that stem alone lands somewhere else. Nothing
+   raises. Misaligned stems train perfectly happily and produce a model that
+   quietly cannot separate anything.
+
+   The variant that shares one *generator* rather than one seed is worse still:
+   each call advances it, so every stem gets a different offset even on a
+   perfectly regular corpus.
+
+Two more things worth knowing:
+
 - **Sum the stems to get the mixture**, rather than reading a distributed mixture
   file, if the target must be exactly the sum of the inputs. A released mixture
   is mastered and will not be.
@@ -190,8 +225,14 @@ Three things worth knowing before relying on this:
   of stem dicts collapses into one dict of batched trees with no per-key
   handling.
 
+If the header reads ever do show up in a profile, hoist them: durations are a
+pure function of the corpus, so scan once with
+:func:`~audiotree.sources.scan_durations` and pass the mapping into your
+transform instead of calling ``.info`` per item.
+
 Once loaded, ``scope`` selects which stems an augmentation touches, exactly as in
 the patterns above.
+
 
 Using Scope
 -----------
