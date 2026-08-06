@@ -39,6 +39,14 @@ dependency because bagz publishes manylinux x86-64 wheels only — no macOS, no 
 aarch64, nothing for Python 3.14 — and a hard dependency made `pip install audiotree`
 unsatisfiable on those platforms. Everything else works without it.
 
+```bash
+pip install "audiotree[progress]"
+```
+
+The `progress` extra adds [tqdm](https://github.com/tqdm/tqdm), which `AudioWriter`
+requires for `show_progress=True`. `audiotree[all]` is `progress` plus `bagz` wherever
+bagz has a wheel.
+
 ## Quickstart
 
 ```python
@@ -138,11 +146,12 @@ Upgrading from 0.2.x is a breaking change; see the
 }
 ```
 
-See [`CITATION.cff`](CITATION.cff).
+See [`CITATION.cff`](https://github.com/DBraun/audiotree/blob/main/CITATION.cff).
 
 ## License
 
 MIT, with third-party notices for the julius-derived resampler and the
-pyloudnorm-derived loudness code under [`LICENSES/`](LICENSES). The audio fixtures under
-`tests/assets/` are carved out of the MIT grant — the MUSDB18-HQ excerpt is CC BY-NC-SA
-4.0.
+pyloudnorm-derived loudness code under
+[`LICENSES/`](https://github.com/DBraun/audiotree/tree/main/LICENSES). The audio fixtures
+under `tests/assets/` in the repository are carved out of the MIT grant — the MUSDB18-HQ
+excerpt is CC BY-NC-SA 4.0 — and are not part of any published distribution.

@@ -36,7 +36,8 @@ attributes and methods of the classes those names resolve to.
      - ``AudioCodec``, ``identity``, ``mono``, ``stereo``, ``resample``,
        ``volume_change``, ``volume_norm``, ``rescale_audio``, ``peak_norm``,
        ``invert_phase``, ``swap_stereo``, ``corrupt_phase``, ``shift_phase``,
-       ``roll``, ``choose``, ``encode_with_codec``, ``encode_latents``, ``trim``
+       ``roll``, ``choose``, ``encode_with_codec``, ``encode_latents``,
+       ``trim``, ``map_transform``, ``random_transform``
    * - ``audiotree.transforms.jax``
      - the same list, minus ``choose``
 
@@ -54,10 +55,36 @@ is where autodoc finds them. That is a rendering detail.
 
 Also public:
 
-* **The transform calling convention.** Every transform constructor takes its own
-  parameters plus the keyword-only ``scope`` and ``output_key``; random transforms
-  additionally take ``prob`` and ``split_seed``. The resulting object exposes
-  ``.map(...)`` or ``.random_map(...)`` for Grain.
+* **The transform calling convention.** A transform built by
+  ``@map_transform`` or ``@random_transform`` takes its own parameters
+  positionally-or-by-keyword, then keyword-only ``scope`` and ``output_key``;
+  a random transform additionally takes keyword-only ``prob`` and
+  ``split_seed``. The result exposes ``.map(...)`` (map transforms) or
+  ``.random_map(...)`` (random transforms) for Grain.
+
+  Three exports do **not** follow that convention, and passing ``scope`` or
+  ``output_key`` to any of them raises ``TypeError``:
+
+  .. list-table::
+     :header-rows: 1
+     :widths: 34 66
+
+     * - Export
+       - Signature
+     * - ``choose``
+       - ``choose(*transforms, c=1, weights=None, prob=1.0)``. A
+         ``grain.transforms.RandomMap`` subclass written by hand, not a
+         decorated transform: it takes ``prob`` but no ``split_seed``,
+         ``scope`` or ``output_key``. Scope the transforms you hand it
+         instead.
+     * - ``encode_with_codec``, ``encode_latents``
+       - ``encode_with_codec(codec)`` / ``encode_latents(codec)``. Map
+         transforms with a fixed output field (``codes`` and ``latents``),
+         so there is nothing for ``output_key`` to redirect and no ``scope``
+         parameter.
+
+  ``AudioCodec`` is a protocol, not a transform, and is not called this way at
+  all.
 * **The three on-disk formats** — a ``TreeWriter`` directory, an ``AudioWriter``
   NPZ manifest, and a windowed-LUFS cache. See `On-disk formats`_.
 * **The** ``AudioCodec`` **protocol** — ``encode(AudioTree) -> (codes, scale)`` and
@@ -88,18 +115,20 @@ merged, or deleted in any 1.x release without a deprecation cycle:
      - Transform machinery and implementations; import the transforms from
        ``audiotree.transforms`` or ``audiotree.transforms.jax``.
    * - ``audiotree.transforms.decorators``
-     - ``@random_transform`` / ``@map_transform``. See the note below.
+     - Defines ``@map_transform`` / ``@random_transform``, which are **public**
+       — import them from ``audiotree.transforms`` or
+       ``audiotree.transforms.jax``, not from here.
    * - ``audiotree.loudness``, ``audiotree.resample``
      - Loudness and resampling kernels; reach them through ``AudioTree``.
    * - ``audiotree._fs``, ``audiotree._format``, ``audiotree._bagz``
      - Path confinement, on-disk header, and the lazy ``bagz`` import.
 
 .. note::
-   ``@random_transform`` and ``@map_transform`` are the documented way to write
-   your own transform, but they are reachable only through
-   ``audiotree.transforms.decorators`` and appear in no ``__all__``. Treat them as
-   **provisional** in 1.0: usable, and unlikely to change shape, but not yet covered
-   by the deprecation policy below. If you depend on them, pin a minor version.
+   ``@map_transform`` and ``@random_transform`` — the documented way to write your
+   own transform — are exported from both ``audiotree.transforms`` and
+   ``audiotree.transforms.jax`` and are fully covered by the deprecation policy
+   below. Only the module they happen to be defined in
+   (``audiotree.transforms.decorators``) is internal.
 
 Anything not listed as public may also *appear* to work — a private helper is still
 importable. The distinction here is about what changes without warning, not about
@@ -148,7 +177,10 @@ compatible and still be a meso bump if adopting it is real work.
        costs you effort, that is a bug in the release, not in your code.
 
 The version lives in one place — ``audiotree.__version__`` — which
-``pyproject.toml`` and the docs both read.
+``pyproject.toml`` and the docs both read. Two copies exist for humans rather than
+for code (``CITATION.cff`` and the BibTeX block in ``README.md``, which ships in
+the wheel metadata and renders on PyPI); CI's ``version`` job fails the build if
+any of them drift apart, or if a release tag disagrees with all three.
 
 Deprecation policy
 ------------------

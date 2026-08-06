@@ -11,6 +11,54 @@ on:
     types: [published]
 
 jobs:
+  version:
+    # The version is written by hand in four places and there is no build-time
+    # link between any of them. On an ordinary push this compares the three
+    # in-tree copies to each other so drift is found long before release day;
+    # on a published release the tag joins the comparison. `publish` needs this
+    # job, so a mistyped tag cannot reach PyPI -- and the first release is the
+    # one with no "File already exists" error to catch it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Check the version agrees everywhere it is written
+      env:
+        # Empty for pushes and pull requests; the tag for a published release.
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+      run: |
+        python3 - <<'PY'
+        import os, pathlib, re, sys
+
+        SOURCES = {
+            # The single source of truth, read by pyproject.toml via hatchling.
+            "src/audiotree/__init__.py": r'^__version__ = "([^"]+)"',
+            "CITATION.cff": r'^version: "?([^"\s]+?)"?$',
+            # Ships in the wheel METADATA, so it renders on the PyPI page.
+            "README.md": r"^\s*version = \{([^}]+)\},$",
+        }
+
+        found = {}
+        for path, pattern in SOURCES.items():
+            text = pathlib.Path(path).read_text(encoding="utf-8")
+            hits = re.findall(pattern, text, re.MULTILINE)
+            if len(hits) != 1:
+                sys.exit(f"{path}: expected 1 version match for {pattern!r}, got {hits!r}")
+            found[path] = hits[0]
+
+        tag = os.environ.get("RELEASE_TAG", "")
+        if tag:
+            found["the release tag"] = tag.removeprefix("v")
+
+        for path, version in found.items():
+            print(f"{version:<12} {path}")
+        if len(set(found.values())) != 1:
+            sys.exit("Version mismatch: every source listed above must agree.")
+        print("All versions agree.")
+        PY
+
   test:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -19,6 +67,15 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12", "3.13", "3.14"]
+        # The classifiers claim "Operating System :: OS Independent" and the
+        # docs ship a `make.bat`, so Windows has to be tested rather than
+        # assumed -- but the package is pure Python and its only compiled
+        # dependencies (soundfile, jax, scipy) publish Windows wheels, so a
+        # second full column would mostly re-run the same code. One leg on one
+        # version is the cheap way to keep the claim honest.
+        include:
+          - os: windows-latest
+            python-version: "3.13"
 
     steps:
     - name: Checkout code
@@ -38,17 +95,12 @@ jobs:
       if: runner.os == 'macOS'
       run: brew install libsndfile
 
-    # `bagz` publishes manylinux x86-64 wheels only, so the extra is installable
-    # on the Linux runners and not the macOS ones. Installing it where we can
-    # exercises the string-leaf and windowed-LUFS-cache paths instead of
-    # skipping them; the macOS jobs prove the package works without it.
-    - name: Install dependencies (Linux, with bagz)
-      if: runner.os == 'Linux'
-      run: uv sync --extra bagz
-
-    - name: Install dependencies (macOS, no bagz)
-      if: runner.os == 'macOS'
-      run: uv sync
+    # The `all` extra is `progress` (tqdm) plus `bagz` under the markers
+    # describing where bagz publishes wheels, so one command gives the Linux
+    # x86-64 runners the string-leaf and windowed-LUFS-cache coverage and lets
+    # macOS, Windows and Python 3.14 prove the package works without bagz.
+    - name: Install dependencies
+      run: uv sync --extra all
 
     - name: Run tests
       run: uv run pytest
@@ -73,10 +125,54 @@ jobs:
     - name: Install dependencies (lowest allowed versions)
       run: |
         sudo apt-get install libsndfile-dev
-        uv sync --extra bagz --resolution lowest-direct
+        uv sync --extra bagz --extra progress --resolution lowest-direct
 
     - name: Run tests
       run: uv run --no-sync pytest
+
+  test_wheel:
+    # Every leg of `test` runs against an editable `src/` checkout, which tests
+    # the repository rather than the artifact. This job builds the sdist and the
+    # wheel, installs the wheel into a throwaway environment, and runs the suite
+    # from a staging directory outside the repository -- so a file missing from
+    # the distribution fails here instead of on a user's machine.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Install uv and Python
+      uses: astral-sh/setup-uv@v8.3.1
+      with:
+        python-version: "3.13"
+        enable-cache: true
+
+    - name: Build the sdist and wheel
+      run: |
+        sudo apt-get install libsndfile-dev
+        uv build --out-dir "$RUNNER_TEMP/dist"
+        ls -l "$RUNNER_TEMP/dist"
+
+    # The suite is deliberately not shipped in the sdist (see the policy comment
+    # in pyproject.toml), so stage it from the checkout. Staging it *outside*
+    # the repository is the point: run from the repo root and `src/audiotree`
+    # shadows the installed package on `sys.path`, and the job proves nothing.
+    - name: Run the suite against the installed wheel
+      run: |
+        stage="$RUNNER_TEMP/wheel-check"
+        mkdir -p "$stage"
+        # pyproject.toml comes along for its [tool.pytest.ini_options] only;
+        # `src/` deliberately does not.
+        cp -R tests examples docs pyproject.toml "$stage/"
+        cd "$stage"
+        uv venv
+        # `--group dev` reads the staged pyproject.toml, so the test-time
+        # dependencies cannot drift away from what the other jobs use.
+        uv pip install "$RUNNER_TEMP"/dist/*.whl --group dev
+        # Doctests of the *installed* modules, then the unit suite and examples.
+        uv run --no-project pytest --doctest-modules --pyargs audiotree
+        uv run --no-project pytest tests examples
 
   lint:
     runs-on: ubuntu-latest
@@ -142,7 +238,7 @@ jobs:
       uses: actions/deploy-pages@v5
 
   publish:
-    needs: [test, test_lowest_direct, lint, build_docs]
+    needs: [version, test, test_lowest_direct, test_wheel, lint, build_docs]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.event_name == 'release' && github.event.action == 'published'
@@ -163,6 +259,23 @@ jobs:
 
     - name: Build package
       run: uv build
+
+    # The `version` job already refused a tag that disagrees with the sources.
+    # This is the last gate, on the thing actually being uploaded: the filenames
+    # carry the version the backend derived, so a stale build directory or a
+    # checkout of the wrong ref cannot slip past.
+    - name: Assert the built artifacts carry the release version
+      env:
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+      run: |
+        version="${RELEASE_TAG#v}"
+        for artifact in "audiotree-$version.tar.gz" "audiotree-$version-py3-none-any.whl"; do
+          if [ ! -f "dist/$artifact" ]; then
+            echo "::error::dist/$artifact is missing; uv build produced: $(ls dist)"
+            exit 1
+          fi
+        done
+        ls -l dist
 
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,6 +1,13 @@
+# Hatchling rather than setuptools because the sdist's file list is a release
+# decision that belongs in this file. setuptools has no pyproject.toml knob for
+# it -- its sdist silently globs `tests/test*.py`, which shipped 8 of the 28
+# test modules with no `conftest.py` and no `tests/assets/`, i.e. a suite that
+# could only fail. Hatchling's `[tool.hatch.build.targets.sdist]` states the
+# policy explicitly. `hatchling>=1.27` is the floor for PEP 639
+# `license`/`license-files`.
 [build-system]
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
 
 [project]
 name = "audiotree"
@@ -62,6 +69,18 @@ dependencies = [
 # lazily via `audiotree._bagz.require_bagz`, and is needed only for string
 # leaves in TreeWriter/TreeDataSource and for the windowed-LUFS cache.
 bagz = ["bagz>=0.2.0"]
+# `tqdm` is imported lazily by AudioWriter when `show_progress=True`. It was
+# imported but declared nowhere, so the flag was a silent no-op in every
+# environment that had not installed tqdm for some other reason.
+progress = ["tqdm>=4.66"]
+# `all` deliberately does *not* pull the `bagz` extra verbatim: `pip install
+# audiotree[bagz]` is an explicit request that should fail loudly where bagz has
+# no wheel, but `[all]` is a convenience and must stay installable everywhere.
+# Hence the same requirement under the markers describing where bagz publishes.
+all = [
+    "audiotree[progress]",
+    "bagz>=0.2.0; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.14'",
+]
 
 [project.urls]
 Homepage = "https://github.com/DBraun/audiotree"
@@ -73,21 +92,46 @@ Issues = "https://github.com/DBraun/audiotree/issues"
 # unpinned tool resolves to something ancient that cannot even build.
 dev = [
     "argbind-dbraun>=0.6.0",
-    "furo>=2024.1.29",
-    "myst-parser>=2.0",
+    # Docs. `docs/Makefile` shells out to `sphinx-build`, so Sphinx itself has to
+    # be declared -- it used to arrive only as a transitive dependency of furo.
+    # The floor is 8.1: that is the release that substitutes the build year for
+    # `%Y` in `conf.py`'s `copyright`, and 7.4.7 (which the old floors admitted)
+    # renders the literal `%Y` in every page footer.
+    "sphinx>=8.1",
+    "furo>=2024.8.6",  # earlier releases cap sphinx below 8
+    "myst-parser>=4.0",  # earlier releases cap sphinx below 8
     "pre-commit>=3.5",
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    # So `show_progress=True` is actually exercised in this repo's own venv
+    # rather than silently doing nothing.
+    "tqdm>=4.66",
 ]
 
-[tool.setuptools.dynamic]
-version = { attr = "audiotree.__version__" }
+[tool.hatch.version]
+path = "src/audiotree/__init__.py"
 
-[tool.setuptools.package-data]
-audiotree = ["py.typed"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/audiotree"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# Policy: the sdist ships **no tests**. Running them needs `tests/conftest.py`,
+# the `tests/{sources,datasources,transforms}` subpackages and 3.7 MB of audio
+# under `tests/assets/` -- and those assets are carved out of the MIT grant (the
+# MUSDB18-HQ excerpt is CC BY-NC-SA 4.0), so shipping them would make the sdist
+# something a downstream redistributor cannot ship commercially. The suite lives
+# in the git repository, where it is complete and runnable; the `test_wheel` CI
+# job runs it against the built distribution so "not shipped" never means "not
+# exercised". `CHANGELOG.md` and `CITATION.cff` are included because they are
+# what a user reads after `pip download`.
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/audiotree",
+    "/CHANGELOG.md",
+    "/CITATION.cff",
+    "/LICENSE",
+    "/LICENSES",
+    "/README.md",
+]
 
 [tool.pytest.ini_options]
 # Run docstring examples (``>>> ...``) alongside the unit tests so they can't
@@ -97,6 +141,9 @@ where = ["src"]
 # default run let all three rot against renamed API without anything going red.
 addopts = "--doctest-modules"
 testpaths = ["src", "tests", "examples"]
+markers = [
+    "slow: doc checks that build Sphinx or execute snippets/examples end to end.",
+]
 filterwarnings = [
     "ignore:.*aifc.*:DeprecationWarning:audioread.rawread",
     "ignore:.*audioop.*:DeprecationWarning:audioread.rawread",
