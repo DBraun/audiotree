@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from audiotree import AudioTree, AudioWriter
 from audiotree.sources import AudioDataSource
@@ -550,6 +551,114 @@ def test_array_fields_keep_their_batch_axis_and_dtype():
             np.testing.assert_array_equal(
                 batched.codes[i], np.arange(2 * 5, dtype=np.int32).reshape(2, 5) + i
             )
+
+
+def _write_filter_corpus(output_dir, lufs_values, genres):
+    """Write one item per (lufs, genre) pair, each tagged with its genre."""
+    writer = AudioWriter(output_dir)
+    for lufs, genre in zip(lufs_values, genres):
+        writer.write(
+            AudioTree.create(
+                np.zeros((1, 1, 8000), dtype=np.float32),
+                sample_rate=8000,
+                lufs=np.array([lufs], dtype=np.float32),
+            ),
+            tags={"genre": genre},
+        )
+    writer.save_manifest()
+
+
+def test_filters_compose_instead_of_re_reading_the_manifest():
+    """Each ``filter_*`` narrows the receiver, in either order.
+
+    The helpers used to rebuild an AudioDataSource from the manifest with only
+    their own predicate, so a chained call silently returned a *wider* dataset
+    containing exactly the entries the caller had already excluded.
+    """
+    lufs_values = [-30.0, -18.0, -10.0, -25.0]
+    genres = ["rock", "jazz", "rock", "jazz"]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        _write_filter_corpus(output_dir, lufs_values, genres)
+        source = AudioDataSource.from_writer_output(output_dir)
+        assert len(source) == 4
+
+        # tag then lufs: only the loud rock item survives.
+        rock = source.filter_by_tag("genre", "rock")
+        assert len(rock) == 2
+        loud_rock = rock.filter_by_lufs(min_lufs=-20.0)
+        assert [e["tags"]["genre"] for e in loud_rock.get_all_entries()] == ["rock"]
+        assert [e["lufs"] for e in loud_rock.get_all_entries()] == [-10.0]
+
+        # lufs then tag: same result.
+        loud_rock2 = source.filter_by_lufs(min_lufs=-20.0).filter_by_tag(
+            "genre", "rock"
+        )
+        assert [e["lufs"] for e in loud_rock2.get_all_entries()] == [-10.0]
+
+        # The receiver is untouched by the narrowing.
+        assert len(source) == 4
+        assert len(rock) == 2
+
+
+def test_filters_compose_with_constructor_filter_and_num_records():
+    """A constructor ``filter_fn`` and a ``num_records`` cap survive filtering."""
+    lufs_values = [-30.0, -18.0, -10.0, -25.0]
+    genres = ["rock", "jazz", "rock", "jazz"]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        _write_filter_corpus(output_dir, lufs_values, genres)
+
+        # Constructor filter is not dropped by a subsequent helper call.
+        quiet = AudioDataSource.from_writer_output(
+            output_dir, filter_fn=lambda entry: entry["lufs"] < -20.0
+        )
+        assert len(quiet) == 2
+        assert len(quiet.filter_by_lufs(min_lufs=-100.0)) == 2
+
+        # num_records caps the window that filtering sees.
+        capped = AudioDataSource.from_writer_output(output_dir, num_records=2)
+        assert len(capped) == 2
+        rock = capped.filter_by_tag("genre", "rock")
+        assert [e["lufs"] for e in rock.get_all_entries()] == [-30.0]
+
+        # A generic predicate composes the same way.
+        assert len(capped.filter(lambda entry: entry["lufs"] < 0.0)) == 2
+
+
+def test_filter_matching_nothing_raises():
+    """An empty result is an error, matching the constructor's behavior."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        _write_filter_corpus(output_dir, [-30.0, -10.0], ["rock", "rock"])
+        source = AudioDataSource.from_writer_output(output_dir)
+
+        with pytest.raises(ValueError, match="No entries left"):
+            source.filter_by_tag("genre", "polka")
+
+
+def test_non_scalar_tag_value_reports_the_tag():
+    """A container-valued tag cell fails with an actionable error, not a numpy one.
+
+    ``AudioWriter`` accepts any tag value, and the reader's ``value != ""``
+    check used to raise "truth value of an array is ambiguous" -- naming neither
+    the tag nor the manifest, so the file looked permanently unreadable.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        writer = AudioWriter(output_dir)
+        writer.write(
+            AudioTree.create(
+                np.zeros((1, 1, 8000), dtype=np.float32), sample_rate=8000
+            ),
+            tags={"embedding": np.array([1.0, 2.0, 3.0])},
+        )
+        writer.save_manifest()
+
+        with pytest.raises(ValueError, match="non-scalar value for tag 'embedding'"):
+            AudioDataSource.from_writer_output(output_dir)
 
 
 def test_sentinel_values_are_not_dropped():

@@ -1,11 +1,14 @@
 import functools
 import glob
 import os
+import warnings
+import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Literal, Mapping, Optional
 
 import grain
 import numpy as np
+import soundfile
 
 from audiotree import AudioTree
 from audiotree.core import ExcerptConfig
@@ -17,7 +20,7 @@ _default_extensions = [".wav", ".flac"]
 
 
 def find_audio_files(
-    sources: str | List[str],
+    sources: str | Path | List[str | Path],
     extensions: Optional[List[str]] = None,
 ) -> List[str]:
     """Find audio files under one or more directories or glob patterns.
@@ -35,9 +38,14 @@ def find_audio_files(
     **sorted** and de-duplicated, so the order is deterministic across machines
     and filesystems — important for reproducible shuffling.
 
+    A source that matches nothing (a typo, an unmounted drive, an extension that
+    is not in ``extensions``) shrinks the corpus without failing, so each such
+    source raises a :class:`UserWarning` naming it.
+
     Args:
         sources: A path or glob pattern, or a list of them. Each may be a
-            directory (searched recursively), a file, or a glob pattern such as
+            :class:`~pathlib.Path` or ``str`` naming a directory (searched
+            recursively) or a file, or a glob pattern such as
             ``"/mnt/d/musdb18hq/train/*/mixture.wav"``.
         extensions: File extensions to match (e.g. ``[".wav", ".flac"]``).
             Defaults to ``[".wav", ".flac"]``.
@@ -45,7 +53,7 @@ def find_audio_files(
     Returns:
         A sorted, de-duplicated list of matching file paths.
     """
-    if isinstance(sources, str):
+    if isinstance(sources, (str, os.PathLike)):
         sources = [sources]
     if extensions is None:
         extensions = _default_extensions
@@ -57,11 +65,14 @@ def find_audio_files(
 
     filepaths = []
     for source in sources:
-        source = os.path.expandvars(str(Path(source).expanduser()))
+        expanded = os.path.expandvars(str(Path(source).expanduser()))
         # A glob pattern is expanded to its matches; a plain path matches itself.
         matches = (
-            glob.glob(source, recursive=True) if glob.has_magic(source) else [source]
+            glob.glob(expanded, recursive=True)
+            if glob.has_magic(expanded)
+            else [expanded]
         )
+        found = 0
         for match in matches:
             if os.path.isdir(match):
                 for root, dirs, files in os.walk(match):
@@ -72,8 +83,19 @@ def find_audio_files(
                             continue
                         if _has_audio_extension(filename):
                             filepaths.append(os.path.join(root, filename))
+                            found += 1
             elif os.path.isfile(match) and _has_audio_extension(match):
                 filepaths.append(match)
+                found += 1
+        if not found:
+            warnings.warn(
+                f"Source {str(source)!r} (expanded to {expanded!r}) matched no "
+                f"audio files with extensions {sorted(extensions_lower)}. It "
+                "contributes nothing to the dataset -- check the path, the glob "
+                "pattern, and `extensions`.",
+                UserWarning,
+                stacklevel=2,
+            )
     return sorted(set(filepaths))
 
 
@@ -87,6 +109,7 @@ def _load_excerpt(
     | None = "reflect",
     excerpt: ExcerptConfig | None = None,
     source: str | None = None,
+    channels: int | None = None,
 ) -> AudioTree | None:
     """Load one excerpt from ``file_path`` according to ``excerpt``.
 
@@ -105,11 +128,18 @@ def _load_excerpt(
         excerpt: Which part of the file to take; see :class:`ExcerptConfig`.
             Defaults to a random offset.
         source: Optional source group name (e.g., "music", "speech") to store in metadata.
+        channels: Expected channel count. A file with a different count raises,
+            naming the file, instead of letting the mismatch surface as an
+            opaque shape error at batch time. ``None`` disables the check.
 
     Returns:
         The loaded AudioTree, or ``None`` when the loudness search failed and
         ``excerpt.on_failure == "skip"`` (grain drops ``None`` elements at
         ``to_iter_dataset()``).
+
+    Raises:
+        ValueError: If ``channels`` is given and the file has a different number
+            of channels.
     """
     excerpt = excerpt or ExcerptConfig()
     common = dict(
@@ -121,12 +151,32 @@ def _load_excerpt(
     )
 
     if excerpt.strategy == "start":
-        return AudioTree.from_file(file_path, offset=0, **common)
+        tree = AudioTree.from_file(file_path, offset=0, **common)
+    elif excerpt.strategy == "random":
+        tree = AudioTree.excerpt(file_path, rng=rng, **common)
+    else:
+        tree = AudioTree.loudest_excerpt(file_path, rng, excerpt=excerpt, **common)
 
-    if excerpt.strategy == "random":
-        return AudioTree.excerpt(file_path, rng=rng, **common)
+    if tree is not None and channels is not None and tree.num_channels != channels:
+        raise ValueError(
+            f"{file_path} has {tree.num_channels} channels, but this dataset "
+            f"loads {channels}-channel audio. AudioTree.batch cannot collate a "
+            "mixed-channel corpus: pass `mono=True` to mix everything down, "
+            "pass `channels=` to declare the expected count, or exclude the file."
+        )
+    return tree
 
-    return AudioTree.loudest_excerpt(file_path, rng, excerpt=excerpt, **common)
+
+def _probe_channels(file_path: str) -> Optional[int]:
+    """Read one file's channel count from its header, without decoding it.
+
+    Returns ``None`` when the header cannot be read; the real load then reports
+    whatever is wrong with the file, rather than this probe failing first.
+    """
+    try:
+        return int(soundfile.info(file_path).channels)
+    except Exception:  # noqa: BLE001 - any unreadable header just skips the check
+        return None
 
 
 #: The default excerpt policy: a random offset per draw. Shared because
@@ -136,8 +186,8 @@ _DEFAULT_EXCERPT = ExcerptConfig()
 
 
 def create_audio_dataset(
-    sources: List[str] | str | None = None,
-    filepaths: List[str] | None = None,
+    sources: str | Path | List[str | Path] | None = None,
+    filepaths: List[str | Path] | None = None,
     *,
     shuffle: bool = True,
     repeat: bool = False,
@@ -151,6 +201,7 @@ def create_audio_dataset(
     extensions: Optional[List[str]] = None,
     excerpt: ExcerptConfig = _DEFAULT_EXCERPT,
     source: str | None = None,
+    channels: Optional[int] = None,
 ) -> grain.MapDataset:
     """Create a simple MapDataset from audio files.
 
@@ -161,6 +212,7 @@ def create_audio_dataset(
     Args:
         sources: A directory path, file path, or glob pattern (e.g.
             ``"/data/*/mixture.wav"``), or a list of them, containing audio files.
+            Each entry may be a ``str`` or a :class:`~pathlib.Path`.
             See :func:`find_audio_files` for how each entry is resolved.
             Mutually exclusive with ``filepaths`` — provide exactly one.
         filepaths: An explicit list of audio file paths to use instead of searching
@@ -186,6 +238,12 @@ def create_audio_dataset(
             Defaults to a uniformly random offset.
         source: Optional source group name (e.g., "music", "speech") to store in metadata.
             If None, no source metadata is added.
+        channels: Expected channel count of every file, so that a mixed-channel
+            corpus fails at load time with the offending filename instead of at
+            batch time with a shape error. Ignored when ``mono=True`` (everything
+            is one channel then). When None, the count is taken from the header
+            of the first file, which makes the odd stereo file in a mono corpus
+            (or vice versa) name itself.
 
     Returns:
         A grain.MapDataset that loads audio files using random_map for proper RNG seeding.
@@ -260,9 +318,17 @@ def create_audio_dataset(
             )
     else:
         # Use the caller's explicit list as-is (order preserved).
-        filepaths = list(filepaths)
+        filepaths = [os.fspath(filepath) for filepath in filepaths]
         if not filepaths:
             raise ValueError("`filepaths` must be a non-empty list of file paths.")
+
+    # Multi-channel loading needs every file to agree on the channel count, or
+    # collation explodes far from the file that caused it. Take the expected
+    # count from the first file's header (cheap: no decode) unless declared.
+    if mono:
+        channels = None
+    elif channels is None:
+        channels = _probe_channels(filepaths[0])
 
     # Create dataset from list of filepaths
     ds = grain.MapDataset.source(filepaths)
@@ -282,14 +348,43 @@ def create_audio_dataset(
         pad_mode=pad_mode,
         excerpt=excerpt,
         source=source,
+        channels=channels,
     )
     ds = ds.seed(excerpt_seed).random_map(load_fn)
 
     return ds
 
 
+def _derive_group_seed(base_seed: int, group_name: str, role: str) -> int:
+    """Derive a per-group seed from the group's *name* rather than its position.
+
+    Drawing successive seeds from one RNG while iterating a mapping binds each
+    group's stream to its position, so inserting or reordering a group silently
+    swaps entire streams and changes what a run trains on. Hashing the name
+    instead pins a group's stream to that group. ``role`` (``"shuffle"`` vs
+    ``"excerpt"``) keeps the two streams independent even when the base seeds
+    are equal, which is the default since ``excerpt_seed`` falls back to
+    ``shuffle_seed``.
+
+    Args:
+        base_seed: The caller's seed for this role.
+        group_name: Name of the group the seed is for.
+        role: What the seed drives, e.g. ``"shuffle"`` or ``"excerpt"``.
+
+    Returns:
+        A seed in ``[0, 2**31)``.
+    """
+    entropy = [
+        int(base_seed) & 0xFFFFFFFF,
+        zlib.crc32(group_name.encode("utf-8")),
+        zlib.crc32(role.encode("utf-8")),
+    ]
+    state = np.random.SeedSequence(entropy).generate_state(1, dtype=np.uint32)
+    return int(state[0]) & 0x7FFFFFFF
+
+
 def create_balanced_audio_dataset(
-    sources: Mapping[str, List[str]] | None = None,
+    sources: Mapping[str, str | Path | List[str | Path]] | None = None,
     weights: Optional[Mapping[str, float]] = None,
     datasets: Optional[Mapping[str, grain.MapDataset]] = None,
     *,
@@ -299,12 +394,13 @@ def create_balanced_audio_dataset(
     excerpt_seed: int | None = None,
     sample_rate: int = 44_100,
     mono: bool = True,
-    duration: float = 1.0,
+    duration: Optional[float] = None,
     pad_mode: Literal["constant", "edge", "reflect", "symmetric", "wrap"]
     | None = "constant",
     extensions: Optional[List[str]] = None,
     excerpt: ExcerptConfig = _DEFAULT_EXCERPT,
     window_params: Optional["WindowParams"] = None,
+    channels: Optional[int] = None,
 ) -> grain.MapDataset:
     """Create a balanced MapDataset from multiple audio groups and/or pre-constructed datasets.
 
@@ -314,12 +410,14 @@ def create_balanced_audio_dataset(
     loading, ensuring infinite variety in RNG seeds even when files are repeated.
 
     Args:
-        sources: Optional dictionary mapping group names to lists of directories for
-            audio files. At least one of `sources` or `datasets` must be provided.
+        sources: Optional dictionary mapping group names to directories (or globs,
+            or lists of them, as ``str`` or :class:`~pathlib.Path`) of audio
+            files. At least one of `sources` or `datasets` must be non-empty.
         weights: Optional dictionary mapping group names to sampling weights.
             Weights are normalized to sum to 1.0. Groups not in the dict
             default to weight 1.0. If None, all groups are weighted equally.
-            Group names can refer to keys in either `sources` or `datasets`.
+            Every key must name a group in `sources` or `datasets`; an unknown
+            key raises rather than silently leaving its intended group at 1.0.
         datasets: Optional dictionary mapping group names to pre-constructed grain MapDatasets.
             These datasets will be mixed with file-based sources. Useful for combining
             different data sources or including pre-processed datasets.
@@ -330,14 +428,17 @@ def create_balanced_audio_dataset(
             deterministic iteration (e.g., pre-rendering). Does not affect pre-constructed datasets.
         repeat: Whether to repeat the dataset. If False, then the overall length is limited by smallest of the
             underlying datasets. See ``grain.MapDataset.mix``
-        shuffle_seed: Random seed for shuffling file order. Used to initialize an RNG
-            that derives independent seeds for each group and the final mix.
+        shuffle_seed: Random seed for shuffling file order. Each group's own seed is
+            derived from this and the group's *name*, so adding or reordering
+            groups leaves the other groups' streams untouched.
         excerpt_seed: Random seed for excerpt selection (random_map). If None, defaults
-            to shuffle_seed. Used to initialize an RNG that derives independent seeds
-            for each group.
+            to shuffle_seed. Derived per group the same way, and kept independent
+            of the shuffle stream even when the two base seeds are equal.
         sample_rate: Target sample rate for audio files (only applies to file-based sources).
         mono: Whether to convert audio to mono (only applies to file-based sources, 0 or 1).
-        duration: Duration in seconds to load from each file (only applies to file-based sources).
+        duration: Duration in seconds to load from each file (only applies to
+            file-based sources). Defaults to 1.0. Mutually exclusive with
+            ``window_params``, which carries its own ``duration``.
         pad_mode: Padding mode for files shorter than duration (only applies to file-based sources).
             Options: "constant" (zeros), "edge" (repeat edge), "reflect" (mirror),
             "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
@@ -351,7 +452,11 @@ def create_balanced_audio_dataset(
             the group's ``duration``/``alpha``/etc. from the params and the shared
             ``sample_rate``/``mono``/``pad_mode`` here. The group ``weights`` still
             balance across groups, composing multiplicatively with the within-group
-            length weighting. Mutually exclusive with a customized ``excerpt``.
+            length weighting. Mutually exclusive with a customized ``excerpt``
+            and with ``duration``.
+        channels: Expected channel count of every file (only applies to file-based
+            sources built without ``window_params``); see
+            :func:`create_audio_dataset`.
 
     Returns:
         An infinite grain.MapDataset that interleaves items from source groups
@@ -415,6 +520,12 @@ def create_balanced_audio_dataset(
     if sources is None and datasets is None:
         raise ValueError("At least one of 'sources' or 'datasets' must be provided")
 
+    if not sources and not datasets:
+        raise ValueError(
+            "No groups to mix: 'sources' and 'datasets' are both empty "
+            f"(got sources={sources!r}, datasets={datasets!r})."
+        )
+
     if window_params is not None and excerpt != _DEFAULT_EXCERPT:
         raise ValueError(
             "Pass at most one of `window_params` or a customized `excerpt`; "
@@ -422,12 +533,27 @@ def create_balanced_audio_dataset(
             "filtering through `window_params` instead."
         )
 
+    if window_params is not None and duration is not None:
+        raise ValueError(
+            "Pass at most one of `window_params` or `duration`; windowed "
+            "sampling takes its excerpt length from `window_params.duration` "
+            f"(got duration={duration!r}, window_params.duration="
+            f"{window_params.duration!r})."
+        )
+    if duration is None:
+        duration = 1.0
+
+    group_names = list(sources or {}) + list(datasets or {})
+    if weights is not None:
+        unknown = [name for name in weights if name not in group_names]
+        if unknown:
+            raise ValueError(
+                f"Unknown group name(s) in `weights`: {unknown}. Valid group "
+                f"names are: {group_names}."
+            )
+
     if excerpt_seed is None:
         excerpt_seed = shuffle_seed
-
-    # Create RNGs to derive independent seeds for each group
-    shuffle_rng = np.random.default_rng(shuffle_seed)
-    excerpt_rng = np.random.default_rng(excerpt_seed)
 
     all_datasets = []
     all_proportions = []
@@ -450,8 +576,8 @@ def create_balanced_audio_dataset(
                 lufs_window_sec=window_params.lufs_window_sec,
                 shuffle=shuffle,
                 repeat=repeat,
-                shuffle_seed=int(shuffle_rng.integers(2**31)),
-                excerpt_seed=int(excerpt_rng.integers(2**31)),
+                shuffle_seed=_derive_group_seed(shuffle_seed, group_name, "shuffle"),
+                excerpt_seed=_derive_group_seed(excerpt_seed, group_name, "excerpt"),
                 sample_rate=sample_rate,
                 mono=mono,
                 pad_mode=pad_mode,
@@ -463,8 +589,8 @@ def create_balanced_audio_dataset(
                 sources=folders,
                 shuffle=shuffle,
                 repeat=repeat,
-                shuffle_seed=int(shuffle_rng.integers(2**31)),
-                excerpt_seed=int(excerpt_rng.integers(2**31)),
+                shuffle_seed=_derive_group_seed(shuffle_seed, group_name, "shuffle"),
+                excerpt_seed=_derive_group_seed(excerpt_seed, group_name, "excerpt"),
                 sample_rate=sample_rate,
                 mono=mono,
                 duration=duration,
@@ -472,6 +598,7 @@ def create_balanced_audio_dataset(
                 extensions=extensions,
                 excerpt=excerpt,
                 source=group_name,  # Set source metadata to group name
+                channels=channels,
             )
 
         all_datasets.append(ds)

@@ -1,14 +1,21 @@
 """Tests for create_balanced_audio_dataset function."""
 
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Dict
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from audiotree import AudioTree
-from audiotree.sources import create_balanced_audio_dataset
+from audiotree.sources import (
+    WindowParams,
+    create_balanced_audio_dataset,
+    find_audio_files,
+)
+from audiotree.sources.core import _derive_group_seed
 
 
 def _create_test_audio_files(
@@ -361,6 +368,172 @@ class TestCreateBalancedAudioDataset:
                 assert abs(proportion - 0.5) < 0.1, (
                     f"{group_name} proportion {proportion:.3f} should be ~0.5"
                 )
+
+
+class TestBalancedDatasetValidation:
+    """Configuration mistakes must fail loudly instead of silently changing data."""
+
+    def test_per_group_seeds_follow_the_group_name_not_its_position(self):
+        """Reordering or extending `sources` must not disturb a group's stream.
+
+        Seeds used to be drawn positionally from one RNG, so inserting a group
+        (or writing the mapping in a different order) silently handed every
+        later group a different stream -- a different corpus for the same config.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            a_dir = _create_test_audio_files(tmpdir, "a", 8)
+            b_dir = _create_test_audio_files(tmpdir, "b", 8)
+            c_dir = _create_test_audio_files(tmpdir, "c", 8)
+
+            def a_filepaths(sources):
+                ds = create_balanced_audio_dataset(
+                    sources=sources,
+                    sample_rate=44100,
+                    duration=0.5,
+                    shuffle_seed=42,
+                ).slice(slice(0, 60))
+                return [
+                    ds[i].filepath[0] for i in range(len(ds)) if ds[i].source[0] == "a"
+                ]
+
+            baseline = a_filepaths({"a": [a_dir], "b": [b_dir]})
+            assert baseline  # the group is actually represented
+
+            # Same groups, written in the other order.
+            reordered = a_filepaths({"b": [b_dir], "a": [a_dir]})
+            assert reordered == baseline
+
+            # A third group appears. "a" is drawn less often, but the items it
+            # does yield are still the start of the same stream.
+            extended = a_filepaths({"a": [a_dir], "c": [c_dir], "b": [b_dir]})
+            assert extended
+            assert extended == baseline[: len(extended)]
+
+    def test_shuffle_and_excerpt_streams_are_independent(self):
+        """A group's shuffle and excerpt seeds differ even from one base seed."""
+        assert _derive_group_seed(0, "music", "shuffle") != _derive_group_seed(
+            0, "music", "excerpt"
+        )
+        assert _derive_group_seed(0, "music", "shuffle") != _derive_group_seed(
+            0, "speech", "shuffle"
+        )
+        # Deterministic across processes/runs.
+        assert _derive_group_seed(7, "music", "shuffle") == _derive_group_seed(
+            7, "music", "shuffle"
+        )
+
+    def test_duration_with_window_params_raises(self):
+        """`duration` is meaningless under windowed sampling, so it must not be ignored."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            group_dir = _create_test_audio_files(tmpdir, "group1", 2)
+
+            with pytest.raises(ValueError, match="window_params.*duration"):
+                create_balanced_audio_dataset(
+                    sources={"group1": [group_dir]},
+                    duration=0.25,
+                    window_params=WindowParams(duration=1.0),
+                )
+
+    def test_unknown_weight_key_raises(self):
+        """A typo'd group name in `weights` silently dropped that group's weight."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            group1_dir = _create_test_audio_files(tmpdir, "group1", 2)
+            group2_dir = _create_test_audio_files(tmpdir, "group2", 2)
+
+            with pytest.raises(ValueError, match="grpu1"):
+                create_balanced_audio_dataset(
+                    sources={"group1": [group1_dir], "group2": [group2_dir]},
+                    weights={"grpu1": 2.0, "group2": 1.0},
+                    sample_rate=44100,
+                    duration=0.5,
+                )
+
+    def test_empty_sources_raises(self):
+        """An empty mapping used to die inside grain with `min() iterable argument is empty`."""
+        with pytest.raises(ValueError, match="No groups to mix"):
+            create_balanced_audio_dataset(sources={})
+
+        with pytest.raises(ValueError, match="No groups to mix"):
+            create_balanced_audio_dataset(sources={}, datasets={})
+
+    def test_path_sources_are_accepted(self):
+        """`pathlib.Path` works wherever a `str` path does."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            group1_dir = _create_test_audio_files(tmpdir, "group1", 3)
+
+            ds = create_balanced_audio_dataset(
+                sources={"group1": [Path(group1_dir)]},
+                sample_rate=44100,
+                duration=0.5,
+            ).slice(slice(0, 4))
+            assert isinstance(ds[0], AudioTree)
+
+            # A bare Path (not wrapped in a list) is a source too.
+            ds = create_balanced_audio_dataset(
+                sources={"group1": Path(group1_dir)},
+                sample_rate=44100,
+                duration=0.5,
+            ).slice(slice(0, 4))
+            assert isinstance(ds[0], AudioTree)
+
+            assert find_audio_files(Path(group1_dir)) == find_audio_files(group1_dir)
+
+    def test_source_matching_nothing_warns(self):
+        """One typo'd or unmounted path used to shrink the corpus silently."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            group1_dir = _create_test_audio_files(tmpdir, "group1", 2)
+            missing = str(Path(tmpdir) / "not_mounted")
+
+            with pytest.warns(UserWarning, match="not_mounted"):
+                found = find_audio_files([group1_dir, missing])
+            assert len(found) == 2
+
+            with pytest.warns(UserWarning, match="not_mounted"):
+                create_balanced_audio_dataset(
+                    sources={"group1": [group1_dir, missing]},
+                    sample_rate=44100,
+                    duration=0.5,
+                )
+
+    def test_mixed_channel_corpus_names_the_offending_file(self):
+        """A stray stereo file used to blow up at batch time with no filename."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            group_dir = Path(tmpdir) / "group1"
+            group_dir.mkdir()
+            sf.write(
+                str(group_dir / "audio_0.wav"),
+                np.zeros((44100,), dtype=np.float32),
+                44100,
+            )
+            sf.write(
+                str(group_dir / "audio_1.wav"),
+                np.zeros((44100, 2), dtype=np.float32),
+                44100,
+            )
+
+            ds = create_balanced_audio_dataset(
+                sources={"group1": [str(group_dir)]},
+                sample_rate=44100,
+                duration=0.5,
+                mono=False,
+                shuffle=False,
+            ).slice(slice(0, 4))
+
+            with pytest.raises(ValueError, match=r"audio_1\.wav has 2 channels"):
+                for i in range(len(ds)):
+                    _ = ds[i]
+
+            # mono=True mixes everything down, so the corpus loads fine.
+            mono_ds = create_balanced_audio_dataset(
+                sources={"group1": [str(group_dir)]},
+                sample_rate=44100,
+                duration=0.5,
+                mono=True,
+                shuffle=False,
+            ).slice(slice(0, 4))
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                assert all(mono_ds[i].num_channels == 1 for i in range(len(mono_ds)))
 
 
 def _generate_sine_tone(

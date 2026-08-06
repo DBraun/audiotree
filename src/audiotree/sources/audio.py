@@ -1,5 +1,6 @@
 """DataSource for reading AudioWriter outputs with manifest support."""
 
+import copy
 from pathlib import Path
 from typing import Callable, Dict, List, Literal, Optional, SupportsIndex, Union
 
@@ -229,6 +230,18 @@ class AudioDataSource(grain.RandomAccessDataSource):
             for key in tag_keys:
                 tag_key = key[5:]  # Remove 'tags_' prefix
                 value = tag_arrays[key][i]
+                # A tag column is an object array of *scalars*. A container cell
+                # (written by ``AudioWriter(..., tags={...})`` without
+                # complaint) would make the comparison below raise an opaque
+                # "truth value of an array is ambiguous", so name the offender.
+                if isinstance(value, (np.ndarray, list, tuple, set, dict)):
+                    raise ValueError(
+                        f"Manifest {self.manifest_path} stores a non-scalar value "
+                        f"for tag {tag_key!r} in entry {i} "
+                        f"(type {type(value).__name__}). Tag values must be scalars "
+                        "(str, int, float, bool or None); store array-valued "
+                        "information as AudioTree metadata instead."
+                    )
                 if value is not None and value != "":
                     tags[tag_key] = value
 
@@ -364,8 +377,61 @@ class AudioDataSource(grain.RandomAccessDataSource):
         """
         return self.entries.copy()
 
+    def _with_entries(self, entries: List[Dict], description: str) -> "AudioDataSource":
+        """Return a copy of this source restricted to ``entries``.
+
+        The copy shares every loading option (``audio_dir``, ``sample_rate``,
+        ``mono``, ...) but owns its own entry list, so it is a *view* over the
+        already-loaded entries rather than a fresh read of the manifest. That is
+        what makes the ``filter_*`` helpers compose: each one narrows whatever
+        the receiver already contains, including a constructor ``filter_fn`` and
+        a ``num_records`` cap.
+
+        Args:
+            entries: The subset of ``self.entries`` to keep
+            description: Human-readable description of the narrowing, used in the
+                error raised when nothing is left
+
+        Returns:
+            New AudioDataSource over ``entries``
+        """
+        if not entries:
+            raise ValueError(
+                f"No entries left after {description} "
+                f"({len(self.entries)} entries before filtering)."
+            )
+        view = copy.copy(self)
+        view.entries = list(entries)
+        view._length = len(view.entries)
+        return view
+
+    def filter(self, predicate: Callable[[Dict], bool]) -> "AudioDataSource":
+        """Create a new AudioDataSource keeping the entries matching ``predicate``.
+
+        Filtering narrows the *current* entries, so filters compose:
+        ``source.filter(a).filter(b)`` keeps the entries matching both.
+
+        Args:
+            predicate: Function called with a manifest entry, returning whether
+                to keep it
+
+        Returns:
+            New AudioDataSource with the matching entries
+
+        Raises:
+            ValueError: If no entry matches
+        """
+        return self._with_entries(
+            [entry for entry in self.entries if predicate(entry)],
+            "filtering by the given predicate",
+        )
+
     def filter_by_tag(self, tag_name: str, tag_value) -> "AudioDataSource":
         """Create a new AudioDataSource filtered by a specific tag value.
+
+        Narrows the receiver's entries, so this composes with any other filter
+        already applied (including a constructor ``filter_fn`` and a
+        ``num_records`` cap).
 
         Args:
             tag_name: Name of the tag to filter by
@@ -373,20 +439,18 @@ class AudioDataSource(grain.RandomAccessDataSource):
 
         Returns:
             New AudioDataSource with filtered entries
+
+        Raises:
+            ValueError: If no entry has that tag value
         """
 
         def filter_fn(entry):
             tags = entry.get("tags", {})
             return tags.get(tag_name) == tag_value
 
-        return AudioDataSource(
-            manifest_path=self.manifest_path,
-            audio_dir=self.audio_dir,
-            sample_rate=self.sample_rate,
-            mono=self.mono,
-            duration=self.duration,
-            pad_mode=self.pad_mode,
-            filter_fn=filter_fn,
+        return self._with_entries(
+            [entry for entry in self.entries if filter_fn(entry)],
+            f"filtering on tag {tag_name!r} == {tag_value!r}",
         )
 
     def filter_by_lufs(
@@ -397,12 +461,19 @@ class AudioDataSource(grain.RandomAccessDataSource):
         Filters entries based on the 'lufs' field in the manifest.
         Works with manifests created by AudioWriter in NPZ format.
 
+        Narrows the receiver's entries, so this composes with any other filter
+        already applied (including a constructor ``filter_fn`` and a
+        ``num_records`` cap).
+
         Args:
             min_lufs: Minimum loudness in LUFS (inclusive)
             max_lufs: Maximum loudness in LUFS (inclusive)
 
         Returns:
             New AudioDataSource with filtered entries
+
+        Raises:
+            ValueError: If no entry falls in the range
 
         Example:
             Write four items with known per-item loudness so the manifest
@@ -432,6 +503,11 @@ class AudioDataSource(grain.RandomAccessDataSource):
             >>> mid_source = source.filter_by_lufs(min_lufs=-30.0, max_lufs=-15.0)
             >>> len(mid_source)
             3
+
+            Filters compose, so chaining keeps only what matches both:
+
+            >>> len(loud_source.filter_by_lufs(max_lufs=-15.0))
+            1
         """
 
         def filter_fn(entry):
@@ -444,14 +520,9 @@ class AudioDataSource(grain.RandomAccessDataSource):
                 return False
             return True
 
-        return AudioDataSource(
-            manifest_path=self.manifest_path,
-            audio_dir=self.audio_dir,
-            sample_rate=self.sample_rate,
-            mono=self.mono,
-            duration=self.duration,
-            pad_mode=self.pad_mode,
-            filter_fn=filter_fn,
+        return self._with_entries(
+            [entry for entry in self.entries if filter_fn(entry)],
+            f"filtering on lufs in [{min_lufs}, {max_lufs}]",
         )
 
     @classmethod
