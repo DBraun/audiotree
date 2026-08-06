@@ -3,9 +3,10 @@
 import logging
 import os
 import time
+import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import jax
 import jax.tree_util
@@ -40,6 +41,15 @@ _ALLOWED_DTYPES = frozenset(
         "complex128",
     ]
 )
+
+
+OnOverflow = Literal["error", "trim", "grow"]
+
+#: How much bigger a reallocation makes the memmaps, relative to their current
+#: size. Growing to exactly what the current batch needs would re-mmap every
+#: leaf on every subsequent batch; overshooting geometrically amortizes that,
+#: and ``close()`` truncates the slack away.
+_GROWTH_FACTOR = 1.5
 
 
 def _native_dtype(dtype: np.dtype) -> np.dtype:
@@ -205,7 +215,20 @@ class TreeWriter:
 
     Args:
         directory: Directory where memmap files will be written
-        expected_samples: Total number of samples to pre-allocate
+        expected_samples: Number of samples to pre-allocate. This is an
+            allocation hint, not a cap: what happens when more samples are
+            offered is decided by ``on_overflow``. Under-shooting it is always
+            fine -- :meth:`close` truncates the files to what was written.
+        on_overflow: What to do with a batch that does not fit the current
+            allocation.
+
+            * ``"grow"`` (default) reallocates every leaf file to fit and
+              carries on, so ``expected_samples`` really is only a hint.
+            * ``"error"`` raises :class:`ValueError`, naming how many samples
+              were written, allocated and offered.
+            * ``"trim"`` writes as much of the batch as fits and drops the
+              rest, warning with the same counts. Once the allocation is full,
+              every further ``write()`` warns and returns 0.
         metadata: Optional dict of user metadata to store in manifest
         pbar: Optional tqdm progress bar instance. Updated by ``batch_size``
             after each ``write()`` call.
@@ -244,14 +267,24 @@ class TreeWriter:
         directory: Union[str, Path],
         expected_samples: int,
         *,
+        on_overflow: OnOverflow = "grow",
         metadata: Optional[Dict[str, Any]] = None,
         pbar=None,
         close_pbar: bool = False,
         exist_ok: bool = False,
         manifest_interval: float = 5.0,
     ):
+        if on_overflow not in ("error", "trim", "grow"):
+            raise ValueError(
+                f"on_overflow must be 'error', 'trim' or 'grow', got {on_overflow!r}."
+            )
+        if expected_samples < 0:
+            raise ValueError(
+                f"expected_samples must be non-negative, got {expected_samples}."
+            )
         self.directory = Path(directory)
         self.expected_samples = expected_samples
+        self.on_overflow = on_overflow
         self.metadata = metadata or {}
         self.exist_ok = exist_ok
         self.manifest_interval = manifest_interval
@@ -260,6 +293,8 @@ class TreeWriter:
 
         self._manifest_written_at = 0.0
         self._current_index = 0
+        self._allocated_samples = expected_samples
+        self._broken: Optional[str] = None
         self._memmaps: List[np.memmap] = []
         self._leaf_names: List[str] = []
         self._leaf_info: Dict[str, Dict] = {}
@@ -396,7 +431,7 @@ class TreeWriter:
                 "file": path.name,
             }
 
-            full_shape = (self.expected_samples,) + shape_per_sample
+            full_shape = (self._allocated_samples,) + shape_per_sample
             mm = np.memmap(
                 path,
                 dtype=dtype,
@@ -417,6 +452,105 @@ class TreeWriter:
         # directory of orphaned .bin files. `flush()` keeps it current.
         self._write_manifest()
 
+    def _leaf_file(self, name: str) -> Path:
+        """Resolve an already-recorded leaf's file, re-checking containment."""
+        return safe_join(
+            self.directory, self._leaf_info[name]["file"], description="leaf file"
+        )
+
+    def _bytes_per_sample(self, name: str) -> int:
+        """Size on disk of one sample of leaf *name*."""
+        info = self._leaf_info[name]
+        shape_per_sample = info["shape_per_sample"]
+        elems = int(np.prod(shape_per_sample)) if shape_per_sample else 1
+        return elems * np.dtype(info["dtype"]).itemsize
+
+    def _grow(self, required_samples: int):
+        """Reallocate every array leaf so *required_samples* samples fit.
+
+        A memmap is a fixed-size view of a fixed-size file, so growing means
+        extending each ``.bin`` and remapping it. Extending is done with
+        :func:`os.truncate`, which appends zeros without touching -- or even
+        reading -- the bytes already there, so the prefix a reader can see stays
+        exactly what was written: a crash part-way through leaves some leaves
+        extended and some not, all of them still valid for the
+        ``num_samples`` the manifest claims.
+
+        Each leaf's old mapping is released before its file is resized, because
+        Windows refuses to resize a file that is currently mapped.
+
+        Raises:
+            OSError: If a file cannot be extended (a full disk, typically). The
+                writer is then poisoned: everything written so far is still
+                readable and :meth:`close` still finalizes it, but further
+                ``write()`` calls raise rather than silently skipping the leaves
+                whose mappings were lost.
+        """
+        new_allocated = max(
+            required_samples, int(self._allocated_samples * _GROWTH_FACTOR)
+        )
+        try:
+            for i, name in enumerate(self._leaf_names):
+                mm = self._memmaps[i]
+                mm.flush()
+                # Drop every reference so the mapping is closed before the
+                # resize; `del mm` alone would leave the list holding it.
+                del self._memmaps[i]
+                del mm
+
+                path = self._leaf_file(name)
+                shape_per_sample = tuple(self._leaf_info[name]["shape_per_sample"])
+                # max(..., 1): a leaf with a zero-sized dimension needs no bytes,
+                # and an empty file cannot be mapped.
+                os.truncate(path, max(new_allocated * self._bytes_per_sample(name), 1))
+                self._memmaps.insert(
+                    i,
+                    np.memmap(
+                        path,
+                        dtype=np.dtype(self._leaf_info[name]["dtype"]),
+                        mode="r+",
+                        shape=(new_allocated,) + shape_per_sample,
+                    ),
+                )
+        except BaseException:
+            self._broken = (
+                f"TreeWriter failed to grow its memmap files to hold "
+                f"{new_allocated} samples, so some leaves are no longer mapped. "
+                f"The {self._current_index} samples already written remain "
+                f"readable and close() will finalize them, but this writer "
+                f"cannot accept further writes."
+            )
+            raise
+        self._allocated_samples = new_allocated
+
+    def _handle_overflow(self, batch_size: int) -> int:
+        """Apply the ``on_overflow`` policy to a batch that does not fit.
+
+        Returns:
+            How many of the *batch_size* offered samples may be written.
+        """
+        room = max(self._allocated_samples - self._current_index, 0)
+        counts = (
+            f"{self._current_index} written, {self._allocated_samples} allocated "
+            f"(expected_samples={self.expected_samples}), {batch_size} offered"
+        )
+        if self.on_overflow == "error":
+            raise ValueError(
+                f"Batch does not fit the writer's allocation: {counts}. Raise "
+                f"expected_samples, or pass on_overflow='grow' to reallocate as "
+                f"needed or 'trim' to drop the excess."
+            )
+        if self.on_overflow == "grow":
+            self._grow(self._current_index + batch_size)
+            return batch_size
+        warnings.warn(
+            f"TreeWriter is dropping {batch_size - room} of {batch_size} offered "
+            f"samples: {counts}. Pass on_overflow='grow' to reallocate instead, "
+            f"or 'error' to fail.",
+            stacklevel=3,
+        )
+        return room
+
     def write(self, pytree) -> int:
         """Write a batch of samples to the memmap and bagz files.
 
@@ -430,17 +564,23 @@ class TreeWriter:
                 can be a single ``str`` (batch size 1) or ``List[str]``.
 
         Returns:
-            Number of samples written (batch size)
+            Number of samples written. This is the batch size unless
+            ``on_overflow="trim"`` dropped part of the batch, in which case it
+            is smaller (possibly 0) and a warning is issued.
 
         Raises:
-            RuntimeError: If writer is not open, or has been closed
-            ValueError: If shapes don't match or would exceed expected_samples
+            RuntimeError: If writer is not open, has been closed, or could not
+                grow its files for an earlier batch.
+            ValueError: If shapes don't match, or if the batch does not fit the
+                allocation and ``on_overflow="error"``.
         """
         if self._is_closed:
             raise RuntimeError(
                 "Writer is closed; further writes would be silently dropped. "
                 "Create a new TreeWriter."
             )
+        if self._broken is not None:
+            raise RuntimeError(self._broken)
         if not self._is_open:
             raise RuntimeError("Writer is not open. Call open() first.")
 
@@ -467,17 +607,17 @@ class TreeWriter:
         if batch_size is None:
             raise ValueError("Pytree has no leaves.")
 
+        # The allocation is a hint, not a cap: `on_overflow` decides whether an
+        # overshooting batch grows the files, raises, or is trimmed away.
+        if self._current_index + batch_size > self._allocated_samples:
+            writable = self._handle_overflow(batch_size)
+            if writable < batch_size:
+                if writable <= 0:
+                    return 0
+                array_leaves = [leaf[:writable] for leaf in array_leaves]
+                string_data = {k: v[:writable] for k, v in string_data.items()}
+                batch_size = writable
         end_idx = self._current_index + batch_size
-
-        # Trim batch to fit within expected_samples (last batch may overshoot)
-        if end_idx > self.expected_samples:
-            actual_batch = self.expected_samples - self._current_index
-            if actual_batch <= 0:
-                return 0
-            array_leaves = [leaf[:actual_batch] for leaf in array_leaves]
-            string_data = {k: v[:actual_batch] for k, v in string_data.items()}
-            batch_size = actual_batch
-            end_idx = self._current_index + batch_size
 
         # Write array leaves to memmaps
         for i, (mm, leaf) in enumerate(zip(self._memmaps, array_leaves)):
@@ -553,9 +693,11 @@ class TreeWriter:
     def close(self):
         """Close all memmap and bagz files and write manifest.
 
-        If fewer samples were written than ``expected_samples``, the memmap
-        files are truncated to the actual sample count so no disk space is
-        wasted and readers see the correct size.
+        If fewer samples were written than were allocated -- because
+        ``expected_samples`` overshot, or because ``on_overflow="grow"``
+        reallocated with slack -- the memmap files are truncated to the actual
+        sample count so no disk space is wasted and readers see the correct
+        size.
 
         Closing is terminal: the writer cannot be reopened, because its files
         have been truncated to what was already written and its memmaps
@@ -573,24 +715,25 @@ class TreeWriter:
             del mm
         self._memmaps.clear()
 
-        # Truncate memmap files if we wrote fewer samples than allocated
-        if actual_samples < self.expected_samples:
+        # Truncate memmap files if we wrote fewer samples than allocated. Each
+        # file is measured rather than compared against `_allocated_samples`,
+        # so a growth that failed part-way -- leaving leaves at different
+        # allocations -- still ends up with every file exactly num_samples long.
+        if actual_samples < self._allocated_samples:
             logger = logging.getLogger(__name__)
             logger.info(
-                "Wrote %d / %d expected samples; truncating memmap files.",
+                "Wrote %d / %d allocated samples; truncating memmap files.",
                 actual_samples,
-                self.expected_samples,
+                self._allocated_samples,
             )
-            for name in self._leaf_names:
-                filepath = safe_join(
-                    self.directory,
-                    self._leaf_info[name]["file"],
-                    description="leaf file",
-                )
-                shape_per_sample = self._leaf_info[name]["shape_per_sample"]
-                dtype = np.dtype(self._leaf_info[name]["dtype"])
-                elems = int(np.prod(shape_per_sample)) if shape_per_sample else 1
-                actual_bytes = actual_samples * elems * dtype.itemsize
+        for name in self._leaf_names:
+            filepath = safe_join(
+                self.directory,
+                self._leaf_info[name]["file"],
+                description="leaf file",
+            )
+            actual_bytes = actual_samples * self._bytes_per_sample(name)
+            if filepath.stat().st_size > actual_bytes:
                 os.truncate(filepath, actual_bytes)
 
         # Close bagz writers
@@ -612,6 +755,7 @@ class TreeWriter:
         return {
             "samples_written": self._current_index,
             "expected_samples": self.expected_samples,
+            "allocated_samples": self._allocated_samples,
             "output_directory": str(self.directory),
             "leaves": list(self._leaf_names),
             "string_leaves": list(self._string_leaf_names),

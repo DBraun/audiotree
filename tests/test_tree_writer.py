@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -206,14 +207,15 @@ def test_shape_validation():
 
 
 def test_overflow_trimming():
-    """Batch exceeding expected_samples is trimmed to fit."""
+    """on_overflow='trim' trims a batch to fit -- and says so."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         audio = np.arange(30, dtype=np.float32).reshape(3, 1, 10)
         tree = AudioTree(waveform=audio, sample_rate=44100)
 
-        with TreeWriter(output_dir, expected_samples=2) as w:
-            n = w.write(tree)
+        with TreeWriter(output_dir, expected_samples=2, on_overflow="trim") as w:
+            with pytest.warns(UserWarning, match="dropping 1 of 3 offered samples"):
+                n = w.write(tree)
             assert n == 2  # trimmed from 3 to 2
 
         with open(output_dir / "manifest.json", encoding="utf-8") as f:
@@ -230,7 +232,7 @@ def test_overflow_trimming():
 
 
 def test_overflow_returns_zero_when_full():
-    """Writing after expected_samples is reached returns 0."""
+    """Writing to a full 'trim' writer returns 0 -- with a warning, not silence."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
@@ -238,10 +240,215 @@ def test_overflow_returns_zero_when_full():
             sample_rate=44100,
         )
 
-        with TreeWriter(output_dir, expected_samples=2) as w:
+        with TreeWriter(output_dir, expected_samples=2, on_overflow="trim") as w:
             w.write(tree)
-            n = w.write(tree)  # already full
+            with pytest.warns(UserWarning, match="dropping 2 of 2 offered samples"):
+                n = w.write(tree)  # already full
             assert n == 0
+
+
+def test_trim_warning_names_the_counts():
+    """The trim warning must carry written/allocated/offered, not just 'overflow'."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=5, on_overflow="trim") as w:
+            w.write({"x": _f32(1.0, (4, 3))})
+            with pytest.warns(UserWarning) as record:
+                w.write({"x": _f32(2.0, (4, 3))})
+        message = str(record[0].message)
+        assert "4 written" in message
+        assert "5 allocated" in message
+        assert "expected_samples=5" in message
+        assert "4 offered" in message
+
+
+def test_overflow_error_raises_with_counts():
+    """on_overflow='error' refuses the batch and names every count."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=5, on_overflow="error") as w:
+            w.write({"x": _f32(1.0, (4, 3))})
+            with pytest.raises(ValueError) as excinfo:
+                w.write({"x": _f32(2.0, (4, 3))})
+        message = str(excinfo.value)
+        assert "4 written" in message
+        assert "5 allocated" in message
+        assert "expected_samples=5" in message
+        assert "4 offered" in message
+
+
+def test_overflow_error_leaves_the_written_prefix_readable():
+    """A refused batch must not damage what was already written."""
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        writer = TreeWriter(tmpdir, expected_samples=3, on_overflow="error")
+        writer.open()
+        writer.write({"x": _f32(1.0, (2, 3))})
+        with pytest.raises(ValueError):
+            writer.write({"x": _f32(2.0, (2, 3))})
+        writer.close()
+
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 2
+        np.testing.assert_array_equal(source[1]["x"].ravel(), [1.0, 1.0, 1.0])
+
+
+def test_overflow_grows_by_default():
+    """The default policy keeps every offered sample, reallocating as needed.
+
+    ``expected_samples`` is documented as an allocation hint, so an underestimate
+    must not cost data: it used to be trimmed away without a word.
+    """
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=2) as w:  # wildly under-allocated
+            for i in range(3):
+                assert w.write({"x": _f32(float(i), (4, 3))}) == 4
+
+        manifest = json.loads(
+            (Path(tmpdir) / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["num_samples"] == 12
+        assert manifest["expected_samples"] == 2  # the hint, recorded as given
+
+        # close() truncates the growth slack away: the file is exactly 12 samples.
+        assert (Path(tmpdir) / "x.bin").stat().st_size == 12 * 3 * 4
+
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 12
+        for i in range(3):
+            for j in range(4):
+                np.testing.assert_array_equal(
+                    source[i * 4 + j]["x"].ravel(), [float(i)] * 3
+                )
+
+
+def test_grow_preserves_data_across_several_leaves():
+    """Reallocating must not shuffle, zero, or drop any leaf's existing bytes."""
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=1) as w:
+            for i in range(4):
+                w.write(
+                    {
+                        "a": np.full((3, 2), i, dtype=np.int32),
+                        "b": AudioTree(
+                            waveform=np.full((3, 1, 5), float(i), dtype=np.float32),
+                            sample_rate=16000,
+                        ),
+                    }
+                )
+
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 12
+        for i in range(4):
+            sample = source[i * 3]
+            np.testing.assert_array_equal(sample["a"].ravel(), [i, i])
+            np.testing.assert_array_equal(sample["b"].waveform.ravel(), [float(i)] * 5)
+        assert source[0]["b"].sample_rate == 16000
+
+
+def test_grow_from_a_zero_sample_allocation():
+    """expected_samples=0 is a legal hint when the writer may grow."""
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=0) as w:
+            assert w.write({"x": _f32(7.0, (2, 3))}) == 2
+
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 2
+        np.testing.assert_array_equal(source[1]["x"].ravel(), [7.0] * 3)
+
+
+@requires_bagz
+def test_grow_keeps_string_leaves_aligned():
+    """Growing the memmaps must not desynchronize the append-only bagz files."""
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=2) as w:
+            w.write({"s": ["a", "b", "c"], "x": _f32(1.0, (3, 2))})
+            w.write({"s": ["d", "e", "f"], "x": _f32(2.0, (3, 2))})
+
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 6
+        assert [source[i]["s"] for i in range(6)] == list("abcdef")
+        np.testing.assert_array_equal(source[5]["x"].ravel(), [2.0, 2.0])
+
+
+def test_grown_dataset_is_readable_before_close():
+    """A kill between a grow and close() must still leave a readable prefix."""
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        writer = TreeWriter(tmpdir, expected_samples=2, manifest_interval=1e-9)
+        writer.open()
+        for i in range(3):
+            writer.write({"x": _f32(float(i), (4, 3))})
+        # No flush(), no close() -- exactly what a SIGKILL would leave behind.
+        assert len(TreeDataSource(tmpdir)) == 12
+        np.testing.assert_array_equal(
+            TreeDataSource(tmpdir)[11]["x"].ravel(), [2.0] * 3
+        )
+        writer.close()
+
+
+def test_failed_grow_keeps_the_prefix_and_refuses_further_writes(monkeypatch):
+    """A grow that dies half-way must not silently write partial batches after.
+
+    Once a leaf's mapping has been released the writer can no longer store that
+    leaf, so continuing would drop it from every subsequent batch.
+    """
+    from audiotree.sources import TreeDataSource
+    from audiotree import tree_writer as tw
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        writer = TreeWriter(tmpdir, expected_samples=2)
+        writer.open()
+        writer.write({"x": _f32(1.0, (2, 3)), "y": _f32(2.0, (2, 3))})
+
+        real_truncate = os.truncate
+        calls = {"n": 0}
+
+        def flaky_truncate(path, length):
+            calls["n"] += 1
+            if calls["n"] == 2:  # fail while growing the second leaf
+                raise OSError("No space left on device")
+            return real_truncate(path, length)
+
+        monkeypatch.setattr(tw.os, "truncate", flaky_truncate)
+        with pytest.raises(OSError, match="No space left"):
+            writer.write({"x": _f32(3.0, (2, 3)), "y": _f32(4.0, (2, 3))})
+        with pytest.raises(RuntimeError, match="cannot accept further writes"):
+            writer.write({"x": _f32(5.0, (2, 3)), "y": _f32(6.0, (2, 3))})
+
+        monkeypatch.setattr(tw.os, "truncate", real_truncate)
+        writer.close()
+
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 2
+        np.testing.assert_array_equal(source[1]["x"].ravel(), [1.0] * 3)
+        np.testing.assert_array_equal(source[1]["y"].ravel(), [2.0] * 3)
+
+
+def test_get_stats_reports_the_grown_allocation():
+    """get_stats separates the user's hint from the live allocation."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=2) as w:
+            w.write({"x": _f32(1.0, (5, 3))})
+            stats = w.get_stats()
+        assert stats["samples_written"] == 5
+        assert stats["expected_samples"] == 2
+        assert stats["allocated_samples"] >= 5
+
+
+def test_unknown_on_overflow_is_rejected():
+    """A typo'd policy must fail at construction, not silently trim."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with pytest.raises(ValueError, match="on_overflow must be"):
+            TreeWriter(tmpdir, expected_samples=2, on_overflow="truncate")
 
 
 def test_undershoot_truncates_memmaps():
