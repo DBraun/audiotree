@@ -418,10 +418,17 @@ def _build_corpus(root: pathlib.Path) -> pathlib.Path:
 
 
 def _retarget(source: str, corpus: pathlib.Path) -> str:
-    """Point the guides' placeholder corpus paths at the synthetic corpus."""
+    """Point the guides' placeholder corpus paths at the synthetic corpus.
+
+    ``as_posix()``, not ``str()``: the replacement is spliced into a Python
+    string literal, and a Windows path puts backslashes there --
+    ``"C:\\Users\\runneradmin\\..."`` is a SyntaxError from the invalid ``\\U``
+    escape before anything runs. Forward slashes work on Windows too.
+    """
+    prefix = corpus.as_posix()
     for root in _PLACEHOLDER_ROOTS:
-        source = source.replace(f'"{root}/', f'"{corpus}{root}/')
-        source = source.replace(f"'{root}/", f"'{corpus}{root}/")
+        source = source.replace(f'"{root}/', f'"{prefix}{root}/')
+        source = source.replace(f"'{root}/", f"'{prefix}{root}/")
     return source
 
 

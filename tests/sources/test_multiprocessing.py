@@ -1,10 +1,12 @@
 """Tests for multiprocessing/multithreading with audio datasets."""
 
+import sys
 import tempfile
 from pathlib import Path
 
 import grain
 import numpy as np
+import pytest
 import soundfile as sf
 
 from audiotree import AudioTree
@@ -103,6 +105,21 @@ class TestMultithreading:
             assert sources_found == {"group1", "group2"}
 
 
+#: Grain's worker processes hand results to the parent through named shared
+#: memory. On Windows a named mapping is destroyed as soon as its last handle
+#: closes, so by the time the parent attaches the worker has already exited and
+#: `SharedMemory(name=..., create=False)` raises
+#: `FileNotFoundError: [WinError 2] ... 'wnsm_<id>'`. Grain supports Linux and
+#: macOS only -- Windows support is google/grain#793, still open -- so this is
+#: upstream, not something audiotree can work around. Single-process use is
+#: fine on Windows and stays covered by the rest of the suite.
+requires_grain_multiprocessing = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="grain multiprocessing is unsupported on Windows (google/grain#793)",
+)
+
+
+@requires_grain_multiprocessing
 class TestMultiprocessing:
     """Test multiprocessing with mp_prefetch."""
 
@@ -218,6 +235,7 @@ class TestMultiprocessing:
             assert abs(group2_proportion - 0.3) < 0.05
 
 
+@requires_grain_multiprocessing
 class TestCombinedMultithreadingMultiprocessing:
     """Test combining multithreading and multiprocessing."""
 

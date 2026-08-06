@@ -11,6 +11,19 @@ Multiprocessing and Multithreading
 
 AudioTree datasets work seamlessly with Grain's multiprocessing (``mp_prefetch``) and multithreading (``ReadOptions``) for parallel data loading, which can significantly speed up training.
 
+.. note::
+
+   **Multiprocessing is Linux and macOS only.** Grain's workers return results
+   through named shared memory, and Windows destroys a named mapping as soon as
+   its last handle closes -- so the parent fails to attach with
+   ``FileNotFoundError: [WinError 2] ... 'wnsm_<id>'`` once the worker exits.
+   This is `google/grain#793 <https://github.com/google/grain/issues/793>`_,
+   still open upstream, and not something AudioTree can work around.
+
+   Multithreading via ``ReadOptions(num_threads=...)`` is unaffected -- threads
+   share one address space and need no shared memory. On Windows, raise
+   ``num_threads`` instead of adding workers, or run under WSL.
+
 Why Parallel Loading?
 ----------------------
 
