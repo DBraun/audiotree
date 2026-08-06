@@ -860,3 +860,86 @@ def test_manifest_json_is_utf8_regardless_of_locale(tmp_path, monkeypatch):
     )
     with open(path, encoding="utf-8") as f:
         assert json.load(f) == payload
+
+
+def _tiny_dataset(directory, num_samples=64):
+    with TreeWriter(directory=directory, expected_samples=num_samples) as writer:
+        for start in range(0, num_samples, 8):
+            writer.write(
+                {
+                    "waveform": np.arange(8 * 1 * 16, dtype=np.float32).reshape(
+                        8, 1, 16
+                    )
+                    + start,
+                    "lufs": np.arange(start, start + 8, dtype=np.float32),
+                }
+            )
+    return directory
+
+
+def test_leaf_memmaps_are_held_open_and_reused(tmp_path):
+    """One memmap per leaf per process, not one per access.
+
+    Rebuilding the mapping on every ``__getitem__`` cost an open+mmap pair per
+    leaf per item -- roughly 15x on a random-order read.
+    """
+    source = TreeDataSource(directory=_tiny_dataset(tmp_path / "ds"))
+    source[0]
+    first = {name: id(mm) for name, mm in source._leaf_memmaps.items()}
+    assert set(first) == {"waveform", "lufs"}
+
+    for i in range(1, 64):
+        source[i]
+    assert {name: id(mm) for name, mm in source._leaf_memmaps.items()} == first
+
+
+def test_held_memmap_is_not_aliased_by_returned_samples(tmp_path):
+    """Samples are copies, so nothing hands out a view into the shared mapping."""
+    source = TreeDataSource(directory=_tiny_dataset(tmp_path / "ds"))
+    tree = source[3]
+    assert not np.shares_memory(tree["waveform"], source._leaf_memmaps["waveform"])
+
+    tree["waveform"][:] = -1.0
+    assert source[3]["waveform"].max() > 0  # the dataset is untouched
+
+
+def test_concurrent_first_reads_are_consistent(tmp_path):
+    """Grain's prefetch pool opens from many threads at once.
+
+    The lazy open used to be unsynchronized. The window was narrower than it
+    looks -- ``_leaf_names = []`` rebinds rather than clears, so an in-flight
+    iteration keeps the old complete list, and the "opened" flag was already
+    assigned last -- and attempts to provoke a truncated sample (40 leaves, 16
+    threads, a 1us switch interval, 60 trials) never produced one. The open is
+    now built into locals and published under a lock regardless, which makes
+    the remaining window structurally impossible rather than merely unlikely.
+    This test guards that; it is not a reproduction of a demonstrated failure.
+    """
+    import concurrent.futures
+
+    source = TreeDataSource(directory=_tiny_dataset(tmp_path / "ds"))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        trees = list(pool.map(source.__getitem__, range(64)))
+
+    for i, tree in enumerate(trees):
+        assert set(tree) == {"waveform", "lufs"}, f"sample {i} lost a leaf"
+        assert tree["lufs"][0] == float(i)
+
+
+def test_source_survives_a_pickle_round_trip(tmp_path):
+    """Grain spawns workers, so the source is pickled with its handles live.
+
+    A `threading.Lock` cannot be pickled at all and a memmap belongs to the
+    process that made it; both are dropped on the way out and rebuilt on first
+    use in the worker.
+    """
+    import pickle
+
+    source = TreeDataSource(directory=_tiny_dataset(tmp_path / "ds"))
+    expected = source[5]["waveform"]  # open the handles before pickling
+
+    revived = pickle.loads(pickle.dumps(source))
+    assert revived._leaf_memmaps == {}
+    assert not revived._data_files_opened
+    np.testing.assert_array_equal(revived[5]["waveform"], expected)
+    assert revived._leaf_memmaps  # rebuilt on demand

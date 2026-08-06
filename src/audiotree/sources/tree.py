@@ -1,6 +1,7 @@
 """TreeDataSource: pytree-native reader for memory-mapped datasets."""
 
 import json
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, SupportsIndex, Union
 
@@ -257,7 +258,13 @@ class TreeDataSource(RandomAccessDataSource):
         # picklable for grain worker processes.
         self._leaf_names: List[str] = []
         self._bagz_readers: Dict = {}
+        self._leaf_memmaps: Dict[str, np.memmap] = {}
         self._data_files_opened: bool = False
+        # Grain's prefetch pool calls __getitem__ from many threads, so the
+        # lazy open has to be serialized or a reader can observe a half-built
+        # `_leaf_names`. Dropped and rebuilt around pickling -- see
+        # __getstate__/__setstate__.
+        self._open_lock = threading.Lock()
 
     def _load_all_into_memory(self):
         """Load all non-excluded leaves into RAM."""
@@ -292,28 +299,60 @@ class TreeDataSource(RandomAccessDataSource):
         # Mark as opened so lazy path is skipped.
         self._data_files_opened = True
 
-    def _open_data_files(self):
-        """Collect leaf names and open bagz readers, skipping excluded leaves.
+    def _ensure_open(self):
+        """Open this process's memmaps and readers once, safely under threads.
 
-        Array memmaps are reopened per access in ``__getitem__`` (so the OS can
-        reclaim pages between reads); only the leaf names are gathered here.
+        Double-checked: the common case is one attribute read, and the slow
+        path is serialized. ``_data_files_opened`` is assigned last, after every
+        other attribute is fully built, so a thread that sees it ``True``
+        without taking the lock cannot observe a half-built one.
         """
-        self._leaf_names = []
-        for name in self._leaf_info:
+        if self._data_files_opened:
+            return
+        with self._open_lock:
+            if not self._data_files_opened:
+                self._open_data_files()
+
+    def _open_data_files(self):
+        """Open one memmap per array leaf and a reader per string leaf.
+
+        The memmaps are held for the life of the process rather than rebuilt on
+        every access. Rebuilding them was worth roughly 15x on a random-order
+        read (4.4k -> 68k items/s measured), and it bought only the appearance
+        of lower memory: the pages a mapping keeps resident are clean and
+        file-backed, so the kernel evicts them under pressure. RSS does track
+        the working set now, which is the trade -- ``load_into_memory=True``
+        remains the option that makes that cost explicit and up front.
+
+        Callers should use :meth:`_ensure_open`, which handles the locking.
+        """
+        leaf_names: List[str] = []
+        memmaps: Dict[str, np.memmap] = {}
+        for name, info in self._leaf_info.items():
             if _is_excluded(name, self.exclude_prefixes):
                 continue
-            self._leaf_names.append(name)
+            leaf_names.append(name)
+            memmaps[name] = np.memmap(
+                safe_join(self.data_dir, info["file"], description="leaf file"),
+                dtype=np.dtype(info["dtype"]),
+                mode="r",
+                shape=tuple([self._num_samples] + info["shape_per_sample"]),
+            )
 
+        readers: Dict = {}
         for name, info in self._string_leaf_info.items():
             # See _load_all_into_memory: bagz is resolved per included leaf.
             if _is_excluded(name, self.exclude_prefixes):
                 continue
             bagz = require_bagz(f"reading string leaf {name!r} in TreeDataSource")
-            self._bagz_readers[name] = bagz.Reader(
+            readers[name] = bagz.Reader(
                 str(safe_join(self.data_dir, info["file"], description="string leaf"))
             )
 
-        self._data_files_opened = True
+        self._leaf_names = leaf_names
+        self._leaf_memmaps = memmaps
+        self._bagz_readers = readers
+        self._data_files_opened = True  # last: see _ensure_open
 
     def __getstate__(self):
         """Drop memmaps/readers before pickling (they reopen lazily in workers).
@@ -325,10 +364,18 @@ class TreeDataSource(RandomAccessDataSource):
         state = self.__dict__.copy()
         state["_leaf_names"] = []
         state["_bagz_readers"] = {}
+        # A memmap belongs to the process that made it, and a Lock cannot be
+        # pickled at all; both are rebuilt by _ensure_open in the worker.
+        state["_leaf_memmaps"] = {}
+        del state["_open_lock"]
         # If data is in memory, workers don't need to reopen files.
         if not self.load_into_memory:
             state["_data_files_opened"] = False
         return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._open_lock = threading.Lock()
 
     def __len__(self) -> int:
         return self._num_samples
@@ -350,8 +397,7 @@ class TreeDataSource(RandomAccessDataSource):
         if idx < 0 or idx >= self._num_samples:
             raise IndexError(f"Index {idx} out of range [0, {self._num_samples})")
 
-        if not self._data_files_opened:
-            self._open_data_files()
+        self._ensure_open()
 
         leaf_values: Dict[str, Any] = {}
 
@@ -362,20 +408,10 @@ class TreeDataSource(RandomAccessDataSource):
             for name, strings in self._in_memory_strings.items():
                 leaf_values[name] = strings[idx]
         else:
-            # Reopen memmaps per access to let the OS reclaim pages, preventing
-            # the page cache from growing unboundedly.
-            # See: https://github.com/karpathy/nanoGPT/blob/3adf61e/train.py#L117-L118
-            for name in self._leaf_names:
-                info = self._leaf_info[name]
-                full_shape = tuple([self._num_samples] + info["shape_per_sample"])
-                mm = np.memmap(
-                    safe_join(self.data_dir, info["file"], description="leaf file"),
-                    dtype=np.dtype(info["dtype"]),
-                    mode="r",
-                    shape=full_shape,
-                )
+            # `np.array` copies out of the mapping, so the returned tree never
+            # aliases it and the held memmap stays an implementation detail.
+            for name, mm in self._leaf_memmaps.items():
                 leaf_values[name] = np.array(mm[idx])[np.newaxis, ...]
-                del mm
             for name, reader in self._bagz_readers.items():
                 leaf_values[name] = reader[idx].decode("utf-8")
 
