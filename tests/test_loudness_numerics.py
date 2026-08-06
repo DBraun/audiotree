@@ -8,6 +8,8 @@ frequency where the 1.5 kHz K-weighting shelf is inert and where 512 FIR taps
 happen to be enough.
 """
 
+import tracemalloc
+
 import jaxloudnorm as jln
 import loudness as loudness_cpp
 import numpy as np
@@ -21,6 +23,10 @@ from audiotree.loudness import (
     _jit_windowed_loudness,
     _kweighting_biquad,
     _numpy_windowed_lufs,
+    _window_mean_square_jax,
+    _window_mean_square_numpy,
+    _window_samples,
+    _windowed_num_windows,
     fir_taps,
     pad_to_gating_block,
 )
@@ -62,6 +68,46 @@ _WINDOW_CONSISTENCY_ATOL = 0.01
 
 _ABSOLUTE_OFFSET = -0.691
 
+# Window/hop pairs the streaming reductions have to tile the same way the old
+# gather did. Every duration below leaves a trailing partial window, which must be
+# dropped rather than zero-padded.
+_WINDOW_HOP_CASES = [
+    (48_000, 0.4, 0.4),  # windows tile the signal, no overlap
+    (48_000, 0.4, 0.1),  # 4x overlap -- the EBU-style setting
+    (48_000, 0.5, 0.3),  # non-integer window/hop ratio (5/3)
+    (48_000, 1.0, 0.35),  # non-integer window/hop ratio (20/7)
+    (44_100, 0.4, 0.15),  # spans that are not round sample counts
+    (16_000, 0.75, 0.2),
+]
+
+# Per-window LUFS of ``_window_probe(48_000, 1.75)``, recorded from the gather
+# implementation that ``_window_mean_square_{numpy,jax}`` replaced. The two
+# backends differ by ~7e-4 LU here (exact IIR vs. FIR approximation), so each gets
+# its own column; a change to the *reduction* would move a column by far more than
+# the ``_REFERENCE_ATOL`` below.
+_WINDOW_LUFS_REFERENCE = {
+    ("numpy", 0.4, 0.4): (-6.224682, -5.484969, -6.910188, -11.125896),
+    ("jax", 0.4, 0.4): (-6.224178, -5.484275, -6.909417, -11.125133),
+    ("numpy", 0.5, 0.3): (-6.063997, -5.524408, -6.124948, -8.125831, -11.736936),
+    ("jax", 0.5, 0.3): (-6.063460, -5.523734, -6.124200, -8.125055, -11.736178),
+    ("numpy", 1.0, 0.35): (-5.920049, -6.479918, -8.468568),
+    ("jax", 1.0, 0.35): (-5.919413, -6.479195, -8.467807),
+}
+
+# The streaming reductions are not bit-identical to the gather -- they sum the same
+# samples in a different order. Measured drift is ~1e-13 LU (NumPy, float64) and
+# ~1e-5 LU (JAX, float32); 1e-3 LU absorbs that and any platform-to-platform wobble
+# in the FFT convolution behind the JAX K-weighting, while still being 100x tighter
+# than the smallest step between reference windows.
+_REFERENCE_ATOL = 1e-3
+
+# Peak allocation as a multiple of the input waveform, measured on a 12 s stereo
+# excerpt at the 3 s / 100 ms setting. The gather cost 72x (NumPy, whose filtering
+# is float64) and 24x (JAX); the streaming reductions cost 4.0x and 3.5x, which is
+# the filtered signal and its square. 8x fails the old code by a wide margin
+# without being so tight that an extra temporary trips it.
+_MAX_ALLOCATION_RATIO = 8.0
+
 
 def _colored_noise(sample_rate: int, duration: float, exponent: float, seed: int):
     """Noise with a ``1 / f**exponent`` amplitude spectrum, peak-normalized to 0.5.
@@ -101,6 +147,35 @@ def _stationary_harmonics(sample_rate: int, duration: float, seed: int = 0):
             break
         y += np.sin(2 * np.pi * freq * t + rng.uniform(0.0, 2 * np.pi)) / np.sqrt(freq)
     return (0.4 * y / np.abs(y).max()).astype(np.float32)
+
+
+def _window_probe(sample_rate: int, duration: float) -> np.ndarray:
+    """A deterministic ``(1, 2, samples)`` stereo probe whose level drifts slowly.
+
+    Two amplitude-modulated tones, one either side of the K-weighting shelf, at
+    modulation rates that are not commensurate with any window length below. Every
+    window therefore has a *different* loudness, so a reduction that misaligns the
+    windows by even one hop cannot pass by accident. Purely analytic, so the
+    reference values it pins are reproducible without an asset file.
+    """
+    n = int(sample_rate * duration)
+    t = np.arange(n) / sample_rate
+    left = np.sin(2 * np.pi * 220.0 * t) * (0.4 + 0.3 * np.sin(2 * np.pi * 0.37 * t))
+    right = np.sin(2 * np.pi * 3_500.0 * t + 1.1) * (
+        0.2 + 0.15 * np.cos(2 * np.pi * 0.23 * t)
+    )
+    return np.stack([left, right]).astype(np.float32)[None]
+
+
+def _gathered_window_mean_square(sq, window_span, hop_span, num_windows, xp):
+    """The reduction this module used to run: materialize every window, then mean.
+
+    Kept as the reference that :func:`_window_mean_square_numpy` and
+    :func:`_window_mean_square_jax` have to reproduce -- they exist only because
+    this one allocates ``window_span / hop_span`` copies of the signal.
+    """
+    idx = (xp.arange(num_windows) * hop_span)[:, None] + xp.arange(window_span)[None, :]
+    return sq[..., idx].mean(axis=-1)
 
 
 def _numpy_integrated(waveform: np.ndarray, sample_rate: int) -> float:
@@ -285,3 +360,91 @@ def test_pad_to_gating_block_passes_through_long_waveforms():
 def test_pad_to_gating_block_rejects_empty():
     with pytest.raises(ValueError, match="zero-length"):
         pad_to_gating_block(np.zeros((1, 1, 0), dtype=np.float32), 44_100, xp=np)
+
+
+@pytest.mark.parametrize(("sample_rate", "window_sec", "hop_sec"), _WINDOW_HOP_CASES)
+def test_streaming_window_reduction_matches_the_gather(
+    sample_rate: int, window_sec: float, hop_sec: float
+):
+    """The sliding/``reduce_window`` reductions tile and reduce exactly as the gather did.
+
+    Both backends, at overlapping and non-overlapping hops, at window/hop ratios
+    that are not integers, and with a trailing partial window that must be dropped
+    rather than padded.
+    """
+    waveform = _window_probe(sample_rate, 2.53)
+    window_span = _window_samples(window_sec, sample_rate)
+    hop_span = _window_samples(hop_sec, sample_rate)
+    num_windows = _windowed_num_windows(waveform.shape[-1], window_span, hop_span)
+    # Every case must exercise the dropped tail, else it proves nothing about it.
+    assert 0 < (num_windows - 1) * hop_span + window_span < waveform.shape[-1]
+
+    sq64 = waveform.astype(np.float64) ** 2
+    expected = _gathered_window_mean_square(
+        sq64, window_span, hop_span, num_windows, np
+    )
+    actual = _window_mean_square_numpy(sq64, window_span, hop_span)
+    assert actual.shape == expected.shape == (1, 2, num_windows)
+    np.testing.assert_allclose(actual, expected, rtol=1e-12)
+
+    sq32 = jnp.asarray(waveform) ** 2
+    jax_actual = np.asarray(_window_mean_square_jax(sq32, window_span, hop_span))
+    assert jax_actual.shape == expected.shape
+    np.testing.assert_allclose(jax_actual, expected, rtol=1e-5)
+
+
+@pytest.mark.parametrize(("backend", "window_sec", "hop_sec"), _WINDOW_LUFS_REFERENCE)
+def test_windowed_lufs_matches_saved_reference(
+    backend: str, window_sec: float, hop_sec: float
+):
+    """Per-window LUFS is unchanged from the gather implementation, to 1e-3 LU.
+
+    ``lufs_windows`` is a persisted manifest column, so the streaming reduction
+    that replaced the gather has to be a pure memory optimization: same windows,
+    same values.
+    """
+    sample_rate = 48_000
+    waveform = _window_probe(sample_rate, 1.75)
+    if backend == "numpy":
+        windows = _numpy_windowed_lufs(waveform, sample_rate, window_sec, hop_sec)
+    else:
+        windows = np.asarray(
+            _jit_windowed_loudness(
+                jnp.asarray(waveform), sample_rate, window_sec, hop_sec
+            )
+        )
+    expected = _WINDOW_LUFS_REFERENCE[backend, window_sec, hop_sec]
+    assert windows.shape == (1, len(expected))
+    np.testing.assert_allclose(windows[0], expected, atol=_REFERENCE_ATOL)
+
+
+def test_numpy_windowed_lufs_does_not_materialize_the_windows():
+    """The NumPy reduction runs over a strided view, so cost is O(signal), not O(gather).
+
+    An 84.7 MB batch at the standard EBU setting used to peak at 5.8 GB RSS,
+    because indexing with a ``(num_windows, window_span)`` index array copies the
+    signal once per window of overlap -- 30x at 3 s / 100 ms, and 60x once the
+    float64 filtering is counted.
+    """
+    sample_rate = 48_000
+    waveform = _window_probe(sample_rate, 12.0)
+    tracemalloc.start()
+    try:
+        _numpy_windowed_lufs(waveform, sample_rate, 3.0, 0.1)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < _MAX_ALLOCATION_RATIO * waveform.nbytes
+
+
+def test_jax_windowed_lufs_does_not_materialize_the_windows():
+    """Same for the JAX reduction, read off XLA's own buffer assignment."""
+    sample_rate = 48_000
+    waveform = _window_probe(sample_rate, 12.0)
+    compiled = _jit_windowed_loudness.lower(
+        jnp.asarray(waveform), sample_rate, 3.0, 0.1
+    ).compile()
+    analysis = compiled.memory_analysis()
+    if analysis is None:  # not every XLA backend reports buffer assignment
+        pytest.skip("backend does not expose a memory analysis")
+    assert analysis.temp_size_in_bytes < _MAX_ALLOCATION_RATIO * waveform.nbytes
