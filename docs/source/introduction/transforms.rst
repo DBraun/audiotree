@@ -94,6 +94,31 @@ augment them in the same jitted step that trains your model.
    traced), so anything you configure for a Grain pipeline works here by importing
    it from ``audiotree.transforms.jax``.
 
+   ``encode_with_codec`` and ``encode_latents`` are a special case in the other
+   direction: the two namespaces export the *same* objects, because the
+   arithmetic lives in the codec you supply rather than in audiotree. Neither
+   wraps the codec in ``jax.jit``, so a JAX codec traces into a step like the one
+   above. See :ref:`codecs`.
+
+.. note::
+   **Same names, same semantics, not bit-identical results.** The two backends
+   agree on what a transform *means* — and ``tests/transforms/test_backend_parity.py``
+   pins that agreement — but two implementations of the same DSP do not produce
+   identical floats:
+
+   - ``resample`` uses librosa/soxr on NumPy and a Julius-style sinc filter on
+     JAX. On band-limited content they agree to about ``8.5e-5`` absolute; on
+     broadband noise only to ~24 dB SNR, essentially all of it in the
+     anti-aliasing filter's transition band, where the two filter designs roll
+     off differently.
+   - ``volume_norm`` uses FIR K-weighting (pyloudnorm-style) on NumPy and IIR
+     K-weighting on JAX. Measured loudness differs by up to 0.031 dB, so the
+     output differs from the other backend's by a pure scalar gain of about
+     0.036 dB.
+
+   Neither is a bug, but do not expect a NumPy-augmented run and a
+   JAX-augmented run to reproduce each other sample-for-sample.
+
 Next
 ----
 

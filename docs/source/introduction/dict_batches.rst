@@ -920,6 +920,7 @@ See Also
 --------
 
 - :ref:`transform_chaining` - Chaining transforms with datasets
+- :ref:`codecs` - ``scope`` and ``output_key`` applied to the codec transforms
 - :ref:`argbind_guide` - Configuring transforms with ArgBind
 - :ref:`multiprocessing` - Parallel data loading
 - :func:`~audiotree.transforms.volume_norm` - Volume normalization

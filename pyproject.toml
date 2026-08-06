@@ -46,6 +46,10 @@ dependencies = [
     # the `test_lowest_direct` CI job. Declaring a lower one is fiction: the
     # resolver can never pick it.
     "absl-py>=2.0",
+    # Imported directly by sources/core.py to name the exception librosa's
+    # fallback decoder raises. It arrives transitively via librosa, but a
+    # direct import needs a direct declaration.
+    "audioread>=3.0",
     "einops>=0.8.1",
     "flax>=0.12.3",  # earlier 0.12.x break against every jax we allow
     # Upper-bounded on principle: grain is 0.x, so a minor release may break

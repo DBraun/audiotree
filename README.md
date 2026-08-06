@@ -86,9 +86,11 @@ dict — and are bindable from YAML or the command line with
 [ArgBind](https://github.com/DBraun/argbind/).
 
 Beyond the basics: balanced sampling across source groups, length-aware *windowed*
-sampling, loudness-gated excerpt search, and two writers (`AudioWriter` for WAVs plus a
-manifest, `TreeWriter` for memory-mapped pre-rendered pytrees). See the
-[guides](https://dirt.design/audiotree).
+sampling, loudness-gated excerpt search, a per-dataset `on_read_error` policy for
+corpora that contain unreadable files, two writers (`AudioWriter` for WAVs plus a
+manifest, `TreeWriter` for memory-mapped pre-rendered pytrees), and two protocols
+(`AudioCodec`, `LatentAudioCodec`) for tokenizing a corpus with a neural codec you
+supply. See the [guides](https://dirt.design/audiotree).
 
 ## How it compares
 
@@ -97,8 +99,9 @@ AudioTree is modeled on Descript's [audiotools](https://github.com/descriptinc/a
 recognizably the same — but it is a pytree rather than a mutable object: transforms
 return new trees, everything is batched-first, and the JAX backend traces cleanly under
 `jit` and `vmap`. Against **torchaudio**, the difference is scope in both directions:
-torchaudio ships feature extraction, model zoos, and codecs, none of which are here;
-AudioTree instead ships the data-loading and augmentation layer (Grain sources, balanced
+torchaudio ships feature extraction, model zoos, and codecs, none of which are here
+(AudioTree defines the protocol a codec must satisfy and stores what it returns, but
+ships no weights); AudioTree instead ships the data-loading and augmentation layer (Grain sources, balanced
 and windowed samplers, on-disk dataset writers) that torchaudio leaves to
 `torch.utils.data`. There is no torch interoperability path.
 

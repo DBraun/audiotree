@@ -83,6 +83,24 @@ natural home for pre-computed features — a spectrogram, an embedding, a codec'
 tokens — cached next to (or instead of) the waveform and read back later as a
 zero-copy memmap slice via :class:`~audiotree.sources.TreeDataSource`.
 
+.. note::
+   :class:`~audiotree.sources.TreeDataSource` validates the dataset when you
+   **construct** it, not when you first read from it. Alongside the manifest's
+   declared shapes, dtypes and field names, every leaf's ``.bin`` is measured
+   against what the manifest claims, so a truncated render or a half-finished
+   copy is refused by name::
+
+       ValueError: Invalid manifest dataset/manifest.json: leaf 'waveform'
+       declares 1000 samples of shape (1, 44100) and dtype float32 (176400000
+       bytes), but 'waveform.bin' is only 512 bytes. The dataset is truncated
+       or the manifest does not describe it.
+
+   The alternative is a bare ``np.memmap`` error at the first read — naming
+   neither the leaf nor the manifest, and raised inside a Grain worker under the
+   default lazy mode. A dataset that is still being written is *not* refused: a
+   mid-write ``.bin`` is legitimately longer than ``num_samples`` implies, and
+   only the prefix the manifest promises is checked.
+
 ``expected_samples`` is a hint, not a cap
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -254,7 +272,9 @@ actually train on. Two knobs keep such datasets cheap:
    multiprocessing (the default on Linux) Grain workers then inherit that data via
    copy-on-write instead of each re-opening the memmaps — trading memory for zero
    per-worker I/O. Combine it with ``exclude_prefixes`` so only the leaves you
-   train on are held in memory.
+   train on are held in memory. Each ``ds[i]`` still hands back its own copy of
+   the arrays it reads, exactly as the memmap path does, so nothing downstream
+   aliases the shared store.
 
 ----
 

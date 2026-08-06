@@ -153,6 +153,149 @@ Customize which file types to load:
         duration=3.0,
     )
 
+.. _unreadable-files:
+
+Unreadable Files
+----------------
+
+One truncated, zero-byte or permission-denied file in a 100k-file corpus
+otherwise ends a multi-hour run. ``on_read_error`` decides what happens
+instead. It is accepted by :func:`~audiotree.sources.create_audio_dataset`,
+:func:`~audiotree.sources.create_balanced_audio_dataset`, and
+:class:`~audiotree.sources.AudioDataSource`.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 84
+
+   * - ``on_read_error``
+     - Behavior
+   * - ``"raise"``
+     - **Default.** Raise ``AudioReadError`` naming the file.
+   * - ``"warn"``
+     - Substitute digital silence of the requested shape, and emit a
+       :class:`UserWarning` naming the file and the original error.
+   * - ``"skip"``
+     - Substitute the same silence, without warning — for a corpus already
+       known to contain junk, where a warning per epoch per bad file is just
+       noise.
+
+Failing loudly, by name
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Under the default policy, every read failure surfaces as ``AudioReadError``
+regardless of which layer of the decoding stack noticed. That matters because
+the underlying exception frequently does not identify the file: a truncated
+header sends librosa down its ``audioread`` fallback, whose ``EOFError`` or
+``NoBackendError`` has an empty ``str()`` — a blank traceback line at the end of
+a long run.
+
+``AudioReadError`` subclasses :class:`OSError`, carries the path as
+``file_path``, and keeps whatever the decoder raised as ``__cause__``:
+
+.. testsetup:: readerrors
+
+    # Hidden setup: a corpus of two readable files and one that is not. A
+    # zero-byte ``.wav`` is the cheapest way to make a file that the corpus
+    # scan finds and the decoder cannot open.
+    import os
+    import tempfile
+    import numpy as np
+    import soundfile
+
+    _rng = np.random.default_rng(0)
+    _mixed_dir = tempfile.mkdtemp()
+    for _i in range(2):
+        soundfile.write(
+            os.path.join(_mixed_dir, f"good_{_i}.wav"),
+            (0.1 * _rng.standard_normal((44_100, 1))).astype(np.float32),
+            44_100,
+        )
+    open(os.path.join(_mixed_dir, "broken.wav"), "wb").close()
+
+.. testcode:: readerrors
+
+    import os
+    from audiotree.sources import create_audio_dataset
+
+    strict = create_audio_dataset(_mixed_dir, sample_rate=44100, duration=1.0)
+
+    try:
+        items = [strict[i] for i in range(len(strict))]
+    except OSError as err:           # AudioReadError is an OSError
+        print(type(err).__name__)
+        print(os.path.basename(err.file_path))
+
+.. testoutput:: readerrors
+
+    AudioReadError
+    broken.wav
+
+.. warning::
+   The wrapper changed which ``except`` clauses fire. ``soundfile.LibsndfileError``
+   is a :class:`RuntimeError`, and ``AudioReadError`` is an :class:`OSError`, so
+   code that wrapped a dataset load in ``except soundfile.LibsndfileError``,
+   ``except FileNotFoundError`` or ``except RuntimeError`` no longer catches an
+   unreadable file. Catch ``AudioReadError`` — or :class:`OSError`, which is its
+   base.
+
+Silence, marked as such
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The two non-raising policies substitute **digital silence of exactly the
+requested shape**. They deliberately do *not* drop the item or retry a different
+file: a hole breaks fixed-size batching, and a silent retry both over-samples
+the healthy files and produces an item indistinguishable from real audio.
+
+So that the substitution stays detectable, every item of such a dataset carries
+``metadata["read_error"]`` — ``True`` on a substitute, ``False`` on a real load
+— alongside the usual ``filepath``:
+
+.. testcode:: readerrors
+
+    tolerant = create_audio_dataset(
+        _mixed_dir, sample_rate=44100, duration=1.0, on_read_error="skip"
+    )
+    items = [tolerant[i] for i in range(len(tolerant))]
+
+    substitutes = [
+        os.path.basename(item.filepath[0])
+        for item in items
+        if bool(item.metadata["read_error"][0])
+    ]
+    print(len(items), sorted(substitutes))
+    print(items[0].waveform.shape)     # the substitute is the requested shape
+
+.. testoutput:: readerrors
+
+    3 ['broken.wav']
+    (1, 1, 44100)
+
+Count the losses in a training loop with
+``int(np.asarray(batch.metadata["read_error"]).sum())``, or filter them out
+before batching.
+
+.. important::
+   The marker is written on **every** item, good ones included, because
+   :meth:`~audiotree.core.AudioTree.batch` requires all items in a batch to
+   carry the same metadata keys. The policy is therefore a property of the whole
+   dataset: items from a ``"skip"``/``"warn"`` dataset cannot be batched
+   together with items from a ``"raise"`` one.
+
+Two combinations are refused up front with a ``ValueError`` rather than
+half-supported:
+
+- ``window_params`` with a non-raising policy. Windowed sampling reads slot
+  durations for the whole corpus before the first item, and a substitute has no
+  meaningful duration; see :ref:`windowed_datasets`.
+- ``mono=False`` with ``channels=None`` and a non-raising policy, when the
+  first file's channel-count probe is itself what failed. The substitute's shape
+  is unknowable, so pass ``channels=`` explicitly.
+
+:class:`~audiotree.sources.AudioDataSource` takes the same keyword-only
+argument, exposes it as ``self.on_read_error``, and its ``filter*()`` views
+inherit it.
+
 Time-Aligned Annotations
 ------------------------
 

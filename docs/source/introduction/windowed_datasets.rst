@@ -185,3 +185,11 @@ multiplicatively:
         mono=True,
         window_params=WindowParams(duration=1.0, alpha=0.5),  # within-group coverage
     )
+
+.. note::
+   ``window_params`` cannot be combined with a non-raising ``on_read_error``
+   (see :ref:`unreadable-files`); the combination raises ``ValueError`` rather
+   than half-working. Windowed sampling reads every file's duration up front to
+   build the window index, and a file that cannot be read contributes no
+   duration — the silence substitute the other loaders return is a per-item
+   answer to a question asked here once per corpus.

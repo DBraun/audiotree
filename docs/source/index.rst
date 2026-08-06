@@ -90,8 +90,8 @@ they are also configurable from the command line and YAML:
 The guides are meant to be read in order. **Getting started** walks the main path —
 the :class:`~audiotree.core.AudioTree` object, loading audio, augmenting it, and
 writing datasets back to disk — and **Going further** collects the deeper topics
-(balanced and windowed sampling, dict batches, command-line configuration, and
-multiprocessing).
+(balanced and windowed sampling, dict batches, neural codecs, command-line
+configuration, and multiprocessing).
 
 Content
 --------------------------
@@ -112,6 +112,7 @@ Content
    introduction/balanced_datasets
    introduction/windowed_datasets
    introduction/dict_batches
+   introduction/codecs
    introduction/argbind_guide
    introduction/multiprocessing
 

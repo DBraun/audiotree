@@ -84,6 +84,13 @@ The :meth:`~audiotree.core.AudioTree.create` method automatically handles arrays
     (1, 1, 44100)
     (1, 2, 44100)
 
+Rank 3 is where the normalization stops. A waveform with four or more axes is
+rejected with a ``ValueError`` rather than accepted: ``create`` broadcasts
+``filepath`` / ``source`` over the leading axis, and at rank 4 there is no single
+right answer for what that axis means. Build the tree at rank 3 and add a
+mini-batch axis afterwards with
+:meth:`~audiotree.core.AudioTree.reshape_mini_batches`.
+
 Loading Audio from Files
 ------------------------
 
@@ -436,6 +443,18 @@ and :meth:`~audiotree.core.AudioTree.flatten_mini_batches` removes it again:
    without flattening first. Per-item results follow the leading shape — e.g.,
    ``lufs`` comes back shaped ``(num_mini_batches, mini_batch_size)``.
 
+   The methods whose contract is *per item* refuse a mini-batched tree instead
+   of quietly reinterpreting the leading axis. :meth:`~audiotree.core.AudioTree.filter`,
+   :meth:`~audiotree.core.AudioTree.write`, and
+   :meth:`~audiotree.core.AudioTree.reshape_mini_batches` itself all raise
+   ``ValueError`` at rank 4; call
+   :meth:`~audiotree.core.AudioTree.flatten_mini_batches` first. The provenance
+   properties do keep working: at rank 4,
+   :attr:`~audiotree.core.AudioTree.filepath` and
+   :attr:`~audiotree.core.AudioTree.source` return one list per mini-batch —
+   ``[["0.wav", "1.wav", "2.wav"], ["3.wav", …], …]`` — rather than one flat
+   list.
+
 Splitting into Multiple Trees
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -501,6 +520,11 @@ The :meth:`~audiotree.core.AudioTree.filter` method allows you to selectively ke
 
     (9, 1, 44100)
     [-15.65 -12.15  -9.65  -7.69  -6.11  -4.75  -3.61  -2.56  -1.65]
+
+The predicate is called with one batch item at a time, so ``filter`` requires a
+rank-3 tree; on a mini-batched one it raises ``ValueError`` rather than filtering
+whole mini-batches. Call
+:meth:`~audiotree.core.AudioTree.flatten_mini_batches` first.
 
 Processing Mini-Batches with nnx.scan
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -842,9 +866,11 @@ batch of 1, exactly what ``write`` requires):
 
 .. note::
    ``write`` operates on a single item by design. Calling it on a multi-item batch
-   raises a ``ValueError``. To write a whole batch in one call — with a manifest
-   of per-item metadata — reach for :class:`~audiotree.writer.AudioWriter`, covered in
-   the :ref:`writer` chapter.
+   raises a ``ValueError``, as does calling it on a mini-batched (rank-4) tree or
+   on a token-only tree that carries ``codes``/``latents`` but no ``waveform`` —
+   all three by name, rather than as a shape complaint from soundfile. To write a
+   whole batch in one call — with a manifest of per-item metadata — reach for
+   :class:`~audiotree.writer.AudioWriter`, covered in the :ref:`writer` chapter.
 
 Next Steps
 ----------

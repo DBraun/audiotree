@@ -647,6 +647,19 @@ Smaller behavior changes
        ``replace_lufs()`` again.
    * - ``roll()`` sets ``metadata["offset"]`` to ``None``
      - It no longer points at sample 0 once the waveform has been shifted.
+   * - The JAX ``shift_phase()`` draws **one phase angle per batch item**, not
+       one per ``(batch, channel)``
+     - It now matches the NumPy backend and the rest of the "one global nudge"
+       transforms (``roll``). Stereo comes out phase-coherent instead of
+       decorrelated; if you were relying on the decorrelation, ``corrupt_phase``
+       is the transform that randomizes independently. Recorded JAX
+       augmentations will not reproduce bit-for-bit — the RNG draw for that key
+       changed shape.
+   * - ``corrupt_phase()`` and ``shift_phase()`` no longer zero the last
+       ``length % hop_length`` samples
+     - Output length is unchanged; the tail is now reconstructed instead of
+       silent. A 44100-sample clip at the default hop lost its final 68 samples
+       before.
    * - ``find_audio_files()`` returns a **sorted**, de-duplicated list and expands
        glob patterns
      - File order (and therefore seeded shuffling) is now stable across machines

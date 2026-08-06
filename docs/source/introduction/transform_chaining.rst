@@ -459,6 +459,7 @@ Best Practices
 4. **Add multiprocessing last**: Convert to IterDataset and add mp_prefetch at the end
 5. **Configure from YAML**: Keep transform parameters in config files with ArgBind (see :ref:`argbind_guide`)
 6. **Consider pre-computing**: For expensive pipelines, pre-compute the data and export it with :class:`~audiotree.tree_writer.TreeWriter`
+7. **Encode last**: A neural-codec stage belongs after every augmentation that changes the waveform — anything that does clears ``codes``/``latents`` (see :ref:`codecs`)
 
 Next
 ----
@@ -473,6 +474,7 @@ See Also
 - :ref:`argbind_guide` - Configuring transforms with ArgBind
 - :ref:`multiprocessing` - Parallel data loading
 - :ref:`balanced_datasets` - Creating balanced datasets
+- :ref:`codecs` - Tokenizing audio with a neural codec
 - `Grain Transformations`_ - Grain's transformation API
 
 .. _Grain Transformations: https://github.com/google/grain/blob/main/docs/transformations.md
