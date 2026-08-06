@@ -182,14 +182,18 @@ This is useful for:
 Deterministic Sampling
 ----------------------
 
-Use ``shuffle=False`` and a fixed ``seed`` for reproducible iteration:
+Use ``shuffle=False`` and a fixed ``excerpt_seed`` for reproducible iteration.
+The seed is split in two: ``shuffle_seed`` fixes the file order (and does nothing
+once ``shuffle=False``), while ``excerpt_seed`` fixes which excerpt is drawn from
+each file. ``excerpt_seed`` defaults to ``shuffle_seed``, so passing one seed is
+usually enough:
 
 .. code-block:: python
 
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"], "music": ["/data/music"]},
         shuffle=False,
-        seed=42,
+        excerpt_seed=42,
         sample_rate=44100,
         duration=3.0,
     )
@@ -234,7 +238,6 @@ Use saliency to randomly select louder sections of audio:
     lufs_cutoff = -40  # Only select sections above -40 LUFS
     excerpt = ExcerptConfig(
         strategy="loudest",
-        enabled=True,
         lufs_cutoff=lufs_cutoff,
         num_tries=10,  # Try up to 10 random positions
     )
@@ -274,6 +277,8 @@ Statistical Validation
 
 Over large sample sizes, the actual distribution closely matches requested weights:
 
+.. skip-snippet-exec: ``len()`` of a repeated dataset is unbounded.
+
 .. code-block:: python
 
     ds = create_balanced_audio_dataset(
@@ -309,5 +314,5 @@ See Also
 --------
 
 - :func:`~audiotree.sources.create_audio_dataset` - For simple, unbalanced loading
-- :class:`~audiotree.sources.ExcerptConfig` - For saliency-based excerpt selection
+- :class:`~audiotree.core.ExcerptConfig` - For saliency-based excerpt selection
 - :ref:`multiprocessing` - For parallel data loading

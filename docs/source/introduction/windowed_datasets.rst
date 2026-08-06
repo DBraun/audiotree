@@ -116,6 +116,8 @@ Building the slot index needs each file's duration. These are read from headers
 (no decode) and can be cached so retuning ``alpha``/``hop``/``duration`` never
 re-reads the corpus:
 
+.. skip-snippet-exec: fragment; ``filepaths`` comes from the section above.
+
 .. code-block:: python
 
     from audiotree.sources import scan_durations, create_windowed_audio_dataset
@@ -131,6 +133,8 @@ For uncurated corpora you can drop quiet windows up front. Precompute a per-file
 **windowed-LUFS** cache once (computed on the CPU, no JAX/GPU work), then point
 the dataset at it -- slots below ``lufs_cutoff`` are removed at build time,
 so no loudness search happens during training:
+
+.. skip-snippet-exec: fragment; ``filepaths`` comes from the section above.
 
 .. code-block:: python
 

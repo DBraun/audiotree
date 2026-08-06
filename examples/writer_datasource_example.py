@@ -48,7 +48,7 @@ def main():
                 sample_rate=44100,
                 pitch=np.array([pitch], dtype=np.float32),
                 velocity=np.array([64 + i * 20]),
-                filepaths=[f"original_{i}.wav"],
+                filepath=[f"original_{i}.wav"],
             )
 
             # Calculate loudness
@@ -106,10 +106,12 @@ def main():
         if first_audio.pitch is not None:
             print(f"    - Pitch: MIDI {first_audio.pitch[0]:.0f}")
         print(f"    - Velocity: {first_audio.velocity[0]}")
-        print(
-            f"    - Original source: {first_audio.metadata.get('original_source', 'N/A')}"
-        )
-        print(f"    - Tags: {first_audio.metadata.get('tags', {})}")
+        # The AudioTree carries the path it was *read* from. The path recorded
+        # when the tree was created, and the tags, live in the manifest entry
+        # rather than on the tree — see step 6.
+        print(f"    - Read from: {first_audio.filepath[0]}")
+        print(f"    - Original filepath: {source.get_entry(0)['filepath']}")
+        print(f"    - Tags: {source.get_entry(0)['tags']}")
 
         # 6. Show manifest entry structure
         print("\n6. Raw manifest entry example:")

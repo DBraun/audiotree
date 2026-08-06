@@ -97,6 +97,8 @@ YAML key with ``train/`` or ``val/`` to target a scope:
 
 **Python:**
 
+.. skip-snippet-exec: fragment; argbind parses the command line at run time.
+
 .. code-block:: python
 
     volume_norm = argbind.bind(transforms.volume_norm, "train", "val")
@@ -392,6 +394,8 @@ JAX JIT Compatibility
 Because ``argbind.scope`` only rewrites a plain dict, it composes with
 ``jax.jit``: enter the scope *inside* the jitted step so the resolved parameters
 are baked into the trace alongside the model.
+
+.. skip-snippet-exec: fragment; sketches a training step the guide never defines.
 
 .. code-block:: python
 

@@ -123,6 +123,7 @@ Content
    audiotree_api/sources
    audiotree_api/transforms
    audiotree_api/writer
+   audiotree_api/audio_source
    audiotree_api/tree
 
 .. toctree::

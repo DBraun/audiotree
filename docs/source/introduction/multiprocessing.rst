@@ -28,6 +28,8 @@ Multithreading with ReadOptions
 
 Use multithreading for I/O-bound operations:
 
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
+
 .. code-block:: python
 
     import grain
@@ -64,6 +66,8 @@ Multiprocessing with mp_prefetch
 ---------------------------------
 
 Use multiprocessing for CPU-bound operations:
+
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
 
 .. code-block:: python
 
@@ -102,6 +106,8 @@ Combining Both
 --------------
 
 For maximum throughput, use both multithreading and multiprocessing:
+
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
 
 .. code-block:: python
 
@@ -143,6 +149,8 @@ With Balanced Datasets
 
 Weight-based balancing is preserved with multiprocessing:
 
+.. skip-snippet-exec: grain's multiprocess prefetch needs a real ``__main__`` to spawn workers from.
+
 .. code-block:: python
 
     import grain
@@ -176,6 +184,8 @@ Performance Tuning
 
 Larger buffers = more memory usage but potentially higher throughput:
 
+.. skip-snippet-exec: fragment; ``grain`` comes from the block above, which opts out.
+
 .. code-block:: python
 
     # Conservative (low memory)
@@ -199,6 +209,8 @@ General guidelines:
 - **I/O bound**: Multithreading may be more efficient
 - **CPU bound**: Multiprocessing usually better
 
+.. skip-snippet-exec: fragment; ``grain`` comes from the block above, which opts out.
+
 .. code-block:: python
 
     import os
@@ -210,6 +222,8 @@ General guidelines:
 **Thread Count**
 
 For I/O-bound workloads:
+
+.. skip-snippet-exec: fragment; ``grain`` comes from the block above, which opts out.
 
 .. code-block:: python
 
@@ -225,6 +239,8 @@ Batching
 Use ``AudioTree.batch`` with ``IterDataset.batch()`` to batch AudioTree objects.
 This concatenates along axis 0 (the batch dimension) rather than stacking, which would
 add an extra dimension.
+
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
 
 .. code-block:: python
 
@@ -242,6 +258,8 @@ add an extra dimension.
 
 ``batch`` also handles dict structures containing AudioTrees:
 
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
+
 .. code-block:: python
 
     # If your dataset yields {"src": AudioTree, "tgt": AudioTree}
@@ -257,6 +275,8 @@ Common Patterns
 ---------------
 
 **Training Loop with Batching and Multiprocessing**
+
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
 
 .. code-block:: python
 
@@ -296,6 +316,8 @@ Common Patterns
 
 **Validation with Deterministic Order**
 
+.. skip-snippet-exec: fragment; the training loop it feeds is elided.
+
 .. code-block:: python
 
     # Create validation dataset (no shuffle, no repeat)
@@ -303,7 +325,7 @@ Common Patterns
         sources={"speech": ["/data/val_speech"], "music": ["/data/val_music"]},
         shuffle=False,  # Deterministic order
         repeat=False,
-        seed=42,
+        excerpt_seed=42,  # Fixes which excerpt is drawn from each file
         sample_rate=44100,
         duration=3.0,
     )
@@ -325,6 +347,8 @@ Worker Initialization
 
 Perform setup in each worker process before loading data:
 
+.. skip-snippet-exec: fragment; ``grain`` comes from the block above, which opts out.
+
 .. code-block:: python
 
     def worker_init_fn(worker_id, worker_count):
@@ -345,6 +369,8 @@ Profiling
 ---------
 
 Enable profiling to identify bottlenecks:
+
+.. skip-snippet-exec: fragment; ``grain`` comes from the block above, which opts out.
 
 .. code-block:: python
 
@@ -414,6 +440,8 @@ Example: Full Pipeline
 
 Complete example with batching and all optimizations:
 
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
+
 .. code-block:: python
 
     import grain
@@ -425,7 +453,6 @@ Complete example with batching and all optimizations:
     # Saliency for loud sections
     excerpt = ExcerptConfig(
         strategy="loudest",
-        enabled=True,
         lufs_cutoff=-40,
         num_tries=5,
     )
@@ -440,7 +467,7 @@ Complete example with batching and all optimizations:
         weights={"speech": 0.5, "music": 0.3, "effects": 0.2},
         shuffle=True,
         repeat=True,
-        seed=42,
+        shuffle_seed=42,  # excerpt_seed defaults to this
         sample_rate=48000,
         duration=3.0,
         excerpt=excerpt,

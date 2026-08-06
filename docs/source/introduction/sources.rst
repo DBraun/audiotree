@@ -79,7 +79,6 @@ Use saliency to select louder sections of audio:
 
     excerpt = ExcerptConfig(
         strategy="loudest",
-        enabled=True,
         lufs_cutoff=-40,  # Only select sections above -40 LUFS
         num_tries=10,
     )
@@ -116,7 +115,7 @@ excerpt straight from a file path without building a dataset:
         duration=3.0,          # required
     )
 
-It takes the same :class:`~audiotree.sources.ExcerptConfig` as the dataset loaders and
+It takes the same :class:`~audiotree.core.ExcerptConfig` as the dataset loaders and
 forwards ``sample_rate`` / ``duration`` / ``mono`` to
 :meth:`~audiotree.core.AudioTree.from_file`.
 
@@ -252,6 +251,8 @@ element index, so restoring the position reproduces the exact same subsequent
 The recommended approach is `Orbax`_, which checkpoints your model **and** the
 data pipeline together (and handles distributed-training edge cases). Pass the
 dataset iterator to ``grain.checkpoint.CheckpointSave`` / ``CheckpointRestore``:
+
+.. skip-snippet-exec: writes checkpoints to an absolute path outside the corpus.
 
 .. code-block:: python
 

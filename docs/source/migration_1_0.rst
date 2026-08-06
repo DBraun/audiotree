@@ -65,11 +65,16 @@ AudioTree
      - ``AudioTree.batch``
    * - ``AudioTree.filter(filter_fn=...)``
      - ``AudioTree.filter(predicate=...)``
+   * - ``AudioTree.create(filepaths=...)``
+     - ``AudioTree.create(filepath=...)`` — singular, and it still accepts either
+       one path or a list of them (one per batch item)
 
 The two field renames also change **keyword arguments** everywhere the fields are
 constructible — ``AudioTree(waveform=..., lufs=...)``, ``create()``,
 ``from_file()``, ``tree.replace()`` — and the on-disk leaf/column names (see
 `On-disk data`_).
+
+.. skip-snippet-exec: the "Before" half is pre-1.0 API and cannot run.
 
 .. code-block:: python
 
@@ -155,6 +160,8 @@ is what makes them bindable from YAML and the command line (see
    * - ``ReduceBatchTransform``, then ``Batch``
      - removed — see `Removed API`_
 
+.. skip-snippet-exec: the "Before" half is pre-1.0 API and cannot import.
+
 .. code-block:: python
 
     # Before
@@ -190,6 +197,8 @@ Sources
    * - ``num_records=N``
      - ``.slice(slice(0, N))`` on the returned dataset
 
+.. skip-snippet-exec: the "Before" half is pre-1.0 API and cannot import.
+
 .. code-block:: python
 
     # Before
@@ -211,8 +220,25 @@ Sources
         weights={"speech": 0.7, "music": 0.3},
         sample_rate=44_100,
         duration=5.0,
-        excerpt=ExcerptConfig(lufs_cutoff=-40),
+        excerpt=ExcerptConfig(strategy="loudest", lufs_cutoff=-40),
     ).slice(slice(0, 10_000))
+
+Writers
+~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 48 52
+
+   * - Pre-1.0
+     - 1.0
+   * - ``AudioWriter(output_dir=...)``, ``TreeWriter(output_dir=...)``
+     - ``directory=`` on both, matching ``.directory`` on the instance
+
+``directory`` is the first positional parameter of both writers, so
+``AudioWriter("output/")`` is unaffected; only the keyword spelling moved.
+``AudioDataSource.from_writer_output(output_dir)`` keeps its name — it names the
+directory a writer produced, not a constructor parameter.
 
 Removed API
 -----------
@@ -246,6 +272,8 @@ Removed API
 and the last thing in audiotree riding grain's private surface. Its removal is why
 the ``grain`` requirement is now just ``>=0.2.15,<0.3``, with the ceiling there only
 because grain is still 0.x.
+
+.. skip-snippet-exec: the "Before" half is pre-1.0 API and cannot import.
 
 .. code-block:: python
 
@@ -296,6 +324,8 @@ with a spelling suggestion.
 the error rather than deleting the key — the parameter it names was never being
 applied.
 
+.. skip-snippet-test: the misspelling is the point — it must keep raising.
+
 .. code-block:: python
 
     volume_change(min_dB=6.0)
@@ -309,6 +339,8 @@ applied.
 A scope entry is matched one level *above* where it sits, so the obvious shorthand
 selected every leaf rather than only ``"wet"`` — silently transforming the target
 signal in a dry/wet pipeline. That spelling now raises and points at the list form.
+
+.. skip-snippet-exec: fragment; the surrounding prose supplies the batch.
 
 .. code-block:: python
 
@@ -351,6 +383,8 @@ at a finished directory destroyed it silently, and two processes aiming at one
 directory interleaved into the same files. Both now take a keyword-only
 ``exist_ok`` (default ``False``) and raise ``FileExistsError`` naming the offending
 file.
+
+.. skip-snippet-exec: fragment; needs a dataset directory and a writer loop.
 
 .. code-block:: python
 
@@ -406,8 +440,36 @@ The pre-1.0 spellings ``"ExcerptConfig.search_uniform"`` and
 ``"ExcerptConfig.search_bias_early"`` remain registered, so existing configs keep
 resolving.
 
-Also note ``ExcerptConfig.enabled`` now defaults to ``True``. It used to default to
-``False``, which meant every file loaded from ``offset=0``.
+``ExcerptConfig.enabled`` is gone, replaced by ``strategy``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Two interacting booleans (``enabled`` for the loudness search, ``offset=0``
+otherwise) became one named ``strategy``, so the three real behaviors each have a
+name and the parameters that only apply to one of them say so.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
+
+   * - Pre-1.0
+     - 1.0
+   * - ``ExcerptConfig(enabled=True, ...)``
+     - ``ExcerptConfig(strategy="loudest", ...)``
+   * - ``ExcerptConfig(enabled=False)`` (the old default)
+     - ``ExcerptConfig(strategy="start")``
+   * - no equivalent
+     - ``ExcerptConfig(strategy="random")`` — the new default: a uniformly random
+       offset, with no loudness measured
+
+**Check:** ``strategy`` defaults to ``"random"``, so an ``ExcerptConfig()`` that
+used to load every file from sample 0 now draws a random offset. Pass
+``strategy="start"`` where that determinism mattered — validation sets especially.
+And note that dropping a bare ``enabled=True`` is *not* enough: without
+``strategy="loudest"`` you get the random default, not the loudness search.
+
+``num_tries``, ``lufs_cutoff``, ``search`` and ``on_failure`` mean nothing under
+``"start"`` or ``"random"``, and passing them there raises rather than being
+silently ignored.
 
 ``bagz`` is an optional extra
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -426,6 +488,8 @@ AudioWriter no longer resamples
 The ``sample_rate=`` constructor argument is gone. ``AudioWriter`` adopts the sample
 rate of the first ``AudioTree`` written and raises ``ValueError`` if a later write
 differs, so one manifest never mixes rates.
+
+.. skip-snippet-exec: the "Before" half is pre-1.0 API and cannot run.
 
 .. code-block:: python
 
@@ -449,6 +513,8 @@ longer repacks codes into ``(batch, codebooks*channels, frames)``: ``AudioTree.c
 holds exactly what the codec returned, and a non-``None`` ``scale`` is kept under
 ``metadata["codec_scale"]``.
 
+.. skip-snippet-exec: the "Before" half is pre-1.0 API and cannot run.
+
 .. code-block:: python
 
     # Before
@@ -470,6 +536,8 @@ Two transform backends, two RNG types
 takes ``np.random.Generator``. ``audiotree.transforms.jax`` is the JAX backend, for
 jitted training steps, and takes ``jax.random.key``. A pipeline that passed a JAX key
 to ``audiotree.transforms`` must either switch the import or switch the RNG.
+
+.. skip-snippet-exec: the "Before" half is pre-1.0 API and cannot import.
 
 .. code-block:: python
 

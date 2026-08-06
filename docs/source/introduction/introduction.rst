@@ -359,6 +359,8 @@ Pairing ``__iter__`` with ``len()`` means progress bars work out of the box —
 ``tqdm`` reads ``len()`` to size the bar automatically (``tqdm`` is an optional
 dependency, so this snippet is illustrative rather than executed):
 
+.. skip-snippet-exec: needs the optional ``tqdm`` dependency.
+
 .. code-block:: python
 
     import tqdm

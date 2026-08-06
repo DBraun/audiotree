@@ -56,6 +56,8 @@ stores the entire pytree (AudioTree, dicts of AudioTrees, nested structures) as
 memory-mapped arrays — one ``.bin`` file per leaf, read as a zero-copy slice via
 :class:`~audiotree.sources.tree.TreeDataSource` (a Grain ``RandomAccessDataSource``).
 
+.. skip-snippet-exec: fragment; the dataloader comes from the reader's own pipeline.
+
 .. code-block:: python
 
     from audiotree import TreeWriter
@@ -372,6 +374,8 @@ AudioWriter supports progress tracking via tqdm integration:
 
 **Using an External Progress Bar:**
 
+.. skip-snippet-exec: needs the optional ``tqdm`` dependency.
+
 .. code-block:: python
 
     from tqdm import tqdm
@@ -386,6 +390,8 @@ AudioWriter supports progress tracking via tqdm integration:
 
 **Using Internal Progress Bar:**
 
+.. skip-snippet-exec: fragment; ``audio_trees`` is the reader's own iterable.
+
 .. code-block:: python
 
     # Let AudioWriter create its own progress bar
@@ -396,6 +402,8 @@ AudioWriter supports progress tracking via tqdm integration:
     # Progress bar automatically closed
 
 **Conditional Writing with Progress:**
+
+.. skip-snippet-exec: needs the optional ``tqdm`` dependency.
 
 .. code-block:: python
 
@@ -596,6 +604,8 @@ Example: Creating a Training Dataset
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Here's a complete example of creating a training dataset with TreeWriter:
+
+.. skip-snippet-exec: needs the optional ``tqdm`` dependency.
 
 .. code-block:: python
 

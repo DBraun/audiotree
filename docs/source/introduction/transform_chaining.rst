@@ -305,6 +305,8 @@ For an expensive pipeline, pre-compute the augmented data once and export it wit
 :class:`~audiotree.sources.TreeDataSource`. Each read is a zero-copy memmap slice
 with no re-augmentation or decoding cost:
 
+.. skip-snippet-exec: writes a dataset into a directory the corpus fixture already fills.
+
 .. code-block:: python
 
     from audiotree.sources import create_audio_dataset, TreeDataSource
@@ -332,6 +334,8 @@ loader. See :ref:`quantized-features` for a complete round-trip example.
 **Multiprocessing**
 
 Chain transforms before adding multiprocessing:
+
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
 
 .. code-block:: python
 
@@ -365,6 +369,8 @@ Complete Training Example
 --------------------------
 
 Full pipeline with chained transforms, batching, and multiprocessing:
+
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
 
 .. code-block:: python
 

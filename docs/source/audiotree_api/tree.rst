@@ -13,6 +13,10 @@ TreeWriter / TreeDataSource
    :members:
    :undoc-members:
 
-.. automodule:: audiotree.sources.tree
+.. Documented under the ``audiotree.sources`` package rather than the
+   ``audiotree.sources.tree`` submodule it lives in, so that the public spelling
+   is the one cross-references resolve against.
+
+.. autoclass:: audiotree.sources.TreeDataSource
    :members:
    :undoc-members:

@@ -44,6 +44,8 @@ Common Patterns
 
 Audio effect modeling often uses dry (original) and wet (processed) pairs:
 
+.. skip-snippet-exec: fragment; the dry/wet trees are elided as ``AudioTree(...)``.
+
 .. code-block:: python
 
     import numpy as np
@@ -73,6 +75,8 @@ Audio effect modeling often uses dry (original) and wet (processed) pairs:
 
 **Pattern 2: Input/Target for Supervised Learning**
 
+.. skip-snippet-exec: fragment; the input/target trees are named but not built.
+
 .. code-block:: python
 
     batch = {'input': input_audio, 'target': target_audio}
@@ -91,6 +95,8 @@ Audio effect modeling often uses dry (original) and wet (processed) pairs:
     batch = transform2.random_map(batch, np.random.default_rng(43))
 
 **Pattern 3: Multi-Channel Processing**
+
+.. skip-snippet-exec: fragment; the three trees are named but not built.
 
 .. code-block:: python
 
@@ -116,6 +122,8 @@ Using Scope
 
 **Transform all keys (default):**
 
+.. skip-snippet-exec: fragment; ``batch`` comes from the section above.
+
 .. code-block:: python
 
     # No scope specified - transforms all AudioTree leaves
@@ -123,6 +131,8 @@ Using Scope
     batch = transform.random_map(batch, rng)
 
 **Transform specific key:**
+
+.. skip-snippet-exec: fragment; ``batch`` comes from the section above.
 
 .. code-block:: python
 
@@ -135,6 +145,8 @@ Using Scope
     batch = transform.random_map(batch, rng)
 
 **Transform multiple specific keys:**
+
+.. skip-snippet-exec: fragment; ``batch`` comes from the section above.
 
 .. code-block:: python
 
@@ -150,6 +162,8 @@ Using Scope
     batch = transform.random_map(batch, rng)
 
 **Nested dictionaries:**
+
+.. skip-snippet-exec: fragment; the nested trees are named but not built.
 
 .. code-block:: python
 
@@ -183,6 +197,8 @@ Configure scope via YAML:
         scope: true
 
 **Python:**
+
+.. skip-snippet-exec: fragment; argbind parses the command line at run time.
 
 .. code-block:: python
 
@@ -230,6 +246,8 @@ Complete Training Pipeline
 ---------------------------
 
 Full example using dict batches with scope:
+
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
 
 .. code-block:: python
 
@@ -428,30 +446,66 @@ Scope with ArgBind
         batch = transform1.random_map(batch, np.random.default_rng(42))
         batch = transform2.random_map(batch, np.random.default_rng(43))
 
-Scoped Configurations
----------------------
+Different Parameters Per Key
+----------------------------
 
-Different configurations per key:
+``scope`` selects *which* keys a transform touches. It does **not** carry
+per-key parameters — a transform instance has exactly one set of parameters, and
+they apply to every key it selects. Anything other than the ``scope`` sentinel
+inside a scope dict is read as another path/boolean selection, not as an
+override, so this does not do what it looks like:
 
-**YAML:**
+.. skip-snippet-test: illustrates a mistake — the overrides below are not applied.
 
 .. code-block:: yaml
 
-    # Different volume normalization per key
-    volume_norm.min_db: -20  # Default for all
+    # WRONG: min_db/max_db here are NOT per-key overrides.
+    volume_norm.min_db: -20
     volume_norm.max_db: -15
     volume_norm.scope:
       dry:
         scope: true
-        min_db: -25  # Override for 'dry'
+        min_db: -25   # ignored as a parameter
       wet:
         scope: true
-        max_db: -10  # Override for 'wet'
+        max_db: -10   # ignored as a parameter
 
-This applies:
-- 'dry': min_db=-25, max_db=-15
-- 'wet': min_db=-20, max_db=-10
-- Other keys: not transformed
+To give each key its own parameters, use one transform instance per key:
+
+.. code-block:: python
+
+    import numpy as np
+    from audiotree.transforms import volume_norm
+
+    dry_norm = volume_norm(min_db=-25, max_db=-15, scope=["dry"])
+    wet_norm = volume_norm(min_db=-20, max_db=-10, scope=["wet"])
+
+    batch = dry_norm.random_map(batch, np.random.default_rng(42))
+    batch = wet_norm.random_map(batch, np.random.default_rng(43))
+
+The same thing in YAML, using argbind's own pattern scoping (see
+:ref:`argbind_guide`) to give the two bindings different parameters:
+
+.. code-block:: yaml
+
+    dry/volume_norm.min_db: -25
+    dry/volume_norm.max_db: -15
+    dry/volume_norm.scope: [dry]
+
+    wet/volume_norm.min_db: -20
+    wet/volume_norm.max_db: -10
+    wet/volume_norm.scope: [wet]
+
+Build one instance under each argbind pattern:
+
+.. skip-snippet-exec: needs a parsed argbind config on the command line.
+
+.. code-block:: python
+
+    with argbind.scope(args, "dry"):
+        dry_norm = volume_norm()
+    with argbind.scope(args, "wet"):
+        wet_norm = volume_norm()
 
 Best Practices
 --------------
@@ -467,6 +521,8 @@ Common Use Cases
 
 **Audio Effect Modeling:**
 
+.. skip-snippet-exec: fragment; the dry/wet signals are named but not built.
+
 .. code-block:: python
 
     batch = {'dry': dry_signal, 'wet': wet_signal}
@@ -481,6 +537,8 @@ Common Use Cases
     ).random_map(batch, rng)
 
 **Source Separation:**
+
+.. skip-snippet-exec: fragment; the stem trees are named but not built.
 
 .. code-block:: python
 
@@ -501,6 +559,8 @@ Common Use Cases
     ).random_map(batch, rng)
 
 **Self-Supervised Learning:**
+
+.. skip-snippet-exec: fragment; ``audio`` is elided.
 
 .. code-block:: python
 
@@ -525,6 +585,8 @@ Complete Example
 ----------------
 
 Full training pipeline with dict batches:
+
+.. skip-snippet-exec: fragment; the dataset is elided as ``...``.
 
 .. code-block:: python
 
@@ -723,6 +785,8 @@ Common Pitfalls
 
 **Solution:** Use nested scope structure:
 
+.. skip-snippet-exec: fragment; ``audio`` is elided.
+
 .. code-block:: python
 
     batch = {'input': {'dry': audio, 'wet': audio}, 'target': audio}
@@ -755,6 +819,8 @@ by default with shape ``(batch, channels, samples)``.
 
 **Basic batching with AudioTrees:**
 
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
+
 .. code-block:: python
 
     import grain
@@ -768,6 +834,8 @@ by default with shape ``(batch, channels, samples)``.
         print(batch.waveform.shape)  # (32, channels, samples)
 
 **Batching dict structures:**
+
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
 
 .. code-block:: python
 
@@ -807,6 +875,8 @@ For regular arrays (non-AudioTree), ``batch`` also concatenates along axis 0, so
 they have a leading batch dimension.
 
 **Complete example with multiprocessing:**
+
+.. skip-snippet-exec: iterates a repeated dataset, which is infinite by construction.
 
 .. code-block:: python
 
