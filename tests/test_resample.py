@@ -1,94 +1,193 @@
-from pathlib import Path
-
-import numpy as np
-import jax.numpy as jnp
 import jax
-import librosa
+import jax.numpy as jnp
+import numpy as np
 import pytest
-from scipy.io import wavfile
+from scipy.signal import butter, resample_poly, sosfiltfilt
 
 from audiotree import AudioTree
 from audiotree.resample import resample
 
+# The Julius kernel (a cos^2-windowed sinc, `zeros=24`, cutoff at
+# `0.945 * min(sr) / 2`) is not the same filter as scipy's Kaiser-windowed
+# `resample_poly` default, so the two only agree to within their shared passband
+# ripple + stopband leakage. Measured on the signals below (band-limited to
+# ~0.35 of the lower Nyquist, edges trimmed) the worst deviation is ~1.1e-3 on a
+# unit-scaled waveform; 3e-3 leaves headroom without being loose enough to hide a
+# real defect -- e.g. transposing the polyphase de-interleave takes the error to
+# ~2.0.
+_SCIPY_ATOL = 3e-3
+# Both filters ring at the boundaries, where they disagree by ~2e-2. Compare the
+# steady-state interior only.
+_EDGE_SEC = 0.005
 
-def _resample(
-    y: np.ndarray,
-    old_sr: int,
-    new_sr: int,
-    output_path: str | None = None,
-    do_jit: bool = True,
-):
-
-    y = jnp.array(y)
-    # print('y shape: ', y.shape)
-
-    if do_jit:
-
-        @jax.jit(
-            static_argnames=(
-                "old_sr",
-                "new_sr",
-            ),
-        )
-        def resample_fn(x, old_sr, new_sr):
-            return resample(x, old_sr, new_sr)
-
-    else:
-        resample_fn = resample
-
-    y = resample_fn(y, old_sr=old_sr, new_sr=new_sr)
-    # print('y shape: ', y.shape)
-    y = np.array(y)
-
-    # todo: use the torch version of julius and confirm the outputs match.
-    # (DBraun did this manually once but didn't automate it.)
-
-    if output_path is not None:
-        for i, audio in enumerate(y):
-            wavfile.write(f"{output_path}_{str(i).zfill(3)}.wav", new_sr, audio.T)
+_RATE_PAIRS = [
+    (44_100, 48_000),  # up, awkward ratio (147/160)
+    (48_000, 44_100),  # down, awkward ratio
+    (44_100, 22_050),  # down, simple ratio
+    (22_050, 44_100),  # up, simple ratio
+    (16_000, 8_000),
+    (8_000, 16_000),
+]
 
 
-def test_resample_001():
-    # Use test assets - stereo file loaded 3 times for batch testing
-    assets_dir = Path(__file__).parent / "assets"
-    filepath = str(
-        assets_dir
-        / "musdb18hq"
-        / "train"
-        / "A Classic Education - NightOwl"
-        / "mixture.wav"
+def _band_limited_tones(sample_rate: int, duration: float, seed: int) -> np.ndarray:
+    """A multi-tone signal well inside the passband of both resamplers."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(int(sample_rate * duration)) / sample_rate
+    y = sum(
+        np.sin(2 * np.pi * f * t + rng.uniform(0.0, 2 * np.pi))
+        for f in (55.0, 220.0, 1000.0, 3000.0)
+    )
+    return (y / 4.0).astype(np.float64)
+
+
+def _band_limited_noise(
+    sample_rate: int, duration: float, cutoff_hz: float, seed: int
+) -> np.ndarray:
+    """Broadband noise low-passed below the resampler's transition band."""
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal(int(sample_rate * duration))
+    sos = butter(8, cutoff_hz / (sample_rate / 2), btype="low", output="sos")
+    x = sosfiltfilt(sos, x)
+    return (x / np.abs(x).max()).astype(np.float64)
+
+
+def _assert_matches_resample_poly(x: np.ndarray, old_sr: int, new_sr: int):
+    """Compare `resample` against `scipy.signal.resample_poly` on `[B, C, T]` input."""
+    got = np.asarray(
+        resample(jnp.asarray(x, dtype=jnp.float32), old_sr, new_sr, full=True)
+    )
+    ref = resample_poly(x, new_sr, old_sr, axis=-1)
+    assert got.shape[:2] == x.shape[:2]
+
+    n = min(got.shape[-1], ref.shape[-1])
+    edge = int(_EDGE_SEC * new_sr)
+    err = np.abs(got[..., edge : n - edge] - ref[..., edge : n - edge])
+    assert err.max() < _SCIPY_ATOL, f"{old_sr} -> {new_sr}: max abs error {err.max()}"
+
+
+@pytest.mark.parametrize("old_sr,new_sr", _RATE_PAIRS)
+def test_resample_matches_scipy_mono(old_sr: int, new_sr: int):
+    x = _band_limited_tones(old_sr, 0.5, seed=0)[None, None]
+    _assert_matches_resample_poly(x, old_sr, new_sr)
+
+
+@pytest.mark.parametrize("old_sr,new_sr", _RATE_PAIRS)
+def test_resample_matches_scipy_stereo_batched(old_sr: int, new_sr: int):
+    """Each (batch, channel) is resampled independently and correctly."""
+    # Every (batch, channel) carries a different signal, so a mix-up between the
+    # batch, channel or polyphase axes shows up as a gross error.
+    x = np.stack(
+        [
+            np.stack(
+                [_band_limited_tones(old_sr, 0.3, seed=2 * b + c) for c in range(2)]
+            )
+            for b in range(2)
+        ]
+    )
+    assert x.shape[:2] == (2, 2)
+    _assert_matches_resample_poly(x, old_sr, new_sr)
+
+
+@pytest.mark.parametrize("old_sr,new_sr", [(44_100, 48_000), (48_000, 16_000)])
+def test_resample_matches_scipy_broadband(old_sr: int, new_sr: int):
+    """Broadband (not a pure tone) content, where the anti-aliasing filter matters."""
+    x = _band_limited_noise(old_sr, 0.5, 0.35 * min(old_sr, new_sr), seed=7)[None, None]
+    _assert_matches_resample_poly(x, old_sr, new_sr)
+
+
+def test_resample_under_jit_matches_eager():
+    """Tracing the resample does not change its numerics."""
+    old_sr, new_sr = 44_100, 48_000
+    x = jnp.asarray(_band_limited_tones(old_sr, 0.2, seed=3)[None, None], jnp.float32)
+    jitted = jax.jit(resample, static_argnames=("old_sr", "new_sr"))
+    np.testing.assert_allclose(
+        np.asarray(jitted(x, old_sr=old_sr, new_sr=new_sr)),
+        np.asarray(resample(x, old_sr=old_sr, new_sr=new_sr)),
+        atol=1e-6,
     )
 
-    all_audio = []
 
-    # Load the same file 3 times with different offsets to create a batch
-    for offset in [0.0, 4.0, 8.0]:
-        y, old_sr = librosa.load(
-            filepath, sr=44_100, mono=False, duration=4, offset=offset
-        )
-        all_audio.append(jnp.array(y))
-    y = jnp.stack(all_audio, axis=0)
-
-    new_sr = 96_000
-
-    # Write to test_outputs directory
-    test_outputs_dir = Path(__file__).parent.parent / "test_outputs"
-    test_outputs_dir.mkdir(exist_ok=True)
-    output_path = test_outputs_dir / "test_resample_001"
-    _resample(y, int(old_sr), new_sr, str(output_path))
+@pytest.mark.parametrize(
+    "dtype", [jnp.float32, jnp.float16, jnp.bfloat16], ids=["f32", "f16", "bf16"]
+)
+def test_resample_preserves_dtype(dtype):
+    """The sinc kernel follows the input dtype, not JAX's global default."""
+    x = jnp.zeros((1, 1, 4_410), dtype=dtype)
+    y = resample(x, 44_100, 48_000)
+    assert y.dtype == dtype
 
 
-@pytest.mark.parametrize("new_sr", [96_000])
-def test_resample_002(new_sr: int):
+def test_resample_float32_under_x64():
+    """With x64 enabled the kernel must still be float32 for a float32 input.
 
-    old_sr = 44_100
+    Guards the regression where the kernel took `jnp`'s global default dtype, so
+    `JAX_ENABLE_X64=1` made the convolution's operands disagree.
+    """
+    with jax.enable_x64(True):
+        x = jnp.zeros((1, 1, 4_410), dtype=jnp.float32)
+        assert resample(x, 44_100, 48_000).dtype == jnp.float32
 
-    B = 4
-    C = 2
 
-    y = np.zeros((B, C, old_sr * 10))
+def test_resample_rejects_non_3d():
+    with pytest.raises(ValueError, match=r"\[B, C, T\].*\(1, 4410\)"):
+        resample(jnp.zeros((1, 4_410)), 44_100, 48_000)
 
-    _resample(y, old_sr=old_sr, new_sr=new_sr)
+
+def test_resample_rejects_non_integer_rates():
+    with pytest.raises(ValueError, match="should be integers"):
+        resample(jnp.zeros((1, 1, 4_410)), 44_100.0, 48_000)
+
+
+def test_resample_rejects_non_positive_rates():
+    with pytest.raises(ValueError, match="should be positive"):
+        resample(jnp.zeros((1, 1, 4_410)), 44_100, 0)
+
+
+@pytest.mark.parametrize("new_sr", [44_100, 48_000], ids=["same_rate", "other_rate"])
+def test_resample_rejects_oversized_output_length(new_sr: int):
+    """`output_length` is validated at the equal-rate short circuit too."""
+    x = jnp.zeros((1, 1, 4_410))
+    with pytest.raises(ValueError, match="output_length must be between"):
+        resample(x, 44_100, new_sr, output_length=99_999)
+
+
+@pytest.mark.parametrize("new_sr", [44_100, 48_000], ids=["same_rate", "other_rate"])
+def test_resample_rejects_negative_output_length(new_sr: int):
+    x = jnp.zeros((1, 1, 4_410))
+    with pytest.raises(ValueError, match="output_length must be between"):
+        resample(x, 44_100, new_sr, output_length=-5)
+
+
+@pytest.mark.parametrize("new_sr", [44_100, 48_000], ids=["same_rate", "other_rate"])
+def test_resample_rejects_full_with_output_length(new_sr: int):
+    x = jnp.zeros((1, 1, 4_410))
+    with pytest.raises(ValueError, match="cannot pass both"):
+        resample(x, 44_100, new_sr, output_length=100, full=True)
+
+
+def test_resample_same_rate_honors_output_length():
+    """An equal-rate resample must trim like every other rate, not pass through."""
+    x = jnp.asarray(_band_limited_tones(44_100, 0.1, seed=1)[None, None], jnp.float32)
+    out = resample(x, 44_100, 44_100, output_length=1_000)
+    assert out.shape == (1, 1, 1_000)
+    np.testing.assert_array_equal(np.asarray(out), np.asarray(x[..., :1_000]))
+
+
+def test_resample_same_rate_is_identity_by_default():
+    x = jnp.asarray(_band_limited_tones(44_100, 0.1, seed=1)[None, None], jnp.float32)
+    np.testing.assert_array_equal(
+        np.asarray(resample(x, 44_100, 44_100)), np.asarray(x)
+    )
+
+
+def test_resample_output_lengths():
+    """Default is the floored length; `full=True` is the ceiled one."""
+    x = jnp.zeros((1, 1, 1_001))
+    # 1001 * 160 / 147 = 1089.52...
+    assert resample(x, 44_100, 48_000).shape[-1] == 1_089
+    assert resample(x, 44_100, 48_000, full=True).shape[-1] == 1_090
+    assert resample(x, 44_100, 48_000, output_length=1_090).shape[-1] == 1_090
 
 
 def test_audiotree_resample_numpy_stays_numpy():

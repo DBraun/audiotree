@@ -7,6 +7,7 @@ notice is bundled at LICENSES/pyloudnorm-MIT.txt.
 """
 
 import math
+from typing import Optional
 
 import jax
 import jaxloudnorm as jln
@@ -14,18 +15,33 @@ import numpy as np
 from jax import numpy as jnp
 from scipy.signal import lfilter
 
-# ITU-R BS.1770 K-weighting: two RBJ-cookbook biquads (a high-frequency shelf
-# then a high-pass), as ``(gain_db, Q, fc_hz, filter_type)``. These match the
-# ``K-weighting`` filter class in :mod:`jaxloudnorm`, so the NumPy (exact IIR) and
-# JAX (FIR-approximated) paths weight audio the same way.
+# ITU-R BS.1770 K-weighting, as the pair of biquads Brecht DeMan fitted to the
+# coefficients printed in the standard (pyloudnorm/jaxloudnorm call this the
+# ``DeMan`` filter class), given as ``(gain_db, Q, fc_hz, filter_type)``.
+#
+# pyloudnorm *defaults* to a ``K-weighting`` class built from the RBJ cookbook
+# instead; that is an approximation of these and measures ~0.04 LU differently on
+# program material. The ``loudness`` C++ library behind the NumPy ``lufs`` path
+# implements the standard's coefficients, so DeMan is what keeps all four paths
+# -- NumPy/JAX x integrated/windowed -- weighting audio identically.
+_FILTER_CLASS = "DeMan"
 _K_FILTER_STAGES = (
-    (4.0, 1.0 / math.sqrt(2.0), 1500.0, "high_shelf"),
-    (0.0, 0.5, 38.0, "high_pass"),
+    (3.99984385397, 0.7071752369554193, 1681.9744509555319, "high_shelf_DeMan"),
+    (0.0, 0.5003270373253953, 38.13547087613982, "high_pass_DeMan"),
 )
 # BS.1770 per-channel weights for [L, R, C, Ls, Rs] (surround channels count more).
 _CHANNEL_GAINS = (1.0, 1.0, 1.0, 1.41, 1.41)
 # BS.1770 absolute loudness offset in the LUFS formula.
 _ABSOLUTE_OFFSET = -0.691
+# BS.1770 gating block length, in seconds. Loudness is undefined below one block.
+_GATING_BLOCK_SEC = 0.4
+# Duration the FIR approximation of the K-weighting IIR filters must span. The
+# 38 Hz high-pass rings for tens of milliseconds, so the tap count has to track
+# the sample rate: jaxloudnorm's default of 512 taps is 10.7 ms at 48 kHz and
+# cannot realize the filter at all there (0.6-0.7 LU error on 38-60 Hz tones, and
+# unbounded error on infrasonic content). Measured at 48 kHz the approximation
+# has converged to within 0.02 LU by ~43 ms, so 50 ms leaves margin at any rate.
+_FIR_IMPULSE_SEC = 0.05
 
 
 def safe_gain_db(lufs, target_lufs, max_gain_db=None, *, xp=np):
@@ -107,35 +123,83 @@ def _windowed_num_windows(samples: int, window_span: int, hop_span: int) -> int:
     return (samples - window_span) // hop_span + 1
 
 
-def _rbj_biquad(
+def fir_taps(sample_rate: int) -> int:
+    """Tap count for the FIR approximation of the K-weighting IIR filters.
+
+    The K-weighting filters are specified in Hz, so their impulse responses last
+    a fixed *duration* — the tap count must therefore scale with the sample rate.
+    Rounded up to a power of two, which is what the FFT convolution behind
+    :func:`jaxloudnorm.lfilter.approximate_iir_as_fir` wants anyway.
+    """
+    if sample_rate <= 0:
+        raise ValueError(f"sample_rate must be positive, got {sample_rate}.")
+    return 1 << math.ceil(math.log2(_FIR_IMPULSE_SEC * sample_rate))
+
+
+def pad_to_gating_block(waveform, sample_rate: int, *, xp=np):
+    """Right-pad an excerpt shorter than one BS.1770 gating block, level-compensated.
+
+    BS.1770 has no answer below one 400 ms gating block, and every implementation
+    here needs *some* answer because short excerpts are routine. Padding alone is
+    not it: zero-padding a ``dur`` second excerpt out to 400 ms dilutes its mean
+    square by ``dur / 0.4``, so the measured loudness under-reports the excerpt's
+    own loudness by exactly ``10 * log10(dur / 0.4)`` — 3.01 dB for a 200 ms
+    excerpt. Scaling the padded signal by ``sqrt(0.4 * sample_rate / samples)``
+    restores the excerpt's own mean square, so the meter reports the loudness of
+    the audio that is actually there. Scaling before the meter (rather than
+    correcting its output afterwards) also means BS.1770's absolute and relative
+    gates see the corrected level.
+
+    Longer waveforms are returned unchanged.
+
+    Args:
+        waveform: A ``(..., samples)`` array.
+        sample_rate: Sample rate of ``waveform`` in Hz.
+        xp: The array module to compute with — :mod:`numpy` or ``jax.numpy``.
+
+    Returns:
+        The waveform, right-padded and level-compensated to at least one gating
+        block.
+    """
+    samples = waveform.shape[-1]
+    min_samples = math.ceil(_GATING_BLOCK_SEC * sample_rate)
+    if samples >= min_samples:
+        return waveform
+    if samples == 0:
+        raise ValueError("Cannot measure the loudness of a zero-length waveform.")
+    pad_width = ((0, 0),) * (waveform.ndim - 1) + ((0, min_samples - samples),)
+    padded = xp.pad(waveform, pad_width)
+    return padded * xp.asarray(math.sqrt(min_samples / samples), dtype=padded.dtype)
+
+
+def _kweighting_biquad(
     gain_db: float, q: float, fc: float, sample_rate: int, filter_type: str
 ) -> tuple[np.ndarray, np.ndarray]:
-    """RBJ-cookbook biquad coefficients ``(b, a)`` for a K-weighting stage (NumPy).
+    """Biquad coefficients ``(b, a)`` for a K-weighting stage (NumPy).
 
-    Mirrors :meth:`jaxloudnorm.IIRfilter.generate_coefficients` for the two filter
-    shapes the K-weighting uses, so the CPU IIR filter matches the JAX meter's.
+    Mirrors :meth:`jaxloudnorm.IIRfilter.generate_coefficients` for the two
+    ``DeMan`` filter shapes the K-weighting uses, so the CPU IIR filter matches
+    the JAX meter's.
     """
-    A = 10.0 ** (gain_db / 40.0)
-    w0 = 2.0 * np.pi * (fc / sample_rate)
-    alpha = np.sin(w0) / (2.0 * q)
-    cw = np.cos(w0)
-    if filter_type == "high_shelf":
-        b0 = A * ((A + 1) + (A - 1) * cw + 2 * np.sqrt(A) * alpha)
-        b1 = -2 * A * ((A - 1) + (A + 1) * cw)
-        b2 = A * ((A + 1) + (A - 1) * cw - 2 * np.sqrt(A) * alpha)
-        a0 = (A + 1) - (A - 1) * cw + 2 * np.sqrt(A) * alpha
-        a1 = 2 * ((A - 1) - (A + 1) * cw)
-        a2 = (A + 1) - (A - 1) * cw - 2 * np.sqrt(A) * alpha
-    elif filter_type == "high_pass":
-        b0 = (1 + cw) / 2
-        b1 = -(1 + cw)
-        b2 = (1 + cw) / 2
-        a0 = 1 + alpha
-        a1 = -2 * cw
-        a2 = 1 - alpha
+    K = np.tan(np.pi * fc / sample_rate)
+    if filter_type == "high_shelf_DeMan":
+        Vh = 10.0 ** (gain_db / 20.0)
+        Vb = Vh**0.499666774155
+        a0 = 1.0 + K / q + K * K
+        b = np.array(
+            [
+                Vh + Vb * K / q + K * K,
+                2.0 * (K * K - Vh),
+                Vh - Vb * K / q + K * K,
+            ]
+        )
+    elif filter_type == "high_pass_DeMan":
+        a0 = 1.0 + K / q + K * K
+        b = np.array([1.0, -2.0, 1.0]) * a0
     else:
         raise RuntimeError(f"Unsupported K-weighting filter stage: {filter_type!r}")
-    return np.array([b0, b1, b2]) / a0, np.array([a0, a1, a2]) / a0
+    a = np.array([a0, 2.0 * (K * K - 1.0), 1.0 - K / q + K * K])
+    return b / a0, a / a0
 
 
 def _windowed_lufs_from_kweighted(filtered, window_span, hop_span, num_windows, xp):
@@ -162,28 +226,30 @@ def _windowed_lufs_from_kweighted(filtered, window_span, hop_span, num_windows, 
 def _jit_integrated_loudness(
     data: jnp.ndarray,
     sample_rate: int,
-    zeros: int = 512,
+    zeros: Optional[int] = None,
 ):
     """Integrated loudness (LUFS) per item of a ``(batch, channels, samples)`` batch.
 
     Uses the ITU-R BS.1770 gating-block length (0.4s / 400ms). Items shorter than
-    one block are right-padded with silence so the measurement stays valid.
+    one block are padded and level-compensated by :func:`pad_to_gating_block`, so
+    a short excerpt measures its own loudness rather than a diluted one.
+
+    Args:
+        data: A ``(batch, channels, samples)`` waveform.
+        sample_rate: Sample rate of ``data`` in Hz.
+        zeros: Tap count for the FIR approximation of the K-weighting filters.
+            ``None`` (the default) uses :func:`fir_taps`, which scales with the
+            sample rate; pass an explicit count only to study the approximation.
     """
-    block_size = 0.4  # BS.1770 gating block
-    min_samples = math.ceil(block_size * sample_rate)
+    data = pad_to_gating_block(data, sample_rate, xp=jnp)
 
-    original_length = data.shape[-1]
-    if original_length < min_samples:
-        data = jnp.pad(
-            data,
-            pad_width=(
-                (0, 0),
-                (0, 0),
-                (0, min_samples - original_length),
-            ),
-        )
-
-    meter = jln.Meter(sample_rate, block_size=block_size, use_fir=True, zeros=zeros)
+    meter = jln.Meter(
+        sample_rate,
+        filter_class=_FILTER_CLASS,
+        block_size=_GATING_BLOCK_SEC,
+        use_fir=True,
+        zeros=fir_taps(sample_rate) if zeros is None else zeros,
+    )
     # jaxloudnorm >= 0.3.1 returns -inf LUFS for digital silence (the mathematical
     # limit of zero gated power), so no NaN guard is needed here.
     return jax.vmap(meter.integrated_loudness)(data)
@@ -195,7 +261,7 @@ def _jit_windowed_loudness(
     sample_rate: int,
     lufs_window_sec: float,
     lufs_hop_sec: float,
-    zeros: int = 512,
+    zeros: Optional[int] = None,
 ):
     """Ungated per-window loudness (LUFS) for a batch of waveforms on GPU.
 
@@ -212,10 +278,24 @@ def _jit_windowed_loudness(
     The caller ensures at least one whole window fits; the empty case is handled
     upstream.
 
+    Args:
+        data: A ``(batch, channels, samples)`` waveform.
+        sample_rate: Sample rate of ``data`` in Hz.
+        lufs_window_sec: Window length in seconds.
+        lufs_hop_sec: Step between window starts, in seconds.
+        zeros: Tap count for the FIR approximation of the K-weighting filters.
+            ``None`` (the default) uses :func:`fir_taps`, which scales with the
+            sample rate; pass an explicit count only to study the approximation.
+
     Returns:
         A ``(batch, num_windows)`` array of per-window LUFS.
     """
-    meter = jln.Meter(sample_rate, use_fir=True, zeros=zeros)
+    meter = jln.Meter(
+        sample_rate,
+        filter_class=_FILTER_CLASS,
+        use_fir=True,
+        zeros=fir_taps(sample_rate) if zeros is None else zeros,
+    )
 
     def _k_weight(item):  # item: (channels, samples); jaxloudnorm filters are 2-D
         for stage in meter._filters:
@@ -248,7 +328,7 @@ def _numpy_windowed_lufs(
     """
     filtered = waveform.astype(np.float64)
     for gain_db, q, fc, filter_type in _K_FILTER_STAGES:
-        b, a = _rbj_biquad(gain_db, q, fc, sample_rate, filter_type)
+        b, a = _kweighting_biquad(gain_db, q, fc, sample_rate, filter_type)
         filtered = lfilter(b, a, filtered, axis=-1)
 
     window_span = _window_samples(lufs_window_sec, sample_rate)
