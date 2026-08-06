@@ -40,6 +40,7 @@ See also:
 """
 
 from .codec import AudioCodec
+from .codec import LatentAudioCodec
 from .codec import encode_latents
 from .codec import encode_with_codec
 from .functional import identity
@@ -66,6 +67,7 @@ __all__ = [
     "map_transform",
     "random_transform",
     "AudioCodec",
+    "LatentAudioCodec",
     "identity",
     "mono",
     "stereo",

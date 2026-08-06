@@ -207,6 +207,25 @@ def _swap_stereo_np(audio_tree: AudioTree) -> AudioTree:
 # =============================================================================
 
 
+def _pad_to_hop_multiple(waveform: jnp.ndarray, hop_length: int) -> jnp.ndarray:
+    """Right-pad a waveform with zeros up to a whole number of hops.
+
+    ``librosax.istft`` reconstructs only ``(n_frames - 1) * hop_length`` samples
+    and zero-fills the remainder of whatever ``length=`` asks for, so a signal
+    whose length is not a multiple of ``hop_length`` comes back with its last
+    ``length % hop_length`` samples silenced -- 68 samples of a 1 s @ 44.1 kHz
+    clip at ``hop_length=1024``, which is audible. Padding up to the next
+    multiple of the hop buys the one extra analysis frame that covers the tail;
+    passing the original ``length`` to ``istft`` then trims the padding back
+    off. ``librosa.istft`` reconstructs the tail itself, so the NumPy backend
+    needs no such padding.
+    """
+    pad = -waveform.shape[-1] % hop_length
+    if pad == 0:
+        return waveform
+    return jnp.pad(waveform, ((0, 0), (0, 0), (0, pad)))
+
+
 def _corrupt_phase_jax(
     audio_tree: AudioTree,
     rng: jax.Array,
@@ -223,9 +242,14 @@ def _corrupt_phase_jax(
     hop_length = int(frame_length * hop_factor)
 
     stft_data = librosax.stft(
-        waveform, n_fft=frame_length, hop_length=hop_length, window=window, center=True
+        _pad_to_hop_multiple(waveform, hop_length),
+        n_fft=frame_length,
+        hop_length=hop_length,
+        window=window,
+        center=True,
     )
 
+    # One random phase offset per (batch, channel, frequency), broadcast over frames.
     amt = random.uniform(
         rng, shape=stft_data.shape[:-1], minval=-jnp.pi * amount, maxval=jnp.pi * amount
     )
@@ -310,17 +334,24 @@ def _shift_phase_jax(
     hop_length = int(frame_length * hop_factor)
 
     stft_data = librosax.stft(
-        waveform, n_fft=frame_length, hop_length=hop_length, window=window, center=True
+        _pad_to_hop_multiple(waveform, hop_length),
+        n_fft=frame_length,
+        hop_length=hop_length,
+        window=window,
+        center=True,
     )
 
-    amt = random.uniform(
+    # One phase shift per batch item, broadcast over channels/frequencies/frames.
+    # Drawing one per channel instead would rotate the two halves of a stereo
+    # image by different angles, decorrelating a pair that started identical.
+    amts = random.uniform(
         key,
-        shape=stft_data.shape[:-2],
+        shape=(B,),
         minval=-jnp.pi * amount,
         maxval=jnp.pi * amount,
     )
 
-    stft_data = stft_data * jnp.expand_dims(jnp.exp(1j * amt), axis=(-2, -1))
+    stft_data = stft_data * jnp.exp(1j * amts)[:, None, None, None]
 
     waveform = librosax.istft(
         stft_data,

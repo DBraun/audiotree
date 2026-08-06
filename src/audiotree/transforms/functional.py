@@ -319,7 +319,9 @@ def corrupt_phase(
     """Perform phase corruption on audio.
 
     The phase shift range is [-pi * amount, pi * amount], independently
-    selected for each frequency in the STFT.
+    selected for each channel and frequency of the STFT, and shared across
+    frames. Contrast :func:`shift_phase`, which rotates the whole spectrum of
+    an item by one angle.
 
     Args:
         audio_tree: Input audio
@@ -354,7 +356,10 @@ def shift_phase(
 ) -> AudioTree:
     """Perform a phase shift on audio.
 
-    The phase shift range is [-pi * amount, pi * amount].
+    The phase shift range is [-pi * amount, pi * amount]. One angle is drawn
+    per item in the batch and applied to every channel and frequency, so a
+    stereo image stays coherent. Contrast :func:`corrupt_phase`, which draws an
+    angle per channel and frequency.
 
     Args:
         audio_tree: Input audio

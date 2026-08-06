@@ -286,6 +286,79 @@ def test_output_key_004():
     assert are_equal_pytree(expected, transformed_audio_tree)
 
 
+def test_output_key_rejects_a_non_dict_element():
+    """``output_key`` renames dict keys, so a bare AudioTree is a usage error.
+
+    A ``raise`` rather than an ``assert``, so it survives ``python -O`` -- see
+    ``test_transform_guards_survive_python_O``.
+    """
+    transform = Multiply(output_key="modified")
+    with pytest.raises(TypeError, match="not a dict"):
+        transform.map(AudioTree(jnp.zeros((1, 1, 64)), 44100))
+
+
+@pytest.mark.parametrize("prob", [-0.1, 1.5, float("nan")])
+def test_random_transform_rejects_out_of_range_prob(prob):
+    """``prob`` outside [0, 1] silently means "always" or "never" if unchecked."""
+    with pytest.raises(ValueError, match=r"prob=.*not in \[0, 1\]"):
+        volume_change(prob=prob)
+
+
+def test_transform_guards_survive_python_O():
+    """The two guards above are ``raise``, not ``assert``, so ``-O`` keeps them.
+
+    Under ``-O`` an ``assert`` is compiled out entirely, so the failure would be
+    a transform that silently always (or never) fires, or one that drops the
+    audio it just transformed.
+    """
+    import subprocess
+    import sys
+
+    script = """
+import numpy as np
+from audiotree import AudioTree
+from audiotree.transforms import volume_change
+
+assert_removed = True
+try:
+    assert False
+except AssertionError:
+    assert_removed = False
+if assert_removed is not True:
+    raise SystemExit("-O did not strip asserts; the test proves nothing")
+
+try:
+    volume_change(prob=1.5)
+except ValueError as exc:
+    if "not in [0, 1]" not in str(exc):
+        raise SystemExit(f"wrong message: {exc}")
+else:
+    raise SystemExit("prob=1.5 was accepted under -O")
+
+from audiotree.transforms.base import BaseMapTransform
+
+class Noop(BaseMapTransform):
+    @staticmethod
+    def get_default_config():
+        return {}
+
+    @staticmethod
+    def _apply_transform(audio_tree):
+        return audio_tree
+
+try:
+    Noop(output_key="modified").map(
+        AudioTree(np.zeros((1, 1, 64), dtype=np.float32), 44100)
+    )
+except TypeError as exc:
+    if "not a dict" not in str(exc):
+        raise SystemExit(f"wrong message: {exc}")
+else:
+    raise SystemExit("a non-dict element was accepted under -O")
+"""
+    subprocess.run([sys.executable, "-O", "-c", script], check=True)
+
+
 def test_volume_change():
     audio_tree = AudioTree(
         waveform=np.ones(shape=(1, 1, 44100), dtype=np.float32), sample_rate=44100

@@ -334,9 +334,13 @@ class BaseTransformMixIn:
         if output_key is None:
             return new_tree
 
-        assert isinstance(old_tree, dict), (
-            "You specified `output_key`, but the transformed element is not a dict."
-        )
+        # A `raise`, not an `assert`: `python -O` strips asserts, and without this
+        # check the rename below silently drops the transformed audio instead.
+        if not isinstance(old_tree, dict):
+            raise TypeError(
+                f"You specified `output_key`, but the transformed element is a "
+                f"{type(old_tree).__name__}, not a dict."
+            )
 
         def is_leaf(x):
             if not isinstance(x, dict):
@@ -386,7 +390,12 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
             output_key (Union[str, Callable[[List[str]], str]], optional): Key under which to store the transformed
                 value. By default, the values will be transformed in-place.
         """
-        assert 0 <= prob <= 1
+        # A `raise`, not an `assert`: `python -O` strips asserts, and `prob` outside
+        # [0, 1] then silently becomes "always" or "never". Matches `choose()`.
+        if not 0 <= prob <= 1:
+            raise ValueError(
+                f"{type(self).__name__} got prob={prob}, which is not in [0, 1]."
+            )
         self.default_config = self.get_default_config()
         self.config = flatten_config(config or {}, self.default_config)
         self.split_seed = split_seed
