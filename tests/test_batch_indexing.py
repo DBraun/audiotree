@@ -74,6 +74,49 @@ def test_getitem_negative_index():
     np.testing.assert_array_equal(tree[-1].waveform[0], tree.waveform[2])
 
 
+def test_getitem_numpy_scalar_keeps_batch_axis():
+    """Any integer scalar indexes the batch, not just the builtin ``int``.
+
+    ``np.argmax`` & friends return ``np.int64``, which used to fall through to
+    raw array indexing and scalar-index every leaf -- silently dropping the
+    batch axis, so the channel count masqueraded as ``batch_size``.
+    """
+    import jax.numpy as jnp
+
+    tree = _tree(batch=3, channels=2)
+    tree = tree.replace(lufs=np.array([-30.0, -10.0, -50.0], dtype=np.float32))
+
+    for key in (
+        np.argmax(tree.lufs),  # np.int64
+        np.int32(1),
+        np.array(1),  # 0-d array
+        jnp.asarray(1),  # 0-d JAX array
+        np.where(tree.lufs > -20.0)[0][0],
+        1,
+    ):
+        item = tree[key]
+        assert item.batch_size == 1, key
+        assert item.waveform.shape == (1, 2, 16), key
+        assert item.codes.shape == (1, 4, 3), key
+        assert item.lufs.shape == (1,), key
+        np.testing.assert_array_equal(item.waveform[0], tree.waveform[1])
+
+    # Negative NumPy scalars index from the end, like the builtin int does.
+    np.testing.assert_array_equal(tree[np.int64(-1)].waveform[0], tree.waveform[2])
+    with pytest.raises(IndexError):
+        tree[np.int64(3)]
+
+
+def test_getitem_fancy_and_mask_keys_still_work():
+    """Lists, index arrays and boolean masks keep selecting sub-batches."""
+    tree = _tree(batch=3)
+    for key in ([0, 2], np.array([0, 2]), np.array([True, False, True])):
+        sub = tree[key]
+        assert sub.batch_size == 2
+        np.testing.assert_array_equal(sub.waveform[1], tree.waveform[2])
+        assert sub.metadata["style"].shape == (2, 4)
+
+
 def test_batch_round_trips_items():
     tree = _tree(batch=3)
     batched = AudioTree.batch([tree[i] for i in range(len(tree))])
@@ -112,6 +155,21 @@ def test_to_mono_strategies():
     )
     with pytest.raises(ValueError, match="strategy"):
         tree.to_mono("center")
+
+
+def test_to_mono_validates_strategy_on_mono_input():
+    """An invalid strategy raises even when there is nothing to mix down.
+
+    The mono short-circuit used to return ``self`` before looking at the
+    argument, so a typo passed silently on mono files and only blew up later on
+    a stereo one.
+    """
+    mono = _tree(batch=2, channels=1)
+    with pytest.raises(ValueError, match="strategy"):
+        mono.to_mono("center")
+    # The valid strategies are still no-ops on mono audio.
+    for strategy in ("average", "left", "right"):
+        assert mono.to_mono(strategy) is mono
 
 
 def test_lazy_submodules_importable():

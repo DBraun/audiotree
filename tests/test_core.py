@@ -742,7 +742,7 @@ def test_loudest_excerpt_terminates_on_fully_silent_audio(tmp_path):
 
 
 def test_loudest_excerpt_accepts_bias_early_by_name(tmp_path):
-    """``search_function`` selects the searcher by registered name."""
+    """``search`` selects the searcher by registered name."""
     from audiotree.core import ExcerptConfig
 
     path = _write_half_silent_wav(tmp_path / "half2.wav")
@@ -757,3 +757,187 @@ def test_loudest_excerpt_accepts_bias_early_by_name(tmp_path):
         sample_rate=16000,
     )
     assert tree.waveform.shape == (1, 1, 8000)
+
+
+def _tone_wav(path, sample_rate=16000, seconds=4.0):
+    """A file of constant tone, long enough for several distinct excerpts."""
+    import soundfile
+
+    t = np.arange(int(sample_rate * seconds)) / sample_rate
+    soundfile.write(
+        str(path), (0.5 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32), sample_rate
+    )
+    return path
+
+
+def test_excerpt_uses_one_searcher_signature(tmp_path):
+    """Every shipped searcher is callable through ``excerpt``.
+
+    ``excerpt`` used to call its searchers with four positional arguments while
+    every searcher in the module (and everything ``_resolve_search_function``
+    returns) also requires ``attempt``/``max_attempts``, so no shipped searcher
+    could actually be used: ``search_bias_early`` raised TypeError and the name
+    ``"bias_early"`` raised "'str' object is not callable".
+    """
+    from audiotree.core import ExcerptConfig, search_bias_early
+
+    path = _tone_wav(tmp_path / "tone.wav")
+    common = dict(duration=0.5, sample_rate=16000)
+
+    for search in ("uniform", "bias_early", search_bias_early):
+        tree = AudioTree.excerpt(
+            str(path),
+            np.random.default_rng(0),
+            excerpt=ExcerptConfig(strategy="loudest", search=search),
+            **common,
+        )
+        assert tree.waveform.shape == (1, 1, 8000)
+
+
+def test_excerpt_strategies(tmp_path):
+    """``start`` is deterministic, ``random`` moves, ``loudest`` measures."""
+    from audiotree.core import ExcerptConfig
+
+    path = _tone_wav(tmp_path / "tone2.wav")
+    common = dict(duration=0.5, sample_rate=16000)
+
+    def offset_of(tree):
+        return float(tree.metadata["offset"][0])
+
+    starts = [
+        offset_of(
+            AudioTree.excerpt(
+                str(path),
+                np.random.default_rng(seed),
+                excerpt=ExcerptConfig(strategy="start"),
+                **common,
+            )
+        )
+        for seed in range(3)
+    ]
+    assert starts == [0.0, 0.0, 0.0]
+
+    randoms = [
+        offset_of(AudioTree.excerpt(str(path), np.random.default_rng(seed), **common))
+        for seed in range(3)
+    ]
+    assert len(set(randoms)) == 3
+    assert all(0.0 <= o <= 3.5 for o in randoms)
+
+    # ``offset`` is the earliest allowed start, not the chosen one.
+    bounded = offset_of(
+        AudioTree.excerpt(str(path), np.random.default_rng(0), offset=2.0, **common)
+    )
+    assert bounded >= 2.0
+
+    # ``loudest`` goes through ``loudest_excerpt``, so it measures loudness.
+    loud = AudioTree.excerpt(
+        str(path),
+        np.random.default_rng(0),
+        excerpt=ExcerptConfig(strategy="loudest"),
+        **common,
+    )
+    assert loud.lufs is not None and float(loud.lufs[0]) > -40.0
+
+
+def test_excerpt_rejects_bad_arguments(tmp_path):
+    """A missing duration, or an offset the strategy cannot honor, raises."""
+    from audiotree.core import ExcerptConfig
+
+    path = _tone_wav(tmp_path / "tone3.wav")
+    with pytest.raises(ValueError, match="positive duration"):
+        AudioTree.excerpt(str(path), np.random.default_rng(0), sample_rate=16000)
+    with pytest.raises(ValueError, match="offset"):
+        AudioTree.excerpt(
+            str(path),
+            np.random.default_rng(0),
+            offset=1.0,
+            duration=0.5,
+            sample_rate=16000,
+            excerpt=ExcerptConfig(strategy="loudest"),
+        )
+
+
+def test_excerpt_can_skip(tmp_path):
+    """``on_failure='skip'`` propagates the ``None`` through ``excerpt``."""
+    import soundfile
+
+    from audiotree.core import ExcerptConfig
+
+    path = tmp_path / "silent.wav"
+    soundfile.write(str(path), np.zeros(16000 * 2, dtype=np.float32), 16000)
+
+    assert (
+        AudioTree.excerpt(
+            str(path),
+            np.random.default_rng(0),
+            duration=0.5,
+            sample_rate=16000,
+            excerpt=ExcerptConfig(strategy="loudest", num_tries=2, on_failure="skip"),
+        )
+        is None
+    )
+
+
+# =============================================================================
+# Provenance broadcasting and typed ``replace``
+# =============================================================================
+
+
+@pytest.mark.parametrize("key", ["filepath", "source"])
+def test_create_broadcasts_a_single_name_over_the_batch(key):
+    """A single string tags every item, not just item 0.
+
+    Tagging only item 0 meant ``tree[2].filepath == []``, and a filter that
+    dropped item 0 lost the provenance entirely -- which then lands in written
+    manifests.
+    """
+    waveform = np.zeros((4, 1, 8), dtype=np.float32)
+    tree = AudioTree.create(waveform, 44100, **{key: "music.wav"})
+
+    assert getattr(tree, key) == ["music.wav"] * 4
+    assert tree.metadata[key].shape[0] == 4
+    assert getattr(tree[2], key) == ["music.wav"]
+    assert getattr(tree[1:], key) == ["music.wav"] * 3
+
+    # A list still means one name per item, and a batch of one is unchanged.
+    per_item = AudioTree.create(waveform, 44100, **{key: list("abcd")})
+    assert getattr(per_item, key) == list("abcd")
+    single = AudioTree.create(np.zeros((1, 1, 8)), 44100, **{key: "one.wav"})
+    assert single.metadata[key].shape[0] == 1
+
+
+def test_create_broadcasts_over_token_only_batches():
+    """Token-only trees have a batch axis too, taken from ``codes``."""
+    codes = np.zeros((3, 4, 2), dtype=np.int32)
+    tree = AudioTree.create(None, 44100, codes=codes, filepath="tokens.wav")
+    assert tree.filepath == ["tokens.wav"] * 3
+
+
+def test_replace_is_typed_and_stays_in_sync():
+    """``replace`` is the primary mutation API, so it must be visible to checkers.
+
+    ``flax.struct.dataclass`` installs an untyped ``replace(**updates)``; the
+    typed one is restored after the class body, and its ``Unpack``ed TypedDict
+    has to keep listing exactly the dataclass fields.
+    """
+    import dataclasses
+    import inspect
+    import typing
+
+    from audiotree.core import _AudioTreeFields
+
+    assert tuple(typing.get_type_hints(_AudioTreeFields)) == tuple(
+        f.name for f in dataclasses.fields(AudioTree)
+    )
+
+    signature = inspect.signature(AudioTree.replace)
+    updates = signature.parameters["updates"]
+    assert updates.kind is inspect.Parameter.VAR_KEYWORD
+    assert "_AudioTreeFields" in str(updates.annotation)
+
+    # ...and it still behaves like ``dataclasses.replace``.
+    tree = AudioTree.create(np.zeros((2, 1, 8), dtype=np.float32), 44100)
+    quieter = tree.replace(waveform=tree.waveform + 1.0)
+    assert quieter.sample_rate == 44100
+    np.testing.assert_array_equal(quieter.waveform, tree.waveform + 1.0)

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-from functools import partial
 import importlib
 import json
 from pathlib import Path
@@ -15,8 +14,10 @@ from typing import (
     Optional,
     Self,
     Sequence,
+    TypedDict,
     TYPE_CHECKING,
     Union,
+    Unpack,
 )
 
 from absl import logging
@@ -35,6 +36,7 @@ from .loudness import (
     _numpy_windowed_lufs,
     _window_samples,
     _windowed_num_windows,
+    pad_to_gating_block,
     safe_gain_db,
     shift_lufs,
     shift_lufs_windows,
@@ -249,6 +251,58 @@ class ExcerptConfig:
 _str_max_length = 1024
 
 
+def _is_integer_scalar(key) -> bool:
+    """Whether *key* indexes a single batch item.
+
+    True for the builtin ``int``, for NumPy integer scalars (``np.argmax`` and
+    friends), and for 0-d integer arrays (NumPy or JAX) -- all of which would
+    otherwise scalar-index every leaf and silently drop the batch axis. ``bool``
+    is excluded even though it subclasses ``int``, so ``tree[True]`` is a mask
+    rather than item 1.
+    """
+    if isinstance(key, bool):
+        return False
+    if isinstance(key, (int, np.integer)):
+        return True
+    if isinstance(key, (np.ndarray, jnp.ndarray)):
+        return key.ndim == 0 and np.issubdtype(key.dtype, np.integer)
+    return False
+
+
+def _leading_axis_size(*candidates) -> Optional[int]:
+    """Batch size implied by the first non-``None`` array in *candidates*.
+
+    ``None`` when nothing was given (a tree with neither audio nor tokens has no
+    batch axis to broadcast provenance over).
+    """
+    for value in candidates:
+        if value is not None:
+            return value.shape[0]
+    return None
+
+
+class _AudioTreeFields(TypedDict, total=False):
+    """The ``AudioTree`` fields, as keyword arguments to :meth:`AudioTree.replace`.
+
+    ``flax.struct.dataclass`` gives every tree an untyped ``replace(**updates)``,
+    which leaves the library's primary mutation API invisible to type checkers
+    and editors despite ``py.typed``. Unpacking this keeps the field names and
+    their types in the signature. ``tests/test_core.py`` asserts it stays in
+    sync with the dataclass fields.
+    """
+
+    waveform: ArrayLike | None
+    sample_rate: int
+    lufs: ArrayLike | None
+    lufs_windows: ArrayLike | None
+    pitch: ArrayLike | None
+    velocity: ArrayLike | None
+    note_duration: ArrayLike | None
+    codes: ArrayLike | None
+    latents: ArrayLike | None
+    metadata: dict
+
+
 @struct.dataclass
 class AudioTree:
     """
@@ -258,8 +312,13 @@ class AudioTree:
         .. _AudioSignal: https://github.com/descriptinc/audiotools/blob/master/audiotools/core/audio_signal.py
         .. _flax.struct.dataclass: https://flax.readthedocs.io/en/latest/api_reference/flax.struct.html#flax.struct.dataclass
 
+    The constructor stores its arguments verbatim -- it neither reshapes the waveform nor encodes
+    provenance. Use :meth:`create` (which accepts a ``(Samples,)`` or ``(Channels, Samples)``
+    waveform and ``filepath`` / ``source`` strings) unless you already hold batched arrays.
+
     Args:
-        waveform (np.ndarray or jax.Array): Audio waveform data shaped ``(Samples)``, ``(Channels, Samples)``, or ``(Batch, Channels, Samples)``
+        waveform (np.ndarray or jax.Array): Audio waveform data shaped ``(Batch, Channels, Samples)``,
+            or ``None`` for token-only trees (``codes`` / ``latents`` without audio).
         sample_rate (int): Sample rate of ``waveform``, such as 44100 Hz.
         lufs (np.ndarray or jax.Array, optional): Integrated loudness of the audio waveform in LUFS, shaped ``(Batch,)``.
             You may not need to set this when initializing. Instead, use ``replace_lufs()`` to create a new AudioTree with
@@ -273,8 +332,10 @@ class AudioTree:
             The value is not necessarily the same as the duration of the audio data. The shape is ``(Batch,)``.
         codes (np.ndarray or jax.Array, optional): The neural audio codec tokens for the audio.
         latents (np.ndarray or jax.Array, optional): The latent representations of the audio.
-        metadata (dict): Any extra metadata can be placed here.
-        filepath (Union[str, Path, List[Union[str, Path]]] | None): Provenance of each item -- one path, or one per batch item.
+        metadata (dict): Any extra metadata can be placed here. Provenance lives here too, under the
+            ``"filepath"`` and ``"source"`` keys (encoded arrays, read back via the :attr:`filepath`
+            and :attr:`source` properties); pass ``filepath=`` / ``source=`` to :meth:`create` rather
+            than encoding them by hand.
 
     Example:
         >>> audio = AudioTree.create(jnp.zeros((2, 44100)), 44100)  # stereo, 1 s
@@ -299,6 +360,34 @@ class AudioTree:
     codes: ArrayLike | None = None
     latents: ArrayLike | None = None
     metadata: dict = struct.field(pytree_node=True, default_factory=dict)
+
+    def replace(self, **updates: Unpack[_AudioTreeFields]) -> Self:
+        """Return a new ``AudioTree`` with the given fields replaced.
+
+        Args:
+            **updates: Any subset of the fields above; everything else is carried
+                over from ``self``, which is never mutated.
+
+        Returns:
+            AudioTree: A copy of ``self`` with ``updates`` applied.
+
+        Example:
+            >>> audio = AudioTree.create(jnp.zeros((44100,)), 44100)
+            >>> quiet = audio.replace(waveform=audio.waveform * 0.5)
+            >>> quiet.sample_rate
+            44100
+
+        Note:
+            ``flax.struct.dataclass`` installs its own ``replace`` over this one
+            at class-creation time. That implementation is this one verbatim
+            (``dataclasses.replace``) minus the typing, which is the whole
+            reason to spell it out here.
+        """
+        return dataclasses.replace(self, **updates)
+
+    #: Alias holding the typed ``replace`` above, so it can be put back after
+    #: ``flax.struct.dataclass`` overwrites the attribute (see below the class).
+    _typed_replace = replace
 
     @classmethod
     def create(
@@ -337,7 +426,9 @@ class AudioTree:
             codes: Optional neural-codec tokens.
             latents: Optional latent representations.
             metadata: Optional extra metadata dict (copied, not mutated).
-            filepath: Optional path(s) for the batch; encoded into ``metadata["filepath"]``.
+            filepath: Optional path(s) for the batch; encoded into ``metadata["filepath"]`` and read
+                back via the :attr:`filepath` property. Pass a single path to tag the whole batch
+                (it is repeated for every item), or a list with one path per batch item.
             source: Optional source-group name(s) (e.g. ``"music"``), encoded into
                 ``metadata["source"]`` and read back via the :attr:`source` property. Pass a
                 single string to tag the whole batch, or a list with one name per batch item
@@ -367,11 +458,22 @@ class AudioTree:
         else:
             metadata = metadata.copy()  # Don't modify the original dict
 
+        # A single string tags the whole batch: encode once and repeat, so that
+        # ``tree[2].filepath`` and any filtered sub-batch keep their provenance
+        # instead of only item 0 carrying it.
+        batch_size = _leading_axis_size(waveform, codes, latents)
+
+        def _encode_provenance(value):
+            encoded = cls._encode_filepaths(value)
+            if isinstance(value, (str, Path)) and batch_size is not None:
+                encoded = np.repeat(encoded, batch_size, axis=0)
+            return encoded
+
         if filepath is not None:
-            metadata["filepath"] = cls._encode_filepaths(filepath)
+            metadata["filepath"] = _encode_provenance(filepath)
 
         if source is not None:
-            metadata["source"] = cls._encode_filepaths(source)
+            metadata["source"] = _encode_provenance(source)
 
         return cls(
             waveform=waveform,
@@ -503,9 +605,10 @@ class AudioTree:
                 if device is None
                 else jax.device_put(waveform, device)
             )
-            lufs_array = _jit_integrated_loudness(
-                compute_waveform, self.sample_rate, zeros=512
-            )
+            # ``zeros`` is left to the default so the FIR tap count scales with
+            # the sample rate; a fixed 512 cannot realize the 38 Hz high-pass
+            # much above 16 kHz.
+            lufs_array = _jit_integrated_loudness(compute_waveform, self.sample_rate)
             if num_windows == 0:
                 lufs_windows_array = jnp.zeros(
                     (compute_waveform.shape[0], 0), dtype=jnp.float32
@@ -516,7 +619,6 @@ class AudioTree:
                     self.sample_rate,
                     lufs_window_sec,
                     lufs_hop_sec,
-                    zeros=512,
                 )
         else:
             compute_waveform = np.asarray(waveform)
@@ -727,15 +829,23 @@ class AudioTree:
         """
         return self.batch_size
 
-    def __getitem__(self, key: Union[int, slice]) -> Self:
+    def __getitem__(
+        self, key: Union[int, np.integer, slice, Sequence[int], ArrayLike]
+    ) -> Self:
         """Index the batch axis, returning an AudioTree of the selected item(s).
 
         An integer key selects a single item but keeps the leading batch axis
-        (a batch of 1); a slice selects a sub-batch. Every array field —
-        including ``codes``, ``latents``, and the ``metadata`` arrays — is
-        indexed along the same axis so the fields stay rank-aligned.
+        (a batch of 1); a slice, a list of indices, or a boolean mask selects a
+        sub-batch. Every array field — including ``codes``, ``latents``, and the
+        ``metadata`` arrays — is indexed along the same axis so the fields stay
+        rank-aligned.
+
+        Any integer scalar counts as an integer key, not just the builtin
+        ``int``: ``tree[np.argmax(tree.lufs)]`` keeps the batch axis exactly
+        like ``tree[0]`` does.
         """
-        if isinstance(key, int):
+        if _is_integer_scalar(key):
+            key = int(key)
             n = self.batch_size
             if key < -n or key >= n:
                 # Required for the sequence-iteration protocol: `for item in
@@ -1082,41 +1192,61 @@ class AudioTree:
     @classmethod
     def excerpt(
         cls,
-        audio_path: str,
+        audio_path: Union[str, Path],
         rng: np.random.Generator,
         offset: float = 0.0,
         duration: Optional[float] = None,
-        search_function: Optional[Callable] = None,
+        excerpt: Optional["ExcerptConfig"] = None,
         **kwargs,
-    ) -> Self:
-        """Create an AudioTree from a random section of audio from a file path.
+    ) -> Optional[Self]:
+        """Create an AudioTree from one section of an audio file.
+
+        Which section is up to ``excerpt.strategy``: ``"start"`` takes the audio
+        at ``offset``, ``"random"`` (the default) draws a single offset, and
+        ``"loudest"`` defers to :meth:`loudest_excerpt`.
 
         Args:
-            audio_path (str): Path to audio file.
-            rng (np.random.Generator): Random number generator.
-            offset (float, optional): Offset in seconds to audio data.
+            audio_path (str or Path): Path to audio file.
+            rng (np.random.Generator): Random number generator such as ``np.random.default_rng(42)``.
+            offset (float, optional): Earliest offset in seconds the excerpt may start at.
             duration (float, optional): Duration in seconds of audio data. The audio data will be trimmed or lengthened
                 as necessary.
-            search_function (Callable, optional): A function that determines the random offset.
-            **kwargs: Keyword arguments passed to ``AudioTree.__init__``.
+            excerpt (ExcerptConfig, optional): How to choose the offset; defaults to a uniformly
+                random one. See :class:`ExcerptConfig`.
+            **kwargs: Keyword arguments passed to ``AudioTree.from_file``.
 
         Returns:
-            AudioTree: An instance of ``AudioTree``.
+            AudioTree, or ``None`` when ``excerpt`` searched for the loudest
+            section, found nothing above the cutoff, and says ``on_failure="skip"``.
         """
-        assert duration is not None and duration > 0
-        info = soundfile.info(audio_path)
-        total_duration = info.duration  # seconds
+        if duration is None or duration <= 0:
+            raise ValueError(f"excerpt needs a positive duration, got {duration!r}.")
+        if excerpt is None:
+            excerpt = ExcerptConfig()
 
-        if search_function is None:
-            search_function = partial(search_uniform, attempt=0, max_attempts=1)
+        if excerpt.strategy == "loudest":
+            if offset:
+                raise ValueError(
+                    "strategy='loudest' searches the whole file and cannot be "
+                    f"combined with offset={offset!r}."
+                )
+            return cls.loudest_excerpt(
+                audio_path, rng, excerpt=excerpt, duration=duration, **kwargs
+            )
 
-        random_offset = search_function(rng, offset, duration, total_duration)
+        if excerpt.strategy == "start":
+            excerpt_offset = offset
+        else:
+            total_duration = soundfile.info(audio_path).duration  # seconds
+            # One draw, so ``attempt``/``max_attempts`` are the degenerate case;
+            # they exist because the loudest search takes many.
+            excerpt_offset = excerpt.resolved_search(
+                rng, offset, duration, total_duration, attempt=0, max_attempts=1
+            )
 
-        audio_signal = cls.from_file(
-            audio_path=audio_path, offset=random_offset, duration=duration, **kwargs
+        return cls.from_file(
+            audio_path=audio_path, offset=excerpt_offset, duration=duration, **kwargs
         )
-
-        return audio_signal
 
     @classmethod
     def loudest_excerpt(
@@ -1211,6 +1341,13 @@ class AudioTree:
         Returns:
             AudioTree: An instance of ``AudioTree``.
         """
+        # Validated before the mono short-circuit, so a typo'd strategy is not
+        # silently accepted on whichever items happen to be mono already.
+        if strategy not in ("average", "left", "right"):
+            raise ValueError(
+                f"Unsupported to_mono strategy {strategy!r}; expected "
+                f"'average', 'left' or 'right'."
+            )
         waveform = self.waveform
         C = self.num_channels
         if C == 1:
@@ -1580,6 +1717,12 @@ class AudioTree:
         )
 
 
+# ``flax.struct.dataclass`` unconditionally overwrites ``replace`` with an
+# untyped ``**updates`` wrapper. Put the typed one back -- identical behaviour,
+# but ``help()``, ``inspect.signature`` and the docs keep the field names.
+AudioTree.replace = AudioTree._typed_replace
+
+
 # --- Field lists ------------------------------------------------------------
 # Derived from the dataclass rather than restated, because these were three
 # hand-maintained copies that had to agree with each other and with the class.
@@ -1624,13 +1767,11 @@ def _numpy_integrated_lufs(waveform: np.ndarray, sample_rate: int) -> np.ndarray
     """Integrated loudness (LUFS) per item of a ``(batch, channels, samples)`` waveform.
 
     Measured on the CPU with ``loudness.integrated_loudness``. Excerpts shorter
-    than the BS.1770 gating block (400ms) are right-padded with silence so the
-    measurement is valid.
+    than the BS.1770 gating block (400ms) are padded and level-compensated by
+    :func:`~audiotree.loudness.pad_to_gating_block`, the same helper the JAX
+    meter uses, so the two backends agree on short excerpts.
     """
-    min_samples = int(np.ceil(0.4 * sample_rate))
-    if waveform.shape[-1] < min_samples:
-        pad_right = min_samples - waveform.shape[-1]
-        waveform = np.pad(waveform, ((0, 0), (0, 0), (0, pad_right)))
+    waveform = pad_to_gating_block(waveform, sample_rate, xp=np)
     audio_transposed = np.transpose(waveform, (0, 2, 1))  # [B, T, C]
     values = [
         loudness.integrated_loudness(np.ascontiguousarray(item), sample_rate)
