@@ -3,7 +3,7 @@
 import json
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, SupportsIndex, Union
+from typing import Any, Dict, List, NoReturn, Optional, SupportsIndex, Union
 
 import numpy as np
 from grain.sources import RandomAccessDataSource
@@ -44,13 +44,28 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
 
     A manifest travels with the dataset it describes, so its values reach
     ``np.memmap`` and the ``AudioTree`` constructor from a file the reader did
-    not write. ``np.memmap(mode="r")`` does bound-check against the file size,
-    so an over-large shape raises rather than reading out of bounds — but it
-    surfaces as a bare ``ValueError`` naming neither the manifest nor the leaf,
-    and a *smaller* shape silently truncates the dataset with no error at all.
-    """
+    not write. ``np.memmap(mode="r")`` bound-checks against the file size, so an
+    over-large shape raises rather than reading out of bounds, but it surfaces
+    as a bare ``ValueError`` naming neither the manifest nor the leaf, and only
+    at the first read -- which under the default lazy mode may be inside a grain
+    worker. So every leaf file is stat'd here instead, and a file too short for
+    what the manifest claims (an over-large shape, an over-large
+    ``num_samples``, a ``.bin`` truncated after the fact) is refused at
+    construction, by name.
 
-    def fail(message: str):
+    The bound is ``>=``, not ``==``. ``flush()`` is public and the writer
+    publishes a manifest as soon as the schema is known, so from preallocation
+    until ``close()`` every ``.bin`` is legitimately *longer* than
+    ``num_samples`` implies; that prefix is exactly what the manifest promises
+    is readable, and an equality check would reject a valid in-progress dataset.
+    The price is the opposite corruption: a ``shape_per_sample`` too *small*
+    reinterprets the file as more, shorter samples and so leaves it over-long,
+    which is indistinguishable from a mid-write file by size alone. Catching
+    that one needs a finality marker from the writer, not a bigger check here.
+    """
+    data_dir = manifest_path.parent
+
+    def fail(message: str) -> NoReturn:
         raise ValueError(f"Invalid manifest {manifest_path}: {message}")
 
     num_samples = manifest.get("num_samples")
@@ -72,6 +87,23 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
             )
         if not isinstance(info.get("file"), str):
             fail(f"leaf {name!r} has a non-string 'file' entry")
+
+        # Measure the file against the declaration. See the docstring for why
+        # this is `>=` and what that deliberately does not catch.
+        itemsize = np.dtype(info["dtype"]).itemsize
+        required = num_samples * int(np.prod(shape, dtype=np.int64)) * itemsize
+        leaf_path = safe_join(data_dir, info["file"], description="leaf file")
+        try:
+            actual = leaf_path.stat().st_size
+        except OSError as e:
+            fail(f"leaf {name!r} names {info['file']!r}, which cannot be read: {e}")
+        if actual < required:
+            fail(
+                f"leaf {name!r} declares {num_samples} samples of shape "
+                f"{tuple(shape)} and dtype {info['dtype']} ({required} bytes), but "
+                f"{info['file']!r} is only {actual} bytes. The dataset is "
+                f"truncated or the manifest does not describe it."
+            )
 
     def check_node(node, path: str):
         if not isinstance(node, dict):
@@ -160,10 +192,11 @@ class TreeDataSource(RandomAccessDataSource):
     into RAM. Data is read from memory-mapped binary files and reconstructed
     into the original pytree structure (AudioTree, dict, etc.).
 
-    Array memmaps are reopened on each access so the OS can reclaim pages
-    between reads (keeping the page cache bounded during random access), while
-    the source stays pickle-safe for grain's multiprocessing DataLoader. Pass
-    ``load_into_memory=True`` to instead load every leaf into RAM up front.
+    Each process holds one memmap per leaf, opened on first access and dropped
+    on the way into a pickle, so the source stays safe to hand to grain's
+    multiprocessing DataLoader however that DataLoader starts its workers. Pass
+    ``load_into_memory=True`` to instead load every leaf into RAM up front; a
+    source in that mode opens no files at all after construction.
 
     Args:
         directory: Path to the directory containing manifest.json and
@@ -177,8 +210,11 @@ class TreeDataSource(RandomAccessDataSource):
         load_into_memory: If True, load all non-excluded array leaves and
             string leaves into RAM at init time. Workers then read from
             pre-loaded numpy arrays instead of memmaps, eliminating disk
-            I/O. With fork-based multiprocessing (default on Linux), the
-            parent's data is shared with workers via copy-on-write.
+            I/O. With fork-based multiprocessing (default on Linux) the
+            parent's data is shared with workers via copy-on-write; with
+            spawn it is pickled to them, so the RAM cost is per worker.
+            Samples are copied out of the store on the way out, so a caller
+            that writes into one cannot disturb the next reader.
             Default False.
 
     Example:
@@ -251,11 +287,8 @@ class TreeDataSource(RandomAccessDataSource):
         self._in_memory_arrays: Dict[str, np.ndarray] = {}
         self._in_memory_strings: Dict[str, List[str]] = {}
 
-        if load_into_memory:
-            self._load_all_into_memory()
-
-        # Lazily initialized per-process; not set here so the object stays
-        # picklable for grain worker processes.
+        # Per-process file handles, opened lazily by _ensure_open and dropped
+        # on the way into a pickle. Unused when load_into_memory=True.
         self._leaf_names: List[str] = []
         self._bagz_readers: Dict = {}
         self._leaf_memmaps: Dict[str, np.memmap] = {}
@@ -266,8 +299,17 @@ class TreeDataSource(RandomAccessDataSource):
         # __getstate__/__setstate__.
         self._open_lock = threading.Lock()
 
+        if load_into_memory:
+            self._load_all_into_memory()
+
     def _load_all_into_memory(self):
-        """Load all non-excluded leaves into RAM."""
+        """Load all non-excluded leaves into RAM.
+
+        Everything ``__getitem__`` needs then lives in ``_in_memory_arrays`` and
+        ``_in_memory_strings``, both of which survive pickling, so a source in
+        this mode never opens a file again -- not in this process and not in a
+        worker.
+        """
         for name, info in self._leaf_info.items():
             if _is_excluded(name, self.exclude_prefixes):
                 continue
@@ -295,9 +337,6 @@ class TreeDataSource(RandomAccessDataSource):
             self._in_memory_strings[name] = [
                 reader[i].decode("utf-8") for i in range(self._num_samples)
             ]
-
-        # Mark as opened so lazy path is skipped.
-        self._data_files_opened = True
 
     def _ensure_open(self):
         """Open this process's memmaps and readers once, safely under threads.
@@ -357,9 +396,9 @@ class TreeDataSource(RandomAccessDataSource):
     def __getstate__(self):
         """Drop memmaps/readers before pickling (they reopen lazily in workers).
 
-        In-memory data (``_in_memory_arrays``, ``_in_memory_strings``) is
-        kept so that fork-based workers inherit the parent's pre-loaded
-        data via copy-on-write.
+        In-memory data (``_in_memory_arrays``, ``_in_memory_strings``) is kept,
+        so a ``load_into_memory=True`` source arrives in the worker already able
+        to answer -- by copy-on-write under fork, by pickle under spawn.
         """
         state = self.__dict__.copy()
         state["_leaf_names"] = []
@@ -368,9 +407,10 @@ class TreeDataSource(RandomAccessDataSource):
         # pickled at all; both are rebuilt by _ensure_open in the worker.
         state["_leaf_memmaps"] = {}
         del state["_open_lock"]
-        # If data is in memory, workers don't need to reopen files.
-        if not self.load_into_memory:
-            state["_data_files_opened"] = False
+        # The flag has to travel with the handles it describes: leaving it True
+        # in a state whose handles were just dropped told the worker's
+        # _ensure_open there was nothing to do, and it read from empty dicts.
+        state["_data_files_opened"] = False
         return state
 
     def __setstate__(self, state):
@@ -397,17 +437,24 @@ class TreeDataSource(RandomAccessDataSource):
         if idx < 0 or idx >= self._num_samples:
             raise IndexError(f"Index {idx} out of range [0, {self._num_samples})")
 
-        self._ensure_open()
-
         leaf_values: Dict[str, Any] = {}
 
-        if self._in_memory_arrays:
-            # Fast path: read from pre-loaded RAM arrays.
+        # Branch on the *mode*, not on whether the RAM store happens to hold
+        # anything: a source that excludes every array leaf has an empty
+        # `_in_memory_arrays` and no open files, and testing the store sent it
+        # down the file path to read from dicts that mode never fills -- losing
+        # its string leaves and returning an empty sample.
+        if self.load_into_memory:
+            # `np.array` copies, as on the file path below: the store is shared
+            # by every sample this source ever returns, so handing out views
+            # would let one caller's in-place write rewrite the dataset for all
+            # the readers after it.
             for name, arr in self._in_memory_arrays.items():
-                leaf_values[name] = arr[idx][np.newaxis, ...]
+                leaf_values[name] = np.array(arr[idx])[np.newaxis, ...]
             for name, strings in self._in_memory_strings.items():
                 leaf_values[name] = strings[idx]
         else:
+            self._ensure_open()
             # `np.array` copies out of the mapping, so the returned tree never
             # aliases it and the held memmap stays an implementation detail.
             for name, mm in self._leaf_memmaps.items():

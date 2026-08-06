@@ -1,7 +1,10 @@
 """Tests for create_audio_dataset function."""
 
+import os
+import stat
 import sys
 import tempfile
+import warnings
 from pathlib import Path
 
 import grain
@@ -12,7 +15,75 @@ import soundfile as sf
 from audiotree import AudioTree
 from audiotree.core import ExcerptConfig
 from audiotree.sources import create_audio_dataset, find_audio_files
-from audiotree.sources.core import _derive_seed_pair
+from audiotree.sources.core import (
+    READ_ERROR_KEY,
+    AudioReadError,
+    _derive_seed_pair,
+    _load_excerpt,
+)
+
+
+def _write_zero_byte(path: Path, valid_bytes: bytes) -> None:
+    path.write_bytes(b"")
+
+
+def _write_truncated_header(path: Path, valid_bytes: bytes) -> None:
+    # Cut inside the "fmt " chunk, so the container is unparseable.
+    path.write_bytes(valid_bytes[:20])
+
+
+def _write_garbage(path: Path, valid_bytes: bytes) -> None:
+    # No backend recognizes this, which is what raises audioread's
+    # NoBackendError (whose str() is empty) on librosa's fallback path.
+    path.write_bytes(np.random.default_rng(0).bytes(4096))
+
+
+def _write_directory(path: Path, valid_bytes: bytes) -> None:
+    path.mkdir()
+
+
+def _write_unreadable(path: Path, valid_bytes: bytes) -> None:
+    path.write_bytes(valid_bytes)
+    path.chmod(0)
+
+
+#: The ways an audio file is broken in practice, each mapped to a factory that
+#: writes one.
+#:
+#: A *truncated data chunk* is deliberately absent: a WAV whose header is intact
+#: but whose samples are short decodes fine (libsndfile returns what is there),
+#: so it is not a read error at all -- see
+#: ``test_truncated_data_is_not_a_read_error``.
+CORRUPT_FILE_KINDS = {
+    "zero_byte": _write_zero_byte,
+    "truncated_header": _write_truncated_header,
+    "garbage": _write_garbage,
+    "directory": _write_directory,
+    "unreadable": _write_unreadable,
+}
+
+
+def _make_corrupt_file(directory, kind, name="corrupt.wav", sample_rate=44100):
+    """Write one broken ``name`` into ``directory`` and return its path."""
+    path = Path(directory) / name
+    template = Path(directory) / "_template.wav"
+    sf.write(str(template), np.zeros(sample_rate, dtype=np.float32), sample_rate)
+    valid_bytes = template.read_bytes()
+    template.unlink()
+    CORRUPT_FILE_KINDS[kind](path, valid_bytes)
+    return path
+
+
+@pytest.fixture
+def restore_permissions():
+    """Chmod appended paths back, so tempdir cleanup can remove them."""
+    paths = []
+    yield paths
+    for path in paths:
+        try:
+            os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
 
 
 def _create_test_audio_files(tmpdir, num_files, sample_rate=44100, duration=1.0):
@@ -427,6 +498,234 @@ def test_find_audio_files_glob_patterns():
             [str(root / "train" / "*" / "mixture.wav"), str(root / "train")]
         )
         assert combined == all_stems
+
+
+# ---------------------------------------------------------------------------
+# on_read_error: one corrupt file must not be able to end a multi-hour run.
+# ---------------------------------------------------------------------------
+
+ALL_STRATEGIES = ("start", "random", "loudest")
+
+
+@pytest.mark.parametrize("kind", sorted(CORRUPT_FILE_KINDS))
+@pytest.mark.parametrize("strategy", ALL_STRATEGIES)
+def test_on_read_error_raise_always_names_the_path(kind, strategy, restore_permissions):
+    """The default policy raises AudioReadError, and the path is in the message.
+
+    This is the regression: with ``strategy="start"`` a zero-byte or otherwise
+    unparseable file reaches librosa's audioread fallback, which raises an
+    ``EOFError`` or an ``audioread.exceptions.NoBackendError`` whose ``str()``
+    is *empty* -- a blank line at the end of a long run, naming nothing. (The
+    ``soundfile`` errors that ``"random"``/``"loudest"`` hit do name the path;
+    they are checked here so every strategy is known to behave the same.)
+    """
+    if kind == "unreadable" and os.geteuid() == 0:
+        pytest.skip("root can read a mode-000 file")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = _make_corrupt_file(tmpdir, kind)
+        restore_permissions.append(path)
+
+        with pytest.raises(AudioReadError) as excinfo:
+            _load_excerpt(
+                str(path),
+                np.random.default_rng(0),
+                sample_rate=44100,
+                duration=0.5,
+                excerpt=ExcerptConfig(strategy=strategy),
+            )
+
+        assert str(path) in str(excinfo.value)
+        assert excinfo.value.file_path == str(path)
+        # The original exception is preserved, not swallowed.
+        assert excinfo.value.__cause__ is not None
+        # ...and its type is named even when its message is empty.
+        assert type(excinfo.value.__cause__).__name__ in str(excinfo.value)
+
+
+def test_on_read_error_raise_is_the_default():
+    """A corrupt file still ends the run unless a policy says otherwise."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 2)
+        _make_corrupt_file(audio_dir, "zero_byte", name="bad.wav")
+
+        ds = create_audio_dataset(
+            sources=audio_dir, shuffle=False, sample_rate=44100, duration=0.5
+        )
+        # find_audio_files sorts, so "audio_0", "audio_1", "bad".
+        with pytest.raises(AudioReadError, match="bad.wav"):
+            [ds[i] for i in range(len(ds))]
+
+
+@pytest.mark.parametrize("kind", sorted(CORRUPT_FILE_KINDS))
+@pytest.mark.parametrize("policy", ["skip", "warn"])
+def test_on_read_error_substitutes_marked_silence(kind, policy, restore_permissions):
+    """A non-raising policy yields a usable, correctly shaped, *marked* item."""
+    if kind == "unreadable" and os.geteuid() == 0:
+        pytest.skip("root can read a mode-000 file")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = _make_corrupt_file(tmpdir, kind)
+        restore_permissions.append(path)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            tree = _load_excerpt(
+                str(path),
+                np.random.default_rng(0),
+                sample_rate=44100,
+                duration=0.5,
+                on_read_error=policy,
+            )
+
+        assert isinstance(tree, AudioTree)
+        assert tree.waveform.shape == (1, 1, 22050)
+        assert tree.sample_rate == 44100
+        # Digital silence, so it cannot be mistaken for audio that was there.
+        assert not np.any(np.asarray(tree.waveform))
+        # ...and it says so in-band, naming the file it stands in for.
+        assert bool(tree.metadata[READ_ERROR_KEY][0]) is True
+        assert tree.filepath == [str(path)]
+
+
+def test_on_read_error_warn_names_the_file_and_skip_stays_quiet():
+    """The two non-raising policies differ only in whether they warn."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = _make_corrupt_file(tmpdir, "zero_byte")
+
+        with pytest.warns(UserWarning, match="corrupt.wav"):
+            _load_excerpt(
+                str(path),
+                np.random.default_rng(0),
+                sample_rate=44100,
+                duration=0.5,
+                on_read_error="warn",
+            )
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            _load_excerpt(
+                str(path),
+                np.random.default_rng(0),
+                sample_rate=44100,
+                duration=0.5,
+                on_read_error="skip",
+            )
+        # librosa may warn on its own when it falls back to audioread; what
+        # must be absent is *our* substitution notice.
+        assert not [w for w in caught if "Substituting silence" in str(w.message)]
+
+
+@pytest.mark.parametrize("policy", ["skip", "warn"])
+def test_on_read_error_survives_a_whole_epoch_and_batches(policy):
+    """A corpus with junk in it iterates to the end and still collates.
+
+    Both the good items and the substitutes carry ``read_error``, so
+    ``AudioTree.batch`` -- which requires matching metadata keys -- can stack
+    them, and a caller can count the losses from the batch itself.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 3)
+        for i, kind in enumerate(["zero_byte", "garbage"]):
+            _make_corrupt_file(audio_dir, kind, name=f"bad_{i}.wav")
+
+        ds = create_audio_dataset(
+            sources=audio_dir,
+            shuffle=False,
+            sample_rate=44100,
+            duration=0.5,
+            on_read_error=policy,
+        )
+        assert len(ds) == 5
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            items = [ds[i] for i in range(len(ds))]
+
+        assert all(item is not None for item in items)
+        batch = AudioTree.batch(items)
+        assert batch.waveform.shape == (5, 1, 22050)
+        flags = np.asarray(batch.metadata[READ_ERROR_KEY])
+        assert flags.tolist() == [False, False, False, True, True]
+        assert [Path(p).name for p in batch.filepath[3:]] == ["bad_0.wav", "bad_1.wav"]
+
+
+def test_truncated_data_is_not_a_read_error():
+    """A valid header over a short data chunk decodes; it is not a failure.
+
+    Worth pinning: it is the one "corrupt file" of the set that must *not* take
+    the error path, under either policy.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        good = Path(tmpdir) / "good.wav"
+        sf.write(str(good), np.ones(44100, dtype=np.float32) * 0.5, 44100)
+        truncated = Path(tmpdir) / "truncated.wav"
+        truncated.write_bytes(good.read_bytes()[:2000])
+
+        tree = _load_excerpt(
+            str(truncated),
+            np.random.default_rng(0),
+            sample_rate=44100,
+            duration=0.5,
+            excerpt=ExcerptConfig(strategy="start"),
+        )
+        assert tree.waveform.shape == (1, 1, 22050)
+        # The samples that survived are real audio, zero-padded up to duration.
+        assert np.any(np.asarray(tree.waveform))
+
+        marked = _load_excerpt(
+            str(truncated),
+            np.random.default_rng(0),
+            sample_rate=44100,
+            duration=0.5,
+            excerpt=ExcerptConfig(strategy="start"),
+            on_read_error="skip",
+        )
+        assert bool(marked.metadata[READ_ERROR_KEY][0]) is False
+
+
+def test_on_read_error_rejects_an_unknown_policy():
+    """A typo'd policy fails at construction, not per item."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 1)
+        with pytest.raises(ValueError, match="on_read_error must be one of"):
+            create_audio_dataset(sources=audio_dir, on_read_error="ignore")
+
+
+def test_on_read_error_needs_a_channel_count_for_multichannel():
+    """Silence has to be shaped like the corpus, so an unknown count fails early.
+
+    ``channels`` is normally probed from the first file's header; when *that*
+    file is the corrupt one there is nothing to probe, and emitting mono
+    substitutes into a stereo batch would break collation far from the cause.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = Path(tmpdir)
+        # Sorts first, so it is the file the channel probe reads.
+        _make_corrupt_file(audio_dir, "zero_byte", name="a_bad.wav")
+        sf.write(
+            str(audio_dir / "b_good.wav"), np.zeros((44100, 2), dtype=np.float32), 44100
+        )
+
+        with pytest.raises(ValueError, match="channel count could not be read"):
+            create_audio_dataset(
+                sources=str(audio_dir), mono=False, on_read_error="skip"
+            )
+
+        # Declaring the count explicitly is the documented way out, and the
+        # substitute then has the corpus's shape.
+        ds = create_audio_dataset(
+            sources=str(audio_dir),
+            mono=False,
+            channels=2,
+            shuffle=False,
+            sample_rate=44100,
+            duration=0.5,
+            on_read_error="skip",
+        )
+        assert ds[0].waveform.shape == (1, 2, 22050)
+        assert bool(ds[0].metadata[READ_ERROR_KEY][0]) is True
+        assert ds[1].waveform.shape == (1, 2, 22050)
 
 
 if __name__ == "__main__":

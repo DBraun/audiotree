@@ -6,6 +6,7 @@ import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Literal, Mapping, Optional
 
+import audioread.exceptions
 import grain
 import numpy as np
 import soundfile
@@ -17,6 +18,112 @@ if TYPE_CHECKING:
     from audiotree.sources.windowed import WindowParams
 
 _default_extensions = [".wav", ".flac"]
+
+#: What to do when one file in the corpus cannot be read. See
+#: :func:`create_audio_dataset`'s ``on_read_error`` for the semantics.
+OnReadError = Literal["raise", "skip", "warn"]
+
+_ON_READ_ERROR_VALUES = ("raise", "skip", "warn")
+
+#: Metadata key marking whether an item is a *substitute* for an unreadable
+#: file. Present on every item of a dataset built with
+#: ``on_read_error != "raise"`` -- ``False`` for a real load, ``True`` for
+#: silence standing in for a file that failed to read. It is written for good
+#: items too because :meth:`AudioTree.batch` requires every item in a batch to
+#: carry the same metadata keys; a marker that appeared only on failures could
+#: not be collated.
+READ_ERROR_KEY = "read_error"
+
+
+class AudioReadError(OSError):
+    """One audio file could not be read.
+
+    Raised by the dataset loaders in place of whatever the decoding stack threw,
+    so that a corrupt file in a large corpus always names itself. The original
+    exception is kept as ``__cause__`` and the path as :attr:`file_path`.
+
+    The wrapping exists because the underlying exception frequently does *not*
+    identify the file. ``soundfile`` puts the path in its message, but a
+    truncated header sends ``librosa`` down its ``audioread`` fallback, which
+    surfaces an :class:`EOFError` or an
+    :class:`audioread.exceptions.NoBackendError` whose ``str()`` is empty --
+    a blank traceback line at the end of a multi-hour run.
+
+    Attributes:
+        file_path: The file that could not be read.
+    """
+
+    def __init__(self, message: str, file_path: str):
+        super().__init__(message)
+        self.file_path = file_path
+
+
+#: Exceptions that mean "this file could not be read", as opposed to "this
+#: dataset is misconfigured".
+#:
+#: The tuple is explicit rather than a bare ``Exception`` so that real bugs
+#: still crash. Three of the entries are easy to get wrong:
+#:
+#: * ``audioread.exceptions.DecodeError`` (the base of ``NoBackendError``) is
+#:   **not** a :class:`RuntimeError`, so an ``except RuntimeError`` misses every
+#:   file that falls through to the ``audioread`` fallback.
+#: * :class:`EOFError` is what ``audioread``'s stdlib backends raise on a
+#:   header truncated mid-chunk, and it is not an :class:`OSError` either.
+#: * :class:`soundfile.LibsndfileError` is listed instead of its
+#:   :class:`RuntimeError` base on purpose: ``ExcerptConfig.on_failure="raise"``
+#:   also raises a ``RuntimeError``, and that is a *policy* decision the caller
+#:   already made, not a read failure to be papered over.
+_READ_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,  # FileNotFoundError, IsADirectoryError, PermissionError, ...
+    EOFError,
+    soundfile.LibsndfileError,
+    audioread.exceptions.DecodeError,
+)
+
+
+def _validate_on_read_error(on_read_error: str) -> OnReadError:
+    """Check an ``on_read_error`` argument, returning it unchanged."""
+    if on_read_error not in _ON_READ_ERROR_VALUES:
+        raise ValueError(
+            f"on_read_error must be one of {_ON_READ_ERROR_VALUES}, got "
+            f"{on_read_error!r}."
+        )
+    return on_read_error
+
+
+def _substitute_silence(
+    file_path: str,
+    *,
+    sample_rate: int,
+    duration: float,
+    channels: int,
+    source: str | None,
+) -> AudioTree:
+    """Build the stand-in returned for an unreadable file.
+
+    Digital silence of exactly the requested shape, tagged with the offending
+    path and with ``metadata[READ_ERROR_KEY] == True`` so nothing downstream can
+    mistake it for audio that was really on disk.
+    """
+    num_samples = max(0, round(duration * sample_rate))
+    waveform = np.zeros((1, channels, num_samples), dtype=np.float32)
+    return AudioTree.create(
+        waveform,
+        sample_rate,
+        # ``from_file`` records the excerpt offset; match it so a substitute and
+        # a real load carry the same metadata keys and can be batched together.
+        metadata={
+            "offset": np.array([0.0]),
+            READ_ERROR_KEY: np.array([True]),
+        },
+        filepath=file_path,
+        source=source,
+    )
+
+
+def _mark_read_ok(tree: AudioTree) -> AudioTree:
+    """Tag a successfully loaded tree as *not* a read-error substitute."""
+    return tree.replace(metadata={**tree.metadata, READ_ERROR_KEY: np.array([False])})
 
 
 def find_audio_files(
@@ -110,6 +217,7 @@ def _load_excerpt(
     excerpt: ExcerptConfig | None = None,
     source: str | None = None,
     channels: int | None = None,
+    on_read_error: OnReadError = "raise",
 ) -> AudioTree | None:
     """Load one excerpt from ``file_path`` according to ``excerpt``.
 
@@ -131,6 +239,8 @@ def _load_excerpt(
         channels: Expected channel count. A file with a different count raises,
             naming the file, instead of letting the mismatch surface as an
             opaque shape error at batch time. ``None`` disables the check.
+        on_read_error: What to do when the file cannot be read; see
+            :func:`create_audio_dataset`.
 
     Returns:
         The loaded AudioTree, or ``None`` when the loudness search failed and
@@ -138,6 +248,8 @@ def _load_excerpt(
         ``to_iter_dataset()``).
 
     Raises:
+        AudioReadError: If the file cannot be read and ``on_read_error ==
+            "raise"``.
         ValueError: If ``channels`` is given and the file has a different number
             of channels.
     """
@@ -150,20 +262,58 @@ def _load_excerpt(
         source=source,
     )
 
-    if excerpt.strategy == "start":
-        tree = AudioTree.from_file(file_path, offset=0, **common)
-    elif excerpt.strategy == "random":
-        tree = AudioTree.excerpt(file_path, rng=rng, **common)
-    else:
-        tree = AudioTree.loudest_excerpt(file_path, rng, excerpt=excerpt, **common)
+    substituted = False
+    try:
+        if excerpt.strategy == "start":
+            tree = AudioTree.from_file(file_path, offset=0, **common)
+        elif excerpt.strategy == "random":
+            tree = AudioTree.excerpt(file_path, rng=rng, **common)
+        else:
+            tree = AudioTree.loudest_excerpt(file_path, rng, excerpt=excerpt, **common)
+    except _READ_ERRORS as exc:
+        if on_read_error == "raise":
+            raise AudioReadError(
+                f"Failed to read audio file {str(file_path)!r}: "
+                f"{type(exc).__name__}: {exc}",
+                str(file_path),
+            ) from exc
+        if on_read_error == "warn":
+            warnings.warn(
+                f"Substituting silence for unreadable audio file "
+                f"{str(file_path)!r}: {type(exc).__name__}: {exc}. Every "
+                f"substitute carries metadata[{READ_ERROR_KEY!r}] == True; pass "
+                "on_read_error='raise' to fail on it instead.",
+                UserWarning,
+                stacklevel=2,
+            )
+        tree = _substitute_silence(
+            str(file_path),
+            sample_rate=sample_rate,
+            duration=duration,
+            # A substitute has to have the corpus's channel count or it cannot
+            # be collated with the items around it.
+            channels=1 if mono else (channels if channels is not None else 1),
+            source=source,
+        )
+        substituted = True
 
-    if tree is not None and channels is not None and tree.num_channels != channels:
+    if (
+        not substituted
+        and tree is not None
+        and channels is not None
+        and tree.num_channels != channels
+    ):
         raise ValueError(
             f"{file_path} has {tree.num_channels} channels, but this dataset "
             f"loads {channels}-channel audio. AudioTree.batch cannot collate a "
             "mixed-channel corpus: pass `mono=True` to mix everything down, "
             "pass `channels=` to declare the expected count, or exclude the file."
         )
+
+    # Under a non-raising policy every item is marked, so that a substitute and
+    # a real load agree on their metadata keys and still batch together.
+    if on_read_error != "raise" and tree is not None and not substituted:
+        tree = _mark_read_ok(tree)
     return tree
 
 
@@ -262,6 +412,7 @@ def create_audio_dataset(
     excerpt: ExcerptConfig = _DEFAULT_EXCERPT,
     source: str | None = None,
     channels: Optional[int] = None,
+    on_read_error: OnReadError = "raise",
 ) -> grain.MapDataset:
     """Create a simple MapDataset from audio files.
 
@@ -314,6 +465,31 @@ def create_audio_dataset(
             is one channel then). When None, the count is taken from the header
             of the first file, which makes the odd stereo file in a mono corpus
             (or vice versa) name itself.
+        on_read_error: What to do when one file cannot be read -- truncated,
+            zero-byte, unreadable by this process. In a 100k-file corpus a
+            single such file otherwise ends a multi-hour run.
+
+            * ``"raise"`` (default, today's behaviour): raise
+              :class:`AudioReadError`, which always names the path even when the
+              underlying decoder error does not.
+            * ``"warn"``: substitute digital silence of the requested shape and
+              emit a :class:`UserWarning` naming the file and the original
+              error.
+            * ``"skip"``: substitute the same silence without warning, for a
+              corpus already known to contain junk.
+
+            The two non-raising policies deliberately do **not** drop the item
+            or retry a different file: a hole breaks fixed-size batching, and a
+            silent retry both over-samples the healthy files and hides the
+            problem. Instead every item of such a dataset carries
+            ``metadata["read_error"]``, ``True`` on a substitute and ``False``
+            on a real load, alongside the usual ``filepath``, so the failure is
+            visible in-band. Filter on it, or count it, with e.g.
+            ``bool(tree.metadata["read_error"][i])``.
+
+            Note that the marker changes the metadata keys of *every* item, so
+            a dataset built with ``"skip"``/``"warn"`` cannot be batched
+            together with one built with ``"raise"``.
 
     Returns:
         A grain.MapDataset that loads audio files using random_map for proper RNG seeding.
@@ -376,6 +552,7 @@ def create_audio_dataset(
         >>> ds2 = create_audio_dataset(sources=data_dir, shuffle_seed=42, excerpt_seed=200)
     """
     num_epochs = _validate_num_epochs(num_epochs)
+    on_read_error = _validate_on_read_error(on_read_error)
 
     # Both streams are derived, so a lone `shuffle_seed` no longer drives the
     # file order and the excerpt offsets off one and the same integer.
@@ -414,6 +591,16 @@ def create_audio_dataset(
         channels = None
     elif channels is None:
         channels = _probe_channels(filepaths[0])
+        if channels is None and on_read_error != "raise":
+            # Silence has to be shaped like the rest of the corpus, and the one
+            # header we would have read it from is itself unreadable. Say so now
+            # rather than emitting mono substitutes into a stereo batch.
+            raise ValueError(
+                f"on_read_error={on_read_error!r} substitutes silence with the "
+                "corpus's channel count, but mono=False and the channel count "
+                f"could not be read from {filepaths[0]!r}. Pass channels=N "
+                "explicitly, or mono=True."
+            )
 
     # Create dataset from list of filepaths
     ds = grain.MapDataset.source(filepaths)
@@ -433,6 +620,7 @@ def create_audio_dataset(
         excerpt=excerpt,
         source=source,
         channels=channels,
+        on_read_error=on_read_error,
     )
     ds = ds.seed(excerpt_stream_seed).random_map(load_fn)
 
@@ -485,6 +673,7 @@ def create_balanced_audio_dataset(
     excerpt: ExcerptConfig = _DEFAULT_EXCERPT,
     window_params: Optional["WindowParams"] = None,
     channels: Optional[int] = None,
+    on_read_error: OnReadError = "raise",
 ) -> grain.MapDataset:
     """Create a balanced MapDataset from multiple audio groups and/or pre-constructed datasets.
 
@@ -549,6 +738,13 @@ def create_balanced_audio_dataset(
         channels: Expected channel count of every file (only applies to file-based
             sources built without ``window_params``); see
             :func:`create_audio_dataset`.
+        on_read_error: What to do when one file cannot be read; see
+            :func:`create_audio_dataset`. Applies to every file-based group
+            (and, like ``channels``, is not supported alongside
+            ``window_params``). Pre-constructed ``datasets`` keep whatever
+            policy they were built with -- mixing a ``"raise"`` dataset with a
+            ``"skip"`` one produces items with different metadata keys, which
+            :meth:`AudioTree.batch` cannot collate.
 
     Returns:
         A grain.MapDataset that interleaves items from source groups according
@@ -611,6 +807,7 @@ def create_balanced_audio_dataset(
         ... )
     """
     num_epochs = _validate_num_epochs(num_epochs)
+    on_read_error = _validate_on_read_error(on_read_error)
 
     if sources is None and datasets is None:
         raise ValueError("At least one of 'sources' or 'datasets' must be provided")
@@ -635,6 +832,14 @@ def create_balanced_audio_dataset(
             f"(got duration={duration!r}, window_params.duration="
             f"{window_params.duration!r})."
         )
+
+    if window_params is not None and on_read_error != "raise":
+        raise ValueError(
+            "`window_params` does not support `on_read_error`: windowed "
+            "sampling has its own loader, which always raises on an unreadable "
+            f"file (got on_read_error={on_read_error!r})."
+        )
+
     if duration is None:
         duration = 1.0
 
@@ -694,6 +899,7 @@ def create_balanced_audio_dataset(
                 excerpt=excerpt,
                 source=group_name,  # Set source metadata to group name
                 channels=channels,
+                on_read_error=on_read_error,
             )
 
         all_datasets.append(ds)

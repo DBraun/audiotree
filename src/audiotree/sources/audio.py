@@ -1,6 +1,7 @@
 """DataSource for reading AudioWriter outputs with manifest support."""
 
 import copy
+import warnings
 from pathlib import Path
 from typing import Callable, Dict, List, Literal, Optional, SupportsIndex, Union
 
@@ -10,6 +11,13 @@ from grain import python as grain
 from audiotree import AudioTree, _manifest
 from audiotree._fs import safe_join
 from audiotree.core import LABEL_FIELDS
+from audiotree.sources.core import (
+    READ_ERROR_KEY,
+    _READ_ERRORS,
+    _validate_on_read_error,
+    AudioReadError,
+    OnReadError,
+)
 
 
 def _with_batch_axis(value) -> np.ndarray:
@@ -44,6 +52,15 @@ class AudioDataSource(grain.RandomAccessDataSource):
         duration: Optional duration to trim/pad audio to (in seconds)
         pad_mode: Padding mode if duration is specified ("constant" or "wrap")
         filter_fn: Optional function to filter manifest entries
+        on_read_error: What to do when one entry's audio file is missing or
+            cannot be decoded. ``"raise"`` (default) raises
+            :class:`~audiotree.sources.core.AudioReadError`, naming the path;
+            ``"warn"`` substitutes digital silence of the entry's shape and
+            emits a :class:`UserWarning`; ``"skip"`` substitutes the same
+            silence quietly. Under either non-raising policy *every* item
+            carries ``metadata["read_error"]`` (``True`` on a substitute), so
+            the failure stays visible and the items still batch together. See
+            :func:`~audiotree.sources.create_audio_dataset` for the reasoning.
 
     Example:
         First write some audio with :class:`~audiotree.AudioWriter` so there is
@@ -92,8 +109,10 @@ class AudioDataSource(grain.RandomAccessDataSource):
         duration: Optional[float] = None,
         pad_mode: Literal["constant", "wrap"] = "constant",
         filter_fn: Optional[Callable[[Dict], bool]] = None,
+        on_read_error: OnReadError = "raise",
     ):
         self.manifest_path = Path(manifest_path)
+        self.on_read_error = _validate_on_read_error(on_read_error)
 
         # Default audio_dir to manifest directory
         if audio_dir is None:
@@ -186,6 +205,52 @@ class AudioDataSource(grain.RandomAccessDataSource):
         """Return the number of records in the dataset."""
         return self._length
 
+    def _substitute_silence(
+        self, entry: Dict, audio_path, exc: BaseException, metadata: Dict
+    ) -> AudioTree:
+        """Build the stand-in returned for an entry whose audio cannot be read.
+
+        Shaped from the manifest's own ``channels``/``samples`` columns (or the
+        requested ``duration``), so a substitute collates with the real items
+        around it, and tagged with the offending path plus
+        ``metadata[READ_ERROR_KEY] == True``.
+        """
+        sample_rate = self.sample_rate or entry.get("sample_rate")
+        channels = 1 if self.mono else int(entry.get("channels", 1))
+        if self.duration is not None and sample_rate:
+            samples = max(0, round(self.duration * sample_rate))
+        else:
+            samples = int(entry.get("samples", 0))
+
+        tree_kwargs = {
+            "sample_rate": sample_rate,
+            # ``from_file`` records the excerpt offset; match it so a substitute
+            # and a real load carry the same metadata keys.
+            "metadata": {
+                **metadata,
+                "offset": np.array([0.0]),
+                READ_ERROR_KEY: np.array([True]),
+            },
+            "filepath": entry.get("filepath") or str(audio_path),
+        }
+        for field_name in LABEL_FIELDS:
+            if field_name in entry:
+                tree_kwargs[field_name] = _with_batch_axis(entry[field_name])
+
+        if self.on_read_error == "warn":
+            warnings.warn(
+                f"Substituting silence for unreadable audio file "
+                f"{str(audio_path)!r}: {type(exc).__name__}: {exc}. Every "
+                f"substitute carries metadata[{READ_ERROR_KEY!r}] == True; pass "
+                "on_read_error='raise' to fail on it instead.",
+                UserWarning,
+                stacklevel=3,
+            )
+
+        return AudioTree.create(
+            np.zeros((1, channels, samples), dtype=np.float32), **tree_kwargs
+        )
+
     def __getitem__(self, record_key: SupportsIndex) -> AudioTree:
         """Load an AudioTree for the given record index.
 
@@ -194,6 +259,10 @@ class AudioDataSource(grain.RandomAccessDataSource):
 
         Returns:
             AudioTree with audio data and restored metadata
+
+        Raises:
+            AudioReadError: If the entry's audio file is missing or undecodable
+                and ``on_read_error == "raise"``.
         """
         entry = self.entries[int(record_key)]
 
@@ -231,9 +300,6 @@ class AudioDataSource(grain.RandomAccessDataSource):
             filename = entry["filename"]
             audio_path = safe_join(self.audio_dir, filename, description="audio file")
 
-            if not audio_path.exists():
-                raise FileNotFoundError(f"Audio file not found: {audio_path}")
-
             # Build kwargs for AudioTree.from_file with all available fields
             tree_kwargs = {
                 "sample_rate": self.sample_rate or entry.get("sample_rate"),
@@ -256,8 +322,22 @@ class AudioDataSource(grain.RandomAccessDataSource):
                 if field_name in entry:
                     tree_kwargs[field_name] = _with_batch_axis(entry[field_name])
 
-            # Load audio file with all properties
-            audio_tree = AudioTree.from_file(audio_path, **tree_kwargs)
+            # Load audio file with all properties. A missing or undecodable
+            # file is a read error like any other, so it goes through the same
+            # policy rather than ending the run on the spot.
+            try:
+                if not audio_path.exists():
+                    raise FileNotFoundError(f"Audio file not found: {audio_path}")
+                audio_tree = AudioTree.from_file(audio_path, **tree_kwargs)
+            except _READ_ERRORS as exc:
+                if self.on_read_error == "raise":
+                    raise AudioReadError(
+                        f"Failed to read audio file {str(audio_path)!r} for "
+                        f"manifest entry {int(record_key)}: "
+                        f"{type(exc).__name__}: {exc}",
+                        str(audio_path),
+                    ) from exc
+                return self._substitute_silence(entry, audio_path, exc, metadata)
         else:
             # No audio files - create AudioTree from manifest metadata only
             sample_rate = self.sample_rate or entry.get("sample_rate")
@@ -285,6 +365,16 @@ class AudioDataSource(grain.RandomAccessDataSource):
 
             # Create AudioTree with zero audio data
             audio_tree = AudioTree.create(waveform, **tree_kwargs)
+
+        # Under a non-raising policy every item is marked, so that a substitute
+        # and a real load agree on their metadata keys and still batch together.
+        if self.on_read_error != "raise":
+            audio_tree = audio_tree.replace(
+                metadata={
+                    **audio_tree.metadata,
+                    READ_ERROR_KEY: np.array([False]),
+                }
+            )
 
         return audio_tree
 

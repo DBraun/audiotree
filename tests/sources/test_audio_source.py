@@ -1,6 +1,7 @@
 """Tests for AudioDataSource."""
 
 import tempfile
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +9,7 @@ import pytest
 
 from audiotree import AudioTree, AudioWriter
 from audiotree.sources import AudioDataSource
+from audiotree.sources.core import READ_ERROR_KEY, AudioReadError
 
 
 def test_round_trip_npz_manifest():
@@ -743,3 +745,125 @@ def test_entries_report_the_subtype_the_audio_was_written_in(tmp_path):
 
     source = AudioDataSource.from_writer_output(tmp_path)
     assert source.get_entry(0)["subtype"] == "FLOAT"
+
+
+# ---------------------------------------------------------------------------
+# on_read_error: a manifest can outlive the audio it names.
+# ---------------------------------------------------------------------------
+
+
+def _writer_output_with_one_bad_file(tmp_path, breakage):
+    """Write three items, then break the middle one's audio file.
+
+    ``breakage`` is called with the path to ``audio_0001.wav``.
+    """
+    tree = AudioTree.create(
+        np.random.randn(3, 2, 8000).astype(np.float32),
+        sample_rate=8000,
+        lufs=np.array([-20.0, -18.0, -22.0], dtype=np.float32),
+    )
+    with AudioWriter(tmp_path) as writer:
+        writer.write(tree)
+    breakage(Path(tmp_path) / "audio_0001.wav")
+    return tmp_path
+
+
+def _delete(path):
+    path.unlink()
+
+
+def _truncate_header(path):
+    path.write_bytes(path.read_bytes()[:20])
+
+
+def _empty(path):
+    path.write_bytes(b"")
+
+
+BREAKAGES = {"missing": _delete, "truncated_header": _truncate_header, "empty": _empty}
+
+
+@pytest.mark.parametrize("breakage", sorted(BREAKAGES))
+def test_getitem_raises_naming_the_path_by_default(tmp_path, breakage):
+    """The default policy is unchanged, and the message names the file.
+
+    Every read failure -- a deleted file, an unparseable one -- comes back as
+    one catchable type carrying the path, instead of a bare ``EOFError`` whose
+    ``str()`` is empty.
+    """
+    output_dir = _writer_output_with_one_bad_file(tmp_path, BREAKAGES[breakage])
+    source = AudioDataSource.from_writer_output(output_dir)
+
+    assert source[0].waveform.shape == (1, 2, 8000)
+    with pytest.raises(AudioReadError) as excinfo:
+        source[1]
+    assert "audio_0001.wav" in str(excinfo.value)
+    assert excinfo.value.file_path.endswith("audio_0001.wav")
+
+
+@pytest.mark.parametrize("breakage", sorted(BREAKAGES))
+@pytest.mark.parametrize("policy", ["skip", "warn"])
+def test_getitem_substitutes_marked_silence(tmp_path, breakage, policy):
+    """A non-raising policy hands back a shaped, marked, obviously-empty item."""
+    output_dir = _writer_output_with_one_bad_file(tmp_path, BREAKAGES[breakage])
+    source = AudioDataSource.from_writer_output(output_dir, on_read_error=policy)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        item = source[1]
+
+    # The manifest still knows the shape, so the substitute matches its peers.
+    assert item.waveform.shape == (1, 2, 8000)
+    assert item.sample_rate == 8000
+    assert not np.any(np.asarray(item.waveform))
+    assert bool(item.metadata[READ_ERROR_KEY][0]) is True
+    assert item.filepath[0].endswith("audio_0001.wav")
+    # Manifest-side labels survive: only the audio was lost.
+    assert float(item.lufs[0]) == pytest.approx(-18.0)
+
+
+def test_getitem_warn_names_the_file_and_skip_stays_quiet(tmp_path):
+    """The two non-raising policies differ only in whether they warn."""
+    output_dir = _writer_output_with_one_bad_file(tmp_path, _empty)
+
+    warning_source = AudioDataSource.from_writer_output(
+        output_dir, on_read_error="warn"
+    )
+    with pytest.warns(UserWarning, match="audio_0001.wav"):
+        warning_source[1]
+
+    quiet_source = AudioDataSource.from_writer_output(output_dir, on_read_error="skip")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        quiet_source[1]
+    # librosa warns on its own when it falls back to audioread; what must be
+    # absent is *our* substitution notice.
+    assert not [w for w in caught if "Substituting silence" in str(w.message)]
+
+
+def test_substituted_and_real_items_batch_together(tmp_path):
+    """Every item carries the marker, so the batch collates and self-reports."""
+    output_dir = _writer_output_with_one_bad_file(tmp_path, _empty)
+    source = AudioDataSource.from_writer_output(output_dir, on_read_error="skip")
+
+    batch = AudioTree.batch([source[i] for i in range(len(source))])
+    assert batch.waveform.shape == (3, 2, 8000)
+    assert np.asarray(batch.metadata[READ_ERROR_KEY]).tolist() == [False, True, False]
+
+
+def test_getitem_marker_is_absent_under_the_default_policy(tmp_path):
+    """The default policy leaves the metadata as it was before the knob existed."""
+    with AudioWriter(tmp_path) as writer:
+        writer.write(AudioTree.create(np.zeros((2, 1, 8000), dtype=np.float32), 8000))
+
+    source = AudioDataSource.from_writer_output(tmp_path)
+    assert READ_ERROR_KEY not in source[0].metadata
+
+
+def test_unknown_on_read_error_is_rejected_at_construction(tmp_path):
+    """A typo'd policy fails before any item is read."""
+    with AudioWriter(tmp_path) as writer:
+        writer.write(AudioTree.create(np.zeros((1, 1, 8000), dtype=np.float32), 8000))
+
+    with pytest.raises(ValueError, match="on_read_error must be one of"):
+        AudioDataSource.from_writer_output(tmp_path, on_read_error="ignore")

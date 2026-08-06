@@ -3,7 +3,12 @@
 import importlib.util
 import json
 import locale
+import multiprocessing
+import os
+import pickle
+import sys
 import tempfile
+import types
 from pathlib import Path
 
 import numpy as np
@@ -943,3 +948,222 @@ def test_source_survives_a_pickle_round_trip(tmp_path):
     assert not revived._data_files_opened
     np.testing.assert_array_equal(revived[5]["waveform"], expected)
     assert revived._leaf_memmaps  # rebuilt on demand
+
+
+# === Manifest size validation ===
+
+
+def _rewrite_manifest(directory, mutate):
+    """Apply *mutate* to the on-disk manifest dict and write it back."""
+    path = Path(directory) / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    mutate(manifest)
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def _inflate_shape(manifest):
+    manifest["leaves"]["waveform"]["shape_per_sample"] = [1, 200]
+
+
+def _inflate_num_samples(manifest):
+    manifest["num_samples"] = 40
+
+
+@pytest.mark.parametrize(
+    "mutate_manifest,truncate_to",
+    [
+        # An over-large shape_per_sample. np.memmap does refuse this, but with a
+        # bare "mmap length is greater than file size" that names neither the
+        # manifest nor the leaf -- and only at the first read.
+        pytest.param(_inflate_shape, None, id="over-large-shape"),
+        # An over-large num_samples: len() lies and reads run off the end.
+        pytest.param(_inflate_num_samples, None, id="over-large-num-samples"),
+        # A manifest that was honest when written, against a .bin truncated
+        # afterwards (an interrupted copy, a full disk).
+        pytest.param(None, 400, id="truncated-bin"),
+    ],
+)
+def test_leaf_file_shorter_than_the_manifest_claims_is_refused(
+    tmp_path, mutate_manifest, truncate_to
+):
+    """_validate_manifest never stat'd a leaf file, so nothing measured the data.
+
+    The failure surfaced later and anonymously -- or, for a shortfall np.memmap
+    tolerates, not at all. Now the shortfall is named at construction.
+    """
+    data_dir = tmp_path / "ds"
+    with TreeWriter(data_dir, expected_samples=4) as w:
+        w.write(
+            AudioTree(
+                waveform=np.random.randn(4, 1, 100).astype(np.float32),
+                sample_rate=44100,
+            )
+        )
+
+    if mutate_manifest is not None:
+        _rewrite_manifest(data_dir, mutate_manifest)
+    if truncate_to is not None:
+        os.truncate(data_dir / "waveform.bin", truncate_to)
+
+    with pytest.raises(ValueError, match=r"'waveform.bin' is only \d+ bytes"):
+        TreeDataSource(data_dir)
+
+
+def test_missing_leaf_file_is_refused_by_name(tmp_path):
+    """A manifest naming a .bin that is not there fails with both names."""
+    data_dir = tmp_path / "ds"
+    with TreeWriter(data_dir, expected_samples=2) as w:
+        w.write({"x": np.zeros((2, 3), dtype=np.float32)})
+
+    (data_dir / "x.bin").unlink()
+
+    with pytest.raises(ValueError, match=r"leaf 'x' names 'x.bin', which cannot"):
+        TreeDataSource(data_dir)
+
+
+def test_in_progress_dataset_is_readable_after_flush(tmp_path):
+    """The size check is `>=`, so a mid-write dataset still opens.
+
+    ``flush()`` is public and the writer commits a manifest right after
+    preallocation, so between the first write and ``close()`` every ``.bin`` is
+    legitimately *larger* than ``num_samples`` implies. A strict equality check
+    would reject this dataset, which is valid and completely readable.
+    """
+    data_dir = tmp_path / "ds"
+    writer = TreeWriter(data_dir, expected_samples=64).open()
+    writer.write({"x": np.arange(8, dtype=np.float32)[:, None] * np.ones((1, 4))})
+    writer.flush()
+
+    declared = 8 * 4 * np.dtype(np.float32).itemsize
+    assert (data_dir / "x.bin").stat().st_size > declared  # preallocated for 64
+
+    try:
+        source = TreeDataSource(data_dir)
+        assert len(source) == 8
+        np.testing.assert_array_equal(source[7]["x"], np.full((1, 4), 7.0, np.float32))
+    finally:
+        writer.close()
+
+    assert len(TreeDataSource(data_dir)) == 8
+
+
+# === load_into_memory ===
+
+
+def test_in_memory_samples_do_not_alias_the_shared_store(tmp_path):
+    """Samples are copies, as on the memmap path.
+
+    The in-memory arrays are shared by every sample the source will ever hand
+    out, so returning ``arr[idx][np.newaxis]`` -- a writable view -- let one
+    caller's in-place write rewrite the dataset for every reader after it.
+    """
+    source = TreeDataSource(
+        directory=_tiny_dataset(tmp_path / "ds"), load_into_memory=True
+    )
+    tree = source[3]
+    assert not np.shares_memory(tree["waveform"], source._in_memory_arrays["waveform"])
+
+    tree["waveform"][:] = -1.0
+    assert source[3]["waveform"].max() > 0  # the store is untouched
+
+
+class _StubBagzWriter:
+    """Length-prefixed records; enough for TreeWriter's use of bagz."""
+
+    def __init__(self, path):
+        self._file = open(path, "wb")
+
+    def write(self, record: bytes):
+        self._file.write(len(record).to_bytes(8, "little") + record)
+
+    def close(self):
+        self._file.close()
+
+
+class _StubBagzReader:
+    def __init__(self, path):
+        data = Path(path).read_bytes()
+        self._records = []
+        offset = 0
+        while offset < len(data):
+            size = int.from_bytes(data[offset : offset + 8], "little")
+            offset += 8
+            self._records.append(data[offset : offset + size])
+            offset += size
+
+    def __getitem__(self, index: int) -> bytes:
+        return self._records[index]
+
+
+@pytest.fixture
+def stub_bagz(monkeypatch):
+    """Stand in for bagz so string-leaf tests run everywhere.
+
+    bagz publishes manylinux x86-64 wheels only. What these tests exercise is
+    which branch ``__getitem__`` takes, not the container format, so a stub
+    keeps the coverage on macOS and aarch64 instead of skipping it there.
+    """
+    module = types.ModuleType("bagz")
+    module.Writer = _StubBagzWriter
+    module.Reader = _StubBagzReader
+    monkeypatch.setitem(sys.modules, "bagz", module)
+    return module
+
+
+def _string_only_source(tmp_path, **kwargs):
+    """A dataset whose only *included* leaf is a string leaf."""
+    data_dir = tmp_path / "ds"
+    with TreeWriter(data_dir, expected_samples=2) as w:
+        w.write({"label": ["cat", "dog"], "x": np.zeros((2, 3), dtype=np.float32)})
+    return TreeDataSource(data_dir, exclude_prefixes=["x"], **kwargs)
+
+
+def test_in_memory_string_leaves_survive_the_trip_to_a_worker(tmp_path, stub_bagz):
+    """A worker used to get a completely empty sample here.
+
+    ``__getitem__`` branched on whether ``_in_memory_arrays`` held anything
+    rather than on the mode, so a source that excludes every array leaf took the
+    *file* path -- while ``load_into_memory=True`` had already left
+    ``_data_files_opened`` True with no handles behind it on the far side of a
+    pickle. ``_ensure_open`` then had nothing to do and both dicts were empty.
+    The parent's read below is load-bearing: it is what set the flag.
+    """
+    source = _string_only_source(tmp_path, load_into_memory=True)
+    assert source._in_memory_arrays == {}  # every array leaf excluded
+    assert source[0] == {"label": "cat"}  # the parent read that set the flag
+
+    revived = pickle.loads(pickle.dumps(source))  # what spawn does to the source
+    assert revived[0] == {"label": "cat"}
+    assert revived[1] == {"label": "dog"}
+
+
+def test_lazy_string_leaves_survive_the_trip_to_a_worker(tmp_path, stub_bagz):
+    """The same source in the default lazy mode reopens its reader in the worker."""
+    source = _string_only_source(tmp_path)
+    assert source[0] == {"label": "cat"}
+
+    revived = pickle.loads(pickle.dumps(source))
+    assert revived[1] == {"label": "dog"}
+
+
+def _read_sample_in_child(source, index, queue):
+    queue.put(source[index])
+
+
+def test_in_memory_source_reads_in_a_real_spawned_worker(tmp_path, stub_bagz):
+    """End-to-end version of the above: grain spawns workers on macOS/Windows.
+
+    The child never imports bagz -- ``_in_memory_strings`` is plain ``str`` by
+    then -- which is the whole point of loading string leaves up front.
+    """
+    source = _string_only_source(tmp_path, load_into_memory=True)
+    assert source[0] == {"label": "cat"}
+
+    context = multiprocessing.get_context("spawn")
+    queue = context.Queue()
+    process = context.Process(target=_read_sample_in_child, args=(source, 1, queue))
+    process.start()
+    try:
+        assert queue.get(timeout=120) == {"label": "dog"}
+    finally:
+        process.join(timeout=120)

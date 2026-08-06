@@ -16,7 +16,14 @@ from audiotree.sources import (
     create_balanced_audio_dataset,
     find_audio_files,
 )
-from audiotree.sources.core import _derive_group_seed
+from audiotree.sources.core import READ_ERROR_KEY, AudioReadError, _derive_group_seed
+
+
+def _corrupt_audio_file(directory, name="bad.wav"):
+    """Write a zero-byte ``name`` into ``directory`` and return its path."""
+    path = Path(directory) / name
+    path.write_bytes(b"")
+    return path
 
 
 def _create_test_audio_files(
@@ -579,6 +586,72 @@ class TestBalancedDatasetValidation:
             with warnings.catch_warnings():
                 warnings.simplefilter("error")
                 assert all(mono_ds[i].num_channels == 1 for i in range(len(mono_ds)))
+
+    def test_a_corrupt_file_ends_the_mix_by_default(self):
+        """The default policy is unchanged: the run stops, naming the file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            a_dir = _create_test_audio_files(tmpdir, "a", 2)
+            b_dir = _create_test_audio_files(tmpdir, "b", 2)
+            _corrupt_audio_file(b_dir)
+
+            ds = create_balanced_audio_dataset(
+                sources={"a": [a_dir], "b": [b_dir]},
+                sample_rate=44100,
+                duration=0.5,
+                shuffle=False,
+            ).slice(slice(0, 12))
+
+            with pytest.raises(AudioReadError, match=r"bad\.wav"):
+                for i in range(len(ds)):
+                    _ = ds[i]
+
+    def test_on_read_error_reaches_every_file_based_group(self):
+        """One corrupt file per group is substituted, and the mix still batches.
+
+        The marker lands on *every* item, from every group, so the groups
+        collate with each other -- a substitute in one group and a real load in
+        another must agree on their metadata keys.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            a_dir = _create_test_audio_files(tmpdir, "a", 2)
+            b_dir = _create_test_audio_files(tmpdir, "b", 2)
+            _corrupt_audio_file(a_dir)
+            _corrupt_audio_file(b_dir)
+
+            ds = create_balanced_audio_dataset(
+                sources={"a": [a_dir], "b": [b_dir]},
+                sample_rate=44100,
+                duration=0.5,
+                shuffle=False,
+                on_read_error="skip",
+            ).slice(slice(0, 12))
+
+            items = [ds[i] for i in range(len(ds))]
+            batch = AudioTree.batch(items)
+            assert batch.waveform.shape == (12, 1, 22050)
+
+            flags = np.asarray(batch.metadata[READ_ERROR_KEY])
+            # Each group cycles over 3 files, one of which is corrupt, so a
+            # third of the mix is substituted -- and both groups contribute.
+            assert flags.sum() == 4
+            substituted_groups = {
+                source for source, flag in zip(batch.source, flags) if flag
+            }
+            assert substituted_groups == {"a", "b"}
+            for waveform, flag in zip(batch.waveform, flags):
+                assert bool(np.any(np.asarray(waveform))) is not bool(flag)
+
+    def test_on_read_error_is_rejected_with_window_params(self):
+        """Windowed sampling has its own loader, so the knob must not look wired."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            a_dir = _create_test_audio_files(tmpdir, "a", 2)
+
+            with pytest.raises(ValueError, match="does not support `on_read_error`"):
+                create_balanced_audio_dataset(
+                    sources={"a": [a_dir]},
+                    window_params=WindowParams(duration=0.5),
+                    on_read_error="skip",
+                )
 
 
 def _generate_sine_tone(
