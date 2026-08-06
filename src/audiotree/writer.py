@@ -1,6 +1,7 @@
 """AudioWriter class for writing AudioTree objects to disk with manifest support."""
 
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -11,6 +12,47 @@ import soundfile
 from . import _format
 from ._fs import refuse_to_clobber
 from .core import LABEL_FIELDS, AudioTree
+
+# Manifest columns hold one value per written item. Metadata keys that describe
+# *where* an item came from are reconstructed by the reader instead.
+_SKIPPED_METADATA_KEYS = frozenset(
+    {"filepath", "offset", "duration", "manifest_index", "tags"}
+)
+
+
+def _column_value(name: str, value: Any, batch_index: int) -> Any:
+    """Pick the ``batch_index``-th row out of a per-item manifest column.
+
+    ``value`` arrives as whatever the caller put on the AudioTree: a
+    ``jax.Array``, a NumPy array, a list, or a scalar. Dispatching on
+    ``isinstance(value, np.ndarray)`` missed every array-like that is not a
+    NumPy array -- a ``jax.Array`` being the common case -- and stored the whole
+    batch in *every* row, so labels ended up bound to the wrong audio. Coerce
+    first, then let one code path handle all of them.
+
+    Raises:
+        ValueError: If *value* is neither a scalar nor an array-like covering
+            the batch.
+    """
+    # Scalars label the whole batch, so they are stored verbatim in every row.
+    if isinstance(value, (str, bytes, bool, int, float, np.generic)):
+        return value
+
+    array = np.asarray(value)
+    if array.dtype == object:
+        raise ValueError(
+            f"Manifest column {name!r} holds a {type(value).__name__}, which has no "
+            f"manifest representation. Columns must be scalars, strings, or "
+            f"array-likes with one row per batch item."
+        )
+    if array.ndim == 0:
+        return array
+    if batch_index >= len(array):
+        raise ValueError(
+            f"Manifest column {name!r} has {len(array)} rows, too few for batch "
+            f"index {batch_index}. Every per-item column must cover the batch."
+        )
+    return array[batch_index]
 
 
 class AudioWriter:
@@ -35,16 +77,23 @@ class AudioWriter:
             artifacts.
         pbar: Optional tqdm progress bar instance to update during writing
         close_pbar: Whether to close the progress bar on exit (default False)
-        show_progress: Create an internal tqdm progress bar (requires tqdm installed)
+        show_progress: Create an internal tqdm progress bar. Raises ``ImportError``
+            if tqdm is not installed — install it with ``audiotree[progress]``.
         progress_desc: Description for internal progress bar (default "Writing audio")
         exist_ok: Whether to write into a directory that already holds a manifest.
             Defaults to ``False``, which raises ``FileExistsError`` rather than
             overwriting an existing dataset (and catches two writers aimed at one
             directory). Pass ``True`` to deliberately overwrite or append.
+        manifest_every: Rewrite ``manifest.npz`` once this many entries have
+            accumulated since the last write, so a run killed after 100k files
+            leaves a manifest describing (nearly) all of them instead of none.
+            Each rewrite costs one pass over every entry so far, hence the
+            throttle; pass ``0`` to write the manifest only at ``close()``.
 
     Example:
         Write a handful of (silent, one-second mono) ``AudioTree`` objects to a
-        temporary directory. A ``manifest.npz`` is written on context exit.
+        temporary directory. A ``manifest.npz`` is refreshed every
+        ``manifest_every`` entries and finalized on context exit.
 
         >>> import tempfile
         >>> from pathlib import Path
@@ -75,7 +124,7 @@ class AudioWriter:
         >>> with AudioWriter(out_dir, pbar=pbar, exist_ok=True) as writer:  # doctest: +SKIP
         ...     for audio_tree in audio_trees:
         ...         _ = writer.write(audio_tree)
-        >>> with AudioWriter(out_dir, show_progress=True, exist_ok=True) as writer:
+        >>> with AudioWriter(out_dir, show_progress=True, exist_ok=True) as writer:  # doctest: +SKIP
         ...     for audio_tree in audio_trees:
         ...         _ = writer.write(audio_tree)
     """
@@ -94,6 +143,7 @@ class AudioWriter:
         show_progress: bool = False,
         progress_desc: Optional[str] = None,
         exist_ok: bool = False,
+        manifest_every: int = 1000,
     ):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -111,6 +161,8 @@ class AudioWriter:
         self.written_paths = []
         self.manifest_data = []
         self._expected_fields = None  # Track which AudioTree fields should be present
+        self.manifest_every = manifest_every
+        self._manifest_index = 0  # self.index as of the last manifest write
 
         # Progress bar support
         self.pbar = pbar
@@ -127,9 +179,11 @@ class AudioWriter:
                 self._internal_pbar = tqdm(desc=self.progress_desc, unit="files")
                 self.pbar = self._internal_pbar
                 self.close_pbar = True  # Always close internal progress bars
-            except ImportError:
-                # tqdm not available, silently continue without progress bar
-                pass
+            except ImportError as exc:
+                raise ImportError(
+                    "show_progress=True requires tqdm, which is not installed. "
+                    'Install it with `pip install "audiotree[progress]"`.'
+                ) from exc
 
     def _get_present_fields(self, tree: AudioTree) -> set:
         """Get the set of AudioTree fields that are not None.
@@ -201,6 +255,11 @@ class AudioWriter:
             filename = self.pattern.format(index=self.index)
             filepath = self.directory / filename
 
+            # Collect the manifest entry first: a column this writer cannot
+            # store raises, and doing that before the WAV exists keeps the
+            # directory free of audio no manifest row points at.
+            entry = self._create_manifest_entry(tree, i, filename, tags)
+
             # Write audio file if requested
             if self.write_audio:
                 # Convert to numpy and transpose for soundfile (channels, samples) -> (samples, channels)
@@ -211,9 +270,6 @@ class AudioWriter:
                 self.written_paths.append(filepath)
 
             paths.append(filepath)
-
-            # Collect manifest entry
-            entry = self._create_manifest_entry(tree, i, filename, tags)
             self.manifest_data.append(entry)
 
             self.index += 1
@@ -221,6 +277,14 @@ class AudioWriter:
         # Update progress bar if available
         if self.pbar is not None:
             self.pbar.update(batch_size)
+
+        # Publish the manifest as writing progresses, so a killed run leaves a
+        # readable dataset rather than a directory of unindexed WAVs.
+        if (
+            self.manifest_every
+            and self.index - self._manifest_index >= self.manifest_every
+        ):
+            self.save_manifest()
 
         return paths
 
@@ -260,22 +324,7 @@ class AudioWriter:
         for field_name in LABEL_FIELDS:
             field_value = getattr(tree, field_name, None)
             if field_value is not None:
-                # Extract the value for this batch index
-                if isinstance(field_value, np.ndarray):
-                    if field_value.ndim > 0 and batch_index < len(field_value):
-                        val = field_value[batch_index]
-                        # Keep as numpy scalar to preserve dtype
-                        entry[field_name] = (
-                            val
-                            if isinstance(val, np.generic)
-                            else np.array(val, dtype=field_value.dtype)
-                        )
-                    elif field_value.ndim == 0:
-                        # Scalar array
-                        entry[field_name] = field_value
-                else:
-                    # Non-array value (shouldn't normally happen for these fields)
-                    entry[field_name] = field_value
+                entry[field_name] = _column_value(field_name, field_value, batch_index)
 
         # Add source filepath if available (consistent naming)
         filepaths = tree.filepath
@@ -289,28 +338,25 @@ class AudioWriter:
         # Add metadata arrays if present
         if tree.metadata:
             for key, value in tree.metadata.items():
-                # Skip certain internal metadata keys that shouldn't be saved
-                if key in ["filepath", "offset", "duration", "manifest_index"]:
+                # Skip internal keys, and `tags`, which is handled above.
+                if key in _SKIPPED_METADATA_KEYS:
                     continue
-
-                # For arrays in metadata, extract the batch_index element
-                if isinstance(value, np.ndarray):
-                    if value.ndim > 0 and len(value) > batch_index:
-                        # Save the value for this batch item
-                        entry[f"metadata_{key}"] = value[batch_index]
-                    elif value.ndim == 0:
-                        # Scalar array
-                        entry[f"metadata_{key}"] = value
-                # For non-array metadata, only include if it's meant to be saved
-                elif not isinstance(value, (dict, list)) or key == "tags":
-                    # Skip complex objects unless they're tags
-                    if key != "tags":  # tags already handled above
-                        entry[f"metadata_{key}"] = value
+                # A nested dict has no NPZ column representation; write nested
+                # pytrees with TreeWriter instead.
+                if isinstance(value, dict):
+                    continue
+                column = f"metadata_{key}"
+                entry[column] = _column_value(column, value, batch_index)
 
         return entry
 
     def save_manifest(self) -> Optional[Path]:
-        """Save the manifest file to disk.
+        """Write ``manifest.npz`` atomically (temp file + rename).
+
+        A reader -- or a retry after a crash -- sees either the previous
+        manifest or the new one, never the half-written NPZ that a kill during
+        ``savez`` would otherwise leave behind (which reads as a corrupt zip and
+        blocks re-rendering with "already contains a dataset").
 
         Returns:
             Path to the saved manifest file, or None if no data to save
@@ -331,12 +377,17 @@ class AudioWriter:
                 json.dumps(value)
             )
 
-        # Save as compressed or uncompressed NPZ
-        if self.compress_manifest:
-            np.savez_compressed(manifest_path, **arrays_dict)
-        else:
-            np.savez(manifest_path, **arrays_dict)
+        # Save as compressed or uncompressed NPZ. The temp name is dotted so it
+        # does not look like a dataset to `refuse_to_clobber`.
+        tmp_path = manifest_path.with_name(f".{manifest_path.name}.tmp")
+        with open(tmp_path, "wb") as f:
+            if self.compress_manifest:
+                np.savez_compressed(f, **arrays_dict)
+            else:
+                np.savez(f, **arrays_dict)
+        os.replace(tmp_path, manifest_path)
 
+        self._manifest_index = self.index
         return manifest_path
 
     def _manifest_to_arrays(self) -> Dict[str, np.ndarray]:
@@ -348,13 +399,17 @@ class AudioWriter:
         if not self.manifest_data:
             return {}
 
-        # Collect all unique fields across entries
+        n_entries = len(self.manifest_data)
+
+        # Collect all unique fields across entries. Sorting matters: NPZ keys are
+        # written in insertion order, so iterating the set directly made the file
+        # bytes depend on the interpreter's string hash seed.
         all_fields = set()
         for entry in self.manifest_data:
             all_fields.update(entry.keys())
 
         # Separate scalar fields from tag fields
-        scalar_fields = {f for f in all_fields if f != "tags"}
+        scalar_fields = sorted(f for f in all_fields if f != "tags")
 
         # Initialize result dictionary
         arrays = {}
@@ -362,7 +417,14 @@ class AudioWriter:
         # Process scalar fields
         for field in scalar_fields:
             # Collect values from all entries
-            values = [entry[field] for entry in self.manifest_data]
+            values = [entry[field] for entry in self.manifest_data if field in entry]
+            if len(values) != n_entries:
+                raise ValueError(
+                    f"Manifest column {field!r} covers {len(values)} of "
+                    f"{n_entries} entries. A field present on some writes and "
+                    f"absent on others cannot be stored as a manifest column; "
+                    f"write every entry with the same fields."
+                )
 
             # Infer dtype from first value
             first_val = values[0]
@@ -389,19 +451,30 @@ class AudioWriter:
                     else:
                         arrays[field] = np.array(values, dtype=np.float32)
             else:
-                # Fallback for other types
-                arrays[field] = np.concatenate(values, axis=0)
+                raise ValueError(
+                    f"Manifest column {field!r} holds "
+                    f"{type(first_val).__name__} values, which cannot be stored "
+                    f"as a manifest column."
+                )
+
+            # Every column indexes the manifest by row, so a column of any other
+            # length would silently misalign labels with audio.
+            if len(arrays[field]) != n_entries:
+                raise ValueError(
+                    f"Manifest column {field!r} became {len(arrays[field])} rows "
+                    f"for {n_entries} entries."
+                )
 
         # Process tags if present
         if any("tags" in entry for entry in self.manifest_data):
-            # Collect all unique tag keys
+            # Collect all unique tag keys (sorted, for a deterministic NPZ)
             all_tag_keys = set()
             for entry in self.manifest_data:
                 if "tags" in entry and isinstance(entry["tags"], dict):
                     all_tag_keys.update(entry["tags"].keys())
 
             # Store each tag as a separate array
-            for tag_key in all_tag_keys:
+            for tag_key in sorted(all_tag_keys):
                 tag_values = []
                 for entry in self.manifest_data:
                     if "tags" in entry and tag_key in entry["tags"]:

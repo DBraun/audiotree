@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -12,8 +13,46 @@ import numpy as np
 
 from audiotree import _format
 from audiotree._bagz import require_bagz
-from audiotree._fs import refuse_to_clobber, write_json_atomic
+from audiotree._fs import refuse_to_clobber, safe_join, write_json_atomic
 from audiotree.core import PYTREE_FIELDS, AudioTree
+
+# dtypes a leaf may be written with. Must stay in sync with the reader's
+# ``audiotree.sources.tree._ALLOWED_DTYPES``: a dataset whose manifest names a
+# dtype outside this set is refused at read time, and discovering that after an
+# hours-long pre-render is the worst possible moment. It is duplicated rather
+# than imported because ``audiotree.sources`` pulls in grain, which the writer
+# deliberately does not require.
+_ALLOWED_DTYPES = frozenset(
+    [
+        "bool",
+        "int8",
+        "int16",
+        "int32",
+        "int64",
+        "uint8",
+        "uint16",
+        "uint32",
+        "uint64",
+        "float16",
+        "float32",
+        "float64",
+        "complex64",
+        "complex128",
+    ]
+)
+
+
+def _native_dtype(dtype: np.dtype) -> np.dtype:
+    """Return *dtype* in this machine's byte order.
+
+    ``.bin`` files carry no byte-order mark, and the manifest records a plain
+    dtype name (``"float32"``), so a big-endian leaf on a little-endian host
+    would be read back byte-swapped. Normalizing on write keeps the one encoding
+    the reader knows how to name.
+    """
+    if dtype.byteorder in (">", "<"):  # "=" and "|" are already native/N.A.
+        return dtype.newbyteorder("=")
+    return dtype
 
 
 def _path_to_string(path: Tuple) -> str:
@@ -172,6 +211,12 @@ class TreeWriter:
             after each ``write()`` call.
         close_pbar: If True, close the progress bar when the writer closes.
             Default False.
+        manifest_interval: Seconds between refreshes of the manifest's
+            ``num_samples`` while writing. The manifest is what tells a reader
+            how much of the dataset is real, so a hard kill must not leave it
+            claiming zero; refreshing on a timer bounds how stale that count can
+            be without rewriting the JSON on every batch. Pass ``0`` to refresh
+            only on :meth:`flush` and :meth:`close`.
 
     Example:
         Pre-render a few batches of one-second mono ``AudioTree`` objects into a
@@ -203,14 +248,17 @@ class TreeWriter:
         pbar=None,
         close_pbar: bool = False,
         exist_ok: bool = False,
+        manifest_interval: float = 5.0,
     ):
         self.directory = Path(directory)
         self.expected_samples = expected_samples
         self.metadata = metadata or {}
         self.exist_ok = exist_ok
+        self.manifest_interval = manifest_interval
         self._pbar = pbar
         self._close_pbar = close_pbar
 
+        self._manifest_written_at = 0.0
         self._current_index = 0
         self._memmaps: List[np.memmap] = []
         self._leaf_names: List[str] = []
@@ -220,15 +268,25 @@ class TreeWriter:
         self._bagz_writers: Dict = {}
         self._structure = None
         self._is_open = False
+        self._is_closed = False
 
     def open(self) -> "TreeWriter":
         """Open the writer and create output directory.
 
         Returns:
             self for method chaining
+
+        Raises:
+            RuntimeError: If the writer is already open, or has been closed.
         """
         if self._is_open:
             raise RuntimeError("Writer is already open")
+        if self._is_closed:
+            raise RuntimeError(
+                "Writer has been closed and cannot be reopened: its memmaps are "
+                "gone and its files truncated, so further writes would be "
+                "dropped. Create a new TreeWriter."
+            )
         self.directory.mkdir(parents=True, exist_ok=True)
         if not self.exist_ok:
             refuse_to_clobber(self.directory, ("manifest.json", "*.bin", "*.bagz"))
@@ -271,31 +329,76 @@ class TreeWriter:
             + f". Expected leaves {sorted(expected)}."
         )
 
+    def _leaf_path(self, name: str, extension: str, claimed: Dict[str, str]) -> Path:
+        """Resolve one leaf's output file, refusing collisions and escapes.
+
+        Filenames are dot-joined leaf paths, which is not injective: the leaves
+        ``{"a.b": x}`` and ``{"a": {"b": y}}`` both name ``a.b.bin``, so one
+        silently overwrote the other. And a leaf named ``"../escaped"`` wrote
+        outside the dataset directory entirely, so every filename goes through
+        :func:`~audiotree._fs.safe_join` -- the same check the reader applies to
+        the manifest it reads back.
+        """
+        filename = f"{name}{extension}"
+        if filename in claimed:
+            raise ValueError(
+                f"Leaves {claimed[filename]!r} and {name!r} both map to the file "
+                f"{filename!r}. Leaf filenames are dot-joined pytree paths, so a "
+                f"key containing '.' can collide with a nested one; rename one of "
+                f"them."
+            )
+        path = safe_join(self.directory, filename, description="leaf file")
+        if path.parent != self.directory.resolve():
+            raise ValueError(
+                f"Leaf {name!r} maps to the file {filename!r}, which is not a "
+                f"plain name inside {self.directory}. Leaf keys must not contain "
+                f"path separators."
+            )
+        claimed[filename] = name
+        return path
+
     def _init_from_pytree(self, pytree, structure, leaf_names, string_leaf_names):
         """Infer schema from the first pytree and create memmap/bagz files."""
+        array_leaves, _ = _extract_leaves(pytree, leaf_names, string_leaf_names)
+
+        # Resolve and validate every output file *before* creating any of them
+        # or recording any schema, so a pytree the reader could not read back
+        # fails on the first write -- leaving neither half-written files nor a
+        # half-initialized writer -- rather than after hours of rendering.
+        claimed: Dict[str, str] = {}
+        array_paths = []
+        for name, leaf in zip(leaf_names, array_leaves):
+            dtype = _native_dtype(leaf.dtype)
+            if str(dtype) not in _ALLOWED_DTYPES:
+                raise ValueError(
+                    f"Leaf {name!r} has dtype {leaf.dtype!s}, which TreeDataSource "
+                    f"cannot read back. Supported dtypes: "
+                    f"{sorted(_ALLOWED_DTYPES)}. Cast the leaf before writing."
+                )
+            array_paths.append((self._leaf_path(name, ".bin", claimed), dtype))
+        string_paths = [
+            self._leaf_path(name, ".bagz", claimed) for name in string_leaf_names
+        ]
+
         self._structure = structure
         self._leaf_names = leaf_names
         self._string_leaf_names = string_leaf_names
 
-        array_leaves, _ = _extract_leaves(
-            pytree, self._leaf_names, self._string_leaf_names
-        )
-
         # Create memmaps for array leaves
-        for name, leaf in zip(self._leaf_names, array_leaves):
+        for (path, dtype), name, leaf in zip(
+            array_paths, self._leaf_names, array_leaves
+        ):
             shape_per_sample = leaf.shape[1:]  # exclude batch dim
-            dtype = leaf.dtype
-            filename = f"{name}.bin"
 
             self._leaf_info[name] = {
                 "dtype": str(dtype),
                 "shape_per_sample": list(shape_per_sample),
-                "file": filename,
+                "file": path.name,
             }
 
             full_shape = (self.expected_samples,) + shape_per_sample
             mm = np.memmap(
-                self.directory / filename,
+                path,
                 dtype=dtype,
                 mode="w+",
                 shape=full_shape,
@@ -305,10 +408,9 @@ class TreeWriter:
         # Create bagz writers for string leaves
         if self._string_leaf_names:
             bagz = require_bagz("storing string leaves in TreeWriter")
-            for name in self._string_leaf_names:
-                filename = f"{name}.bagz"
-                self._string_leaf_info[name] = {"file": filename}
-                self._bagz_writers[name] = bagz.Writer(str(self.directory / filename))
+            for name, path in zip(self._string_leaf_names, string_paths):
+                self._string_leaf_info[name] = {"file": path.name}
+                self._bagz_writers[name] = bagz.Writer(str(path))
 
         # Publish the manifest as soon as the schema is known, so a pre-render
         # killed partway through leaves a readable prefix rather than a
@@ -331,9 +433,14 @@ class TreeWriter:
             Number of samples written (batch size)
 
         Raises:
-            RuntimeError: If writer is not open
+            RuntimeError: If writer is not open, or has been closed
             ValueError: If shapes don't match or would exceed expected_samples
         """
+        if self._is_closed:
+            raise RuntimeError(
+                "Writer is closed; further writes would be silently dropped. "
+                "Create a new TreeWriter."
+            )
         if not self._is_open:
             raise RuntimeError("Writer is not open. Call open() first.")
 
@@ -405,6 +512,15 @@ class TreeWriter:
         self._current_index += batch_size
         if self._pbar is not None:
             self._pbar.update(batch_size)
+
+        # Keep the on-disk sample count honest as the render progresses. The
+        # manifest is written first with num_samples=0, so without this a
+        # SIGKILL left a directory of real data that reads back as empty.
+        if (
+            self.manifest_interval
+            and time.monotonic() - self._manifest_written_at >= self.manifest_interval
+        ):
+            self._write_manifest()
         return batch_size
 
     def _write_manifest(self):
@@ -425,6 +541,7 @@ class TreeWriter:
             "metadata": self.metadata,
         }
         write_json_atomic(self.directory / "manifest.json", manifest)
+        self._manifest_written_at = time.monotonic()
 
     def flush(self):
         """Flush all memmap files to disk and refresh the manifest."""
@@ -439,9 +556,14 @@ class TreeWriter:
         If fewer samples were written than ``expected_samples``, the memmap
         files are truncated to the actual sample count so no disk space is
         wasted and readers see the correct size.
+
+        Closing is terminal: the writer cannot be reopened, because its files
+        have been truncated to what was already written and its memmaps
+        released.
         """
         if not self._is_open:
             return
+        self._is_closed = True
 
         actual_samples = self._current_index
 
@@ -460,7 +582,11 @@ class TreeWriter:
                 self.expected_samples,
             )
             for name in self._leaf_names:
-                filepath = self.directory / self._leaf_info[name]["file"]
+                filepath = safe_join(
+                    self.directory,
+                    self._leaf_info[name]["file"],
+                    description="leaf file",
+                )
                 shape_per_sample = self._leaf_info[name]["shape_per_sample"]
                 dtype = np.dtype(self._leaf_info[name]["dtype"])
                 elems = int(np.prod(shape_per_sample)) if shape_per_sample else 1

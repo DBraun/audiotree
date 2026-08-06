@@ -579,3 +579,118 @@ def test_writer_refuses_to_clobber_an_existing_dataset():
 
         # Opting in is allowed.
         TreeWriter(tmpdir, expected_samples=2, exist_ok=True).open().close()
+
+
+def test_non_native_endian_leaf_round_trips():
+    """A big-endian leaf is normalized on write, not recorded as an unreadable dtype.
+
+    ``str(np.dtype('>f4'))`` is ``'>f4'``, which TreeDataSource's dtype allowlist
+    refuses -- so the dataset was writable but unreadable. The bytes are
+    byte-swapped to native order and the manifest names the native dtype.
+    """
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        values = np.arange(6, dtype=">f4").reshape(3, 2)
+        with TreeWriter(tmpdir, expected_samples=3) as writer:
+            writer.write({"x": values})
+
+        manifest = json.loads((Path(tmpdir) / "manifest.json").read_text())
+        assert manifest["leaves"]["x"]["dtype"] == "float32"
+
+        source = TreeDataSource(tmpdir)
+        np.testing.assert_array_equal(source[1]["x"].ravel(), [2.0, 3.0])
+
+
+def test_unreadable_dtype_fails_on_the_first_write():
+    """A dtype the reader rejects must fail immediately, not after the render."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=2) as writer:
+            with pytest.raises(ValueError, match="cannot read back"):
+                writer.write({"x": np.array(["ab", "cd"], dtype="<U2")})
+
+        # Nothing half-written was left behind for that leaf.
+        assert not (Path(tmpdir) / "x.bin").exists()
+
+
+def test_colliding_leaf_filenames_raise():
+    """Two leaves must never share one .bin file.
+
+    Filenames are dot-joined leaf paths, so ``{"a.b": ...}`` and
+    ``{"a": {"b": ...}}`` both mapped to ``a.b.bin``: both read back as
+    whichever was written last, and the other leaf vanished.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ones = np.ones((2, 3), dtype=np.float32)
+        with TreeWriter(tmpdir, expected_samples=2) as writer:
+            with pytest.raises(ValueError, match="both map to the file 'a.b.bin'"):
+                writer.write({"a.b": ones * 1.0, "a": {"b": ones * 2.0}})
+
+
+def test_leaf_name_cannot_escape_the_dataset_directory():
+    """A leaf key with '..' must not write outside the dataset directory."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        (root / "dataset").mkdir()
+        with TreeWriter(root / "dataset", expected_samples=2) as writer:
+            with pytest.raises(ValueError, match=r"\.\."):
+                writer.write({"../escaped": np.ones((2, 3), dtype=np.float32)})
+
+        assert not (root / "escaped.bin").exists()
+
+
+def test_leaf_name_cannot_name_a_subdirectory():
+    """A leaf key with a path separator fails clearly rather than at memmap time."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=2) as writer:
+            with pytest.raises(ValueError, match="path separators"):
+                writer.write({"sub/x": np.ones((2, 3), dtype=np.float32)})
+
+
+def test_manifest_sample_count_is_refreshed_while_writing():
+    """A hard kill must leave a truthful num_samples, without any flush().
+
+    The manifest was stamped once with num_samples=0 and refreshed only by
+    flush()/close(), so a SIGKILLed pre-render read back as an empty dataset.
+    """
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # manifest_interval=0.0 disables the timer; a tiny one refreshes always.
+        writer = TreeWriter(tmpdir, expected_samples=100, manifest_interval=1e-9)
+        writer.open()
+        for i in range(5):
+            writer.write({"x": np.full((10, 2), float(i), dtype=np.float32)})
+
+        # No flush(), no close() -- exactly what a SIGKILL would leave behind.
+        manifest = json.loads((Path(tmpdir) / "manifest.json").read_text())
+        assert manifest["num_samples"] == 50
+        assert len(TreeDataSource(tmpdir)) == 50
+        np.testing.assert_array_equal(
+            TreeDataSource(tmpdir)[45]["x"].ravel(), [4.0] * 2
+        )
+
+        writer.close()
+
+
+def test_close_is_terminal():
+    """Reopening a closed writer must raise, not accept writes it will drop.
+
+    After close() the memmaps are gone and the files truncated, so a second
+    open() accepted write() calls, dropped the data, and grew the file back with
+    zeros that the manifest presented as real samples.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        writer = TreeWriter(tmpdir, expected_samples=4)
+        writer.open()
+        writer.write({"x": np.ones((2, 3), dtype=np.float32)})
+        writer.close()
+
+        with pytest.raises(RuntimeError, match="cannot be reopened"):
+            writer.open()
+        with pytest.raises(RuntimeError, match="closed"):
+            writer.write({"x": np.ones((2, 3), dtype=np.float32)})
+
+        manifest = json.loads((Path(tmpdir) / "manifest.json").read_text())
+        assert manifest["num_samples"] == 2
+        assert (Path(tmpdir) / "x.bin").stat().st_size == 2 * 3 * 4

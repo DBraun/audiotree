@@ -1,8 +1,13 @@
 """Tests for AudioWriter class."""
 
+import json
+import subprocess
+import sys
 import tempfile
+import textwrap
 from pathlib import Path
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 import soundfile
@@ -371,8 +376,10 @@ def test_internal_progress_bar():
 
         audio_tree = AudioTree.create(np.random.randn(3, 1, 8000), 8000)
 
-        # Try to create with internal progress bar
-        # This will work if tqdm is installed, otherwise silently continue
+        # ``show_progress=True`` now raises without tqdm rather than silently
+        # continuing, so this exercises the installed-extra path only.
+        pytest.importorskip("tqdm", reason="needs audiotree[progress]")
+
         with AudioWriter(
             output_dir,
             show_progress=True,
@@ -380,7 +387,6 @@ def test_internal_progress_bar():
         ) as writer:
             writer.write(audio_tree)
 
-        # Should have written files regardless of tqdm availability
         assert len(list(output_dir.glob("*.wav"))) == 3
 
 
@@ -1312,3 +1318,203 @@ def test_audio_writer_refuses_to_clobber_an_existing_dataset():
             AudioWriter(tmpdir)
 
         AudioWriter(tmpdir, exist_ok=True)  # opt in
+
+
+def test_jax_label_columns_are_written_per_item():
+    """A ``jax.Array`` label must be split per item, not repeated whole.
+
+    ``_create_manifest_entry`` dispatched on ``isinstance(value, np.ndarray)``,
+    which a ``jax.Array`` fails, so every row stored the *entire batch* and the
+    manifest ended up with more label values than files, each bound to the wrong
+    audio.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        with AudioWriter(output_dir) as writer:
+            for lufs, pitch in ((-1.0, -2.0), (-3.0, -4.0)):
+                tree = AudioTree.create(jnp.zeros((2, 1, 800)), 16000)
+                tree = tree.replace(
+                    lufs=jnp.array([lufs, pitch], dtype=jnp.float32),
+                    metadata={"frame_id": jnp.arange(2, dtype=jnp.int32)},
+                )
+                writer.write(tree)
+
+        assert len(list(output_dir.glob("*.wav"))) == 4
+
+        data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        assert data["lufs"].shape == (4,)
+        np.testing.assert_allclose(data["lufs"], [-1.0, -2.0, -3.0, -4.0])
+        assert data["metadata_frame_id"].shape == (4,)
+        np.testing.assert_array_equal(data["metadata_frame_id"], [0, 1, 0, 1])
+
+        # And the labels round-trip onto the loaded batch in file order.
+        loaded = AudioTree.from_manifest(output_dir / "manifest.npz")
+        np.testing.assert_allclose(np.asarray(loaded.lufs), [-1.0, -2.0, -3.0, -4.0])
+
+
+def test_list_label_column_is_written_per_item():
+    """A plain Python list is array-like too, and must not be stored whole."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        tree = AudioTree.create(np.zeros((3, 1, 800), dtype=np.float32), 16000)
+        tree = tree.replace(metadata={"velocity": [10, 20, 30]})
+
+        with AudioWriter(output_dir, write_audio=False) as writer:
+            writer.write(tree)
+
+        data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        np.testing.assert_array_equal(data["metadata_velocity"], [10, 20, 30])
+
+
+def test_unstorable_column_raises():
+    """A value that is neither scalar nor per-item array-like must raise."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tree = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+        tree = tree.replace(metadata={"weird": [object(), object()]})
+
+        with AudioWriter(tmpdir, write_audio=False) as writer:
+            with pytest.raises(ValueError, match="metadata_weird"):
+                writer.write(tree)
+
+
+def test_column_shorter_than_batch_raises():
+    """A label array with fewer rows than the batch must raise, not be dropped."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tree = AudioTree.create(np.zeros((3, 1, 800), dtype=np.float32), 16000)
+        tree = tree.replace(metadata={"short": np.array([1.0, 2.0])})
+
+        with AudioWriter(tmpdir, write_audio=False) as writer:
+            with pytest.raises(ValueError, match="too few for batch index"):
+                writer.write(tree)
+
+
+def test_ragged_column_raises_naming_the_column():
+    """Every column must cover every entry, or the manifest misaligns silently."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tree1 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+        tree1 = tree1.replace(metadata={"frame_id": np.array([1, 2])})
+        tree2 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+
+        writer = AudioWriter(tmpdir, write_audio=False, manifest_every=0)
+        writer.write(tree1)
+        writer.write(tree2)  # no metadata at all
+
+        with pytest.raises(ValueError, match="metadata_frame_id.* covers 2 of 4"):
+            writer.save_manifest()
+
+
+def test_manifest_is_written_during_the_run():
+    """A killed run must leave a manifest for the files already on disk."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+
+        writer = AudioWriter(output_dir, manifest_every=4)
+        writer.write(tree)
+        assert not (output_dir / "manifest.npz").exists()  # still throttled
+        writer.write(tree)
+
+        # No close(), no context manager: this is what SIGKILL would leave.
+        source = AudioDataSource.from_writer_output(output_dir)
+        assert len(source) == 4
+
+
+def test_manifest_write_failure_leaves_the_previous_manifest_intact(monkeypatch):
+    """The manifest is replaced atomically, so a crash mid-save cannot corrupt it.
+
+    A truncated ``manifest.npz`` reads as a broken zip *and* trips
+    ``refuse_to_clobber`` on the retry, which used to leave the directory
+    unusable in both directions.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+        tree = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+
+        writer = AudioWriter(output_dir, write_audio=False, manifest_every=0)
+        writer.write(tree)
+        writer.save_manifest()
+
+        def explode(fileobj, **kwargs):
+            fileobj.write(b"PK\x03\x04truncated")
+            raise KeyboardInterrupt("killed mid-savez")
+
+        monkeypatch.setattr(np, "savez_compressed", explode)
+        writer.write(tree)
+        with pytest.raises(KeyboardInterrupt):
+            writer.save_manifest()
+
+        data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        assert len(data["index"]) == 2  # the good, complete previous manifest
+
+
+_DETERMINISM_SCRIPT = textwrap.dedent(
+    """
+    import hashlib, sys, tempfile
+    import numpy as np
+    from audiotree import AudioTree, AudioWriter
+
+    with tempfile.TemporaryDirectory() as d:
+        tree = AudioTree.create(
+            np.zeros((3, 1, 80), dtype=np.float32),
+            8000,
+            lufs=np.zeros(3, dtype=np.float32),
+            pitch=np.zeros(3, dtype=np.float32),
+        )
+        tree = tree.replace(
+            metadata={f"col_{i}": np.arange(3, dtype=np.int32) for i in range(12)}
+        )
+        with AudioWriter(d, write_audio=False) as w:
+            w.write(tree, tags={f"tag_{i}": i for i in range(6)})
+        blob = (open(f"{d}/manifest.npz", "rb")).read()
+        print(hashlib.sha256(blob).hexdigest())
+        print(",".join(np.load(f"{d}/manifest.npz", allow_pickle=True).files))
+    """
+)
+
+
+def test_manifest_bytes_are_deterministic_across_hash_seeds():
+    """Two runs must produce byte-identical manifests.
+
+    ``_manifest_to_arrays`` iterated a ``set``, so NPZ key order -- and hence the
+    file's bytes -- depended on the interpreter's string hash seed.
+    """
+    import os
+
+    outputs = []
+    for seed in ("0", "1"):
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        result = subprocess.run(
+            [sys.executable, "-c", _DETERMINISM_SCRIPT],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        outputs.append(result.stdout.strip().splitlines())
+
+    digest_a, keys_a = outputs[0]
+    digest_b, keys_b = outputs[1]
+    assert keys_a == keys_b, json.dumps([keys_a, keys_b], indent=2)
+    assert digest_a == digest_b
+
+
+def test_show_progress_without_tqdm_raises(tmp_path, monkeypatch):
+    """``show_progress=True`` must fail loudly when tqdm is missing.
+
+    It used to swallow the ImportError and carry on with no progress bar, so the
+    flag was a silent no-op for anyone who had not installed the extra.
+    """
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_tqdm(name, *args, **kwargs):
+        if name == "tqdm":
+            raise ImportError("No module named 'tqdm'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_tqdm)
+    with pytest.raises(ImportError, match=r"audiotree\[progress\]"):
+        AudioWriter(directory=tmp_path, show_progress=True)
