@@ -87,14 +87,6 @@ jobs:
         python-version: ${{ matrix.python-version }}
         enable-cache: true
 
-    - name: Install libsndfile (Linux)
-      if: runner.os == 'Linux'
-      run: sudo apt-get install libsndfile-dev
-
-    - name: Install libsndfile (macOS)
-      if: runner.os == 'macOS'
-      run: brew install libsndfile
-
     # The `all` extra is `progress` (tqdm) plus `bagz` under the markers
     # describing where bagz publishes wheels, so one command gives the Linux
     # x86-64 runners the string-leaf and windowed-LUFS-cache coverage and lets
@@ -129,7 +121,6 @@ jobs:
 
     - name: Install dependencies (lowest allowed versions)
       run: |
-        sudo apt-get install libsndfile-dev
         uv sync --extra bagz --extra progress --resolution lowest-direct
 
     - name: Run tests
@@ -155,7 +146,6 @@ jobs:
 
     - name: Build the sdist and wheel
       run: |
-        sudo apt-get install libsndfile-dev
         uv build --out-dir "$RUNNER_TEMP/dist"
         ls -l "$RUNNER_TEMP/dist"
 
@@ -210,7 +200,6 @@ jobs:
 
     - name: Install dependencies
       run: |
-        sudo apt-get install libsndfile-dev
         uv sync
 
     - name: Run doctests
