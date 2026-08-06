@@ -53,7 +53,7 @@ dependencies = [
     # (transforms.Batch) is gone -- so this can be relaxed once grain is 1.x.
     "grain>=0.2.15,<0.3",
     "jax>=0.10.0",  # funless `@jax.jit(...)`, which flax.nnx.jit also requires
-    "jaxloudnorm>=0.3.1",
+    "jaxloudnorm>=0.3.2",
     "librosa>=0.11.0",
     "librosax>=0.1.2",
     "loudness>=0.2.0",
