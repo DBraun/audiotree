@@ -368,20 +368,34 @@ _PLACEHOLDER_PATH = re.compile(
 _AUDIO_SUFFIXES = (".wav", ".flac", ".mp3", ".ogg")
 
 
+def _is_elision(path: str) -> bool:
+    """Is a scraped path prose rather than a real one?
+
+    Guides write ``"/data/..."`` and ``"/data/speech/.../audio_001.wav"`` to mean
+    "and so on". Materializing those creates a directory literally named ``...``,
+    which POSIX allows and Windows does not -- so the corpus fixture built fine
+    on Linux and macOS and made the whole Windows leg error out at setup.
+    """
+    return "..." in pathlib.PurePosixPath(path).parts
+
+
 def _placeholder_paths() -> typing.Set[str]:
     """Every ``/data/...``-style path the guides mention, in any block."""
     return {
         match.group("path")
         for snippet in SNIPPETS
         for match in _PLACEHOLDER_PATH.finditer(snippet.source)
+        if not _is_elision(match.group("path"))
     }
 
 
 def _write_wav(path: pathlib.Path, rng: np.random.Generator, seconds: float = 4.0):
     path.parent.mkdir(parents=True, exist_ok=True)
     samples = int(44_100 * seconds)
+    # str(), not the Path: soundfile at its declared floor rejects os.PathLike
+    # with "TypeError: Invalid file", which only the lowest-direct leg catches.
     soundfile.write(
-        path, (0.1 * rng.standard_normal((samples, 2))).astype(np.float32), 44_100
+        str(path), (0.1 * rng.standard_normal((samples, 2))).astype(np.float32), 44_100
     )
 
 

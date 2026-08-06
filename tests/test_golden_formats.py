@@ -24,6 +24,18 @@ import pytest
 from audiotree import AudioTree, _format
 from audiotree.sources import AudioDataSource, TreeDataSource
 
+
+def load_manifest(path):
+    """Read an NPZ manifest into a plain dict, closing the archive.
+
+    A bare ``np.load`` on an NPZ returns a lazy ``NpzFile`` that keeps the zip
+    open. POSIX lets you unlink an open file, so the leak is invisible there;
+    Windows refuses, and ``TemporaryDirectory`` cleanup fails with WinError 32.
+    """
+    with np.load(path, allow_pickle=True) as npz:
+        return dict(npz)
+
+
 GOLDEN = Path(__file__).parent / "assets" / "golden"
 TREE_DIR = GOLDEN / "tree_v1_0"
 MANIFEST_DIR = GOLDEN / "manifest_v1_0"
@@ -83,10 +95,10 @@ def test_golden_tree_exclude_prefixes():
 
 
 def test_golden_manifest_header():
-    data = np.load(MANIFEST_DIR / "manifest.npz", allow_pickle=True)
+    data = load_manifest(MANIFEST_DIR / "manifest.npz")
     header = {
         key[len(_format.NPZ_HEADER_PREFIX) :]: json.loads(str(data[key]))
-        for key in data.files
+        for key in data
         if key.startswith(_format.NPZ_HEADER_PREFIX)
     }
     assert header["format"] == _format.MANIFEST

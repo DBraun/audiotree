@@ -153,7 +153,10 @@ class AudioDataSource(grain.RandomAccessDataSource):
         Returns:
             List of manifest entry dictionaries
         """
-        data = np.load(self.manifest_path, allow_pickle=True)
+        # Eager dict, not the lazy NpzFile: an open NpzFile holds the archive
+        # open, which leaks a descriptor per source and blocks deletion on Windows.
+        with np.load(self.manifest_path, allow_pickle=True) as npz:
+            data = dict(npz)
 
         # Validate the format header, and strip it before classifying columns:
         # its entries are 0-d scalars, not per-entry arrays, so leaving them in

@@ -1075,14 +1075,17 @@ class AudioTree:
         """
         manifest_path = Path(manifest_path)
 
-        # Load manifest data
-        manifest_data = np.load(manifest_path, allow_pickle=True)
+        # Materialize eagerly and close the handle. `np.load` on an NPZ returns a
+        # lazy NpzFile that holds the archive open; leaving it open leaks a file
+        # descriptor per call, and on Windows it makes the manifest undeletable.
+        with np.load(manifest_path, allow_pickle=True) as npz:
+            manifest_data = dict(npz)
         _format.check(
             {
                 key[len(_format.NPZ_HEADER_PREFIX) :]: json.loads(
                     str(manifest_data[key])
                 )
-                for key in manifest_data.files
+                for key in manifest_data
                 if key.startswith(_format.NPZ_HEADER_PREFIX)
             },
             _format.MANIFEST,

@@ -16,6 +16,17 @@ from audiotree import AudioTree, AudioWriter
 from audiotree.sources import AudioDataSource
 
 
+def load_manifest(path):
+    """Read an NPZ manifest into a plain dict, closing the archive.
+
+    A bare ``np.load`` on an NPZ returns a lazy ``NpzFile`` that keeps the zip
+    open. POSIX lets you unlink an open file, so the leak is invisible there;
+    Windows refuses, and ``TemporaryDirectory`` cleanup fails with WinError 32.
+    """
+    with np.load(path, allow_pickle=True) as npz:
+        return dict(npz)
+
+
 def test_lufs_windows_round_trips_through_manifest():
     """The per-window ``lufs_windows`` field persists to the NPZ manifest and back."""
     sr = 44100
@@ -222,7 +233,7 @@ def test_npz_manifest():
         assert manifest_path.exists()
 
         # Load and verify NPZ contents
-        data = np.load(manifest_path, allow_pickle=True)
+        data = load_manifest(manifest_path)
 
         # Check arrays
         assert len(data["index"]) == 3
@@ -266,7 +277,7 @@ def test_npz_manifest_compressed():
         assert manifest_path.exists()
 
         # Load and verify
-        data = np.load(manifest_path, allow_pickle=True)
+        data = load_manifest(manifest_path)
         assert len(data["index"]) == 2
         assert np.allclose(data["lufs"], [-18.0, -22.0])
 
@@ -292,7 +303,7 @@ def test_npz_manifest_uncompressed():
         assert manifest_path.exists()
 
         # Load and verify
-        data = np.load(manifest_path, allow_pickle=True)
+        data = load_manifest(manifest_path)
         assert len(data["index"]) == 2
         assert np.allclose(data["lufs"], [-18.0, -22.0])
 
@@ -309,7 +320,7 @@ def test_npz_manifest_no_timestamp():
             writer.write(audio_tree)
 
         # Load manifest
-        data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        data = load_manifest(output_dir / "manifest.npz")
 
         # Verify timestamp field is not present
         assert "timestamp" not in data
@@ -327,7 +338,7 @@ def test_npz_manifest_with_timestamp():
             writer.write(audio_tree)
 
         # Load manifest
-        data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        data = load_manifest(output_dir / "manifest.npz")
 
         # Verify timestamp field is present
         assert "timestamp" in data
@@ -477,7 +488,7 @@ def test_dtype_preservation():
             writer.write(audio_tree)
 
         # Load the NPZ manifest directly
-        manifest_data = np.load(output_dir / "manifest.npz")
+        manifest_data = load_manifest(output_dir / "manifest.npz")
 
         # Check dtypes are preserved correctly
         assert manifest_data["index"].dtype == np.int32, (
@@ -544,7 +555,7 @@ def test_metadata_array_preservation():
             writer.write(audio_tree)
 
         # Load the NPZ manifest directly
-        manifest_data = np.load(output_dir / "manifest.npz")
+        manifest_data = load_manifest(output_dir / "manifest.npz")
 
         # Check metadata fields were saved
         assert "metadata_params" in manifest_data
@@ -600,7 +611,7 @@ def test_manifest_only_generation():
         assert manifest_path.exists()
 
         # Load and verify manifest contents
-        data = np.load(manifest_path, allow_pickle=True)
+        data = load_manifest(manifest_path)
 
         # Check basic metadata
         assert len(data["index"]) == 3
@@ -642,7 +653,7 @@ def test_manifest_only_with_write_audio_true():
             )
 
         # Check files_written flag in manifest
-        data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        data = load_manifest(output_dir / "manifest.npz")
         assert "files_written" in data
         assert data["files_written"].all()
 
@@ -683,7 +694,7 @@ def test_manifest_only_multiple_writes():
         manifest_path = writer.save_manifest()
         assert manifest_path.exists()
 
-        data = np.load(manifest_path, allow_pickle=True)
+        data = load_manifest(manifest_path)
         assert len(data["index"]) == 5
         assert not data["files_written"].any()
         assert np.allclose(data["lufs"], [-18.0, -20.0, -15.0, -25.0, -19.0])
@@ -788,7 +799,7 @@ def test_metadata_different_batch_sizes():
             writer.write(tree3)
 
         # Load manifest and verify
-        manifest_data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        manifest_data = load_manifest(output_dir / "manifest.npz")
 
         # Check that metadata was stacked correctly
         assert "metadata_params" in manifest_data
@@ -1128,7 +1139,7 @@ def test_write_empty_audiotree_first():
         manifest_path = output_dir / "manifest.npz"
         assert manifest_path.exists()
 
-        data = np.load(manifest_path, allow_pickle=True)
+        data = load_manifest(manifest_path)
         assert len(data["index"]) == 2
         assert np.allclose(data["lufs"], [-20.0, -18.0])
 
@@ -1156,7 +1167,7 @@ def test_write_empty_audiotree_after_nonempty():
         manifest_path = output_dir / "manifest.npz"
         assert manifest_path.exists()
 
-        data = np.load(manifest_path, allow_pickle=True)
+        data = load_manifest(manifest_path)
         assert len(data["index"]) == 2
         assert np.allclose(data["lufs"], [-20.0, -18.0])
 
@@ -1342,7 +1353,7 @@ def test_jax_label_columns_are_written_per_item():
 
         assert len(list(output_dir.glob("*.wav"))) == 4
 
-        data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        data = load_manifest(output_dir / "manifest.npz")
         assert data["lufs"].shape == (4,)
         np.testing.assert_allclose(data["lufs"], [-1.0, -2.0, -3.0, -4.0])
         assert data["metadata_frame_id"].shape == (4,)
@@ -1364,7 +1375,7 @@ def test_list_label_column_is_written_per_item():
         with AudioWriter(output_dir, write_audio=False) as writer:
             writer.write(tree)
 
-        data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        data = load_manifest(output_dir / "manifest.npz")
         np.testing.assert_array_equal(data["metadata_velocity"], [10, 20, 30])
 
 
@@ -1445,7 +1456,7 @@ def test_manifest_write_failure_leaves_the_previous_manifest_intact(monkeypatch)
         with pytest.raises(KeyboardInterrupt):
             writer.save_manifest()
 
-        data = np.load(output_dir / "manifest.npz", allow_pickle=True)
+        data = load_manifest(output_dir / "manifest.npz")
         assert len(data["index"]) == 2  # the good, complete previous manifest
 
 
@@ -1469,7 +1480,8 @@ _DETERMINISM_SCRIPT = textwrap.dedent(
             w.write(tree, tags={f"tag_{i}": i for i in range(6)})
         blob = (open(f"{d}/manifest.npz", "rb")).read()
         print(hashlib.sha256(blob).hexdigest())
-        print(",".join(np.load(f"{d}/manifest.npz", allow_pickle=True).files))
+        with np.load(f"{d}/manifest.npz", allow_pickle=True) as npz:
+            print(",".join(npz.files))
     """
 )
 
