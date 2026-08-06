@@ -28,7 +28,11 @@ def safe_join(base: Path, relative: str, *, description: str = "path") -> Path:
             f"Refusing to open an absolute {description} from a manifest: "
             f"{relative!r}. Paths must be relative to the dataset directory."
         )
-    if ".." in PurePosixPath(relative).parts:
+    # Both flavours, mirroring the absoluteness check above. To PurePosixPath,
+    # `..\..\etc\hosts` is a single opaque part, so a backslash traversal would
+    # slip past this named check and be caught only by the containment check
+    # below -- refused either way, but with a message that does not say why.
+    if ".." in PurePosixPath(relative).parts or ".." in PureWindowsPath(relative).parts:
         raise ValueError(
             f"Refusing to open a {description} containing '..' from a manifest: "
             f"{relative!r}."

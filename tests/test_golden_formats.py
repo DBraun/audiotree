@@ -21,7 +21,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from audiotree import AudioTree, _format
+from audiotree import AudioTree, _format, _manifest
 from audiotree.sources import AudioDataSource, TreeDataSource
 
 
@@ -31,8 +31,12 @@ def load_manifest(path):
     A bare ``np.load`` on an NPZ returns a lazy ``NpzFile`` that keeps the zip
     open. POSIX lets you unlink an open file, so the leak is invisible there;
     Windows refuses, and ``TemporaryDirectory`` cleanup fails with WinError 32.
+
+    ``allow_pickle=False`` is the point of the manifest encoding, not an
+    incidental argument: a committed fixture that could only be read with
+    unpickling would mean the format regressed.
     """
-    with np.load(path, allow_pickle=True) as npz:
+    with np.load(path, allow_pickle=False) as npz:
         return dict(npz)
 
 
@@ -95,15 +99,44 @@ def test_golden_tree_exclude_prefixes():
 
 
 def test_golden_manifest_header():
+    manifest = _manifest.read_columns(MANIFEST_DIR / "manifest.npz")
+    assert manifest.header["format"] == _format.MANIFEST
+    assert manifest.header["format_version"] == [1, 0]
+    assert manifest.header["min_reader_version"] == [1, 0]
+    assert manifest.header["num_entries"] == 3
+    assert manifest.num_entries == 3
+
+
+def test_golden_manifest_stores_no_object_arrays():
+    """Every column is loadable with ``allow_pickle=False``, strings included.
+
+    A manifest travels with the data it describes, so a reader that has to
+    unpickle it executes whatever a downloaded dataset contains.
+    """
     data = load_manifest(MANIFEST_DIR / "manifest.npz")
-    header = {
-        key[len(_format.NPZ_HEADER_PREFIX) :]: json.loads(str(data[key]))
-        for key in data
-        if key.startswith(_format.NPZ_HEADER_PREFIX)
-    }
-    assert header["format"] == _format.MANIFEST
-    assert header["format_version"] == [1, 0]
-    assert header["min_reader_version"] == [1, 0]
+    assert data["filename"].dtype.kind == "U"
+    assert data["subtype"].dtype.kind == "U"
+    assert all(array.dtype != object for array in data.values())
+
+
+def test_golden_manifest_records_a_lossless_subtype():
+    """The committed audio is float WAV, and the manifest says so."""
+    data = load_manifest(MANIFEST_DIR / "manifest.npz")
+    assert list(data["subtype"]) == ["FLOAT", "FLOAT", "FLOAT"]
+
+
+def test_golden_manifest_masks_the_absent_tag():
+    """Absence is carried by the mask; the third row's empty cell is filler."""
+    data = load_manifest(MANIFEST_DIR / "manifest.npz")
+    mask_key = f"{_manifest.MASK_PREFIX}tags_split"
+    np.testing.assert_array_equal(data[mask_key], [True, True, False])
+
+    entries = _manifest.read_entries(MANIFEST_DIR / "manifest.npz")
+    assert [entry.get("tags") for entry in entries] == [
+        {"split": "train"},
+        {"split": "test"},
+        None,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -118,8 +151,8 @@ def test_golden_manifest_reads_with_expected_values(index, peak, pitch, velocity
     item = source[index]
     assert item.sample_rate == 8000
     assert item.waveform.shape == (1, 1, 400)
-    # Written as PCM_16, so allow a quantization step.
-    np.testing.assert_allclose(np.abs(item.waveform).max(), peak, atol=1e-4)
+    # Written as FLOAT, so the peak survives exactly -- no quantization step.
+    np.testing.assert_allclose(np.abs(item.waveform).max(), peak, atol=1e-7)
 
     np.testing.assert_array_equal(item.pitch, [pitch])
     np.testing.assert_array_equal(item.velocity, [velocity])

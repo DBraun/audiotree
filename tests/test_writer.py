@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import warnings
 from pathlib import Path
 
 import jax.numpy as jnp
@@ -12,7 +13,7 @@ import numpy as np
 import pytest
 import soundfile
 
-from audiotree import AudioTree, AudioWriter
+from audiotree import AudioTree, AudioWriter, _format, _manifest
 from audiotree.sources import AudioDataSource
 
 
@@ -22,8 +23,13 @@ def load_manifest(path):
     A bare ``np.load`` on an NPZ returns a lazy ``NpzFile`` that keeps the zip
     open. POSIX lets you unlink an open file, so the leak is invisible there;
     Windows refuses, and ``TemporaryDirectory`` cleanup fails with WinError 32.
+
+    ``allow_pickle=False`` deliberately: no manifest audiotree writes may contain
+    an object array, so every test that reads one through this helper also
+    asserts that invariant. A regression to ``dtype=object`` columns would fail
+    the suite here rather than being read back happily.
     """
-    with np.load(path, allow_pickle=True) as npz:
+    with np.load(path, allow_pickle=False) as npz:
         return dict(npz)
 
 
@@ -1480,7 +1486,7 @@ _DETERMINISM_SCRIPT = textwrap.dedent(
             w.write(tree, tags={f"tag_{i}": i for i in range(6)})
         blob = (open(f"{d}/manifest.npz", "rb")).read()
         print(hashlib.sha256(blob).hexdigest())
-        with np.load(f"{d}/manifest.npz", allow_pickle=True) as npz:
+        with np.load(f"{d}/manifest.npz", allow_pickle=False) as npz:
             print(",".join(npz.files))
     """
 )
@@ -1531,3 +1537,146 @@ def test_show_progress_without_tqdm_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_tqdm)
     with pytest.raises(ImportError, match=r"audiotree\[progress\]"):
         AudioWriter(directory=tmp_path, show_progress=True)
+
+
+# === Manifest encoding: no pickles, explicit presence masks ===
+
+
+def _one_second(peak=0.5, sample_rate=16000, **fields):
+    waveform = np.full((1, 1, sample_rate), peak, dtype=np.float32)
+    return AudioTree.create(waveform, sample_rate=sample_rate, **fields)
+
+
+def test_manifest_stores_strings_without_pickling(tmp_path):
+    """String columns are fixed-width unicode, so the reader never unpickles.
+
+    A manifest travels with the data it describes; loading it with
+    ``allow_pickle=True`` is arbitrary code execution in every data worker, and
+    the only reason it was ever on is that strings were ``dtype=object``.
+    """
+    tree = _one_second(filepath=["source one.wav"])
+    with AudioWriter(tmp_path) as writer:
+        writer.write(tree, tags={"dataset": "unicode ✓"})
+
+    with np.load(tmp_path / "manifest.npz", allow_pickle=False) as npz:
+        data = dict(npz)
+
+    assert data["filename"].dtype.kind == "U"
+    assert data["filepath"].dtype.kind == "U"
+    assert data["tags_dataset"].dtype.kind == "U"
+    assert all(array.dtype != object for array in data.values())
+    assert list(data["filepath"]) == ["source one.wav"]
+    assert list(data["tags_dataset"]) == ["unicode ✓"]
+
+
+def test_absent_tag_is_masked_rather_than_sentinelled(tmp_path):
+    """Only the mask says "missing" -- ``""``, ``-1`` and ``NaN`` are values.
+
+    The tag columns used to store ``None`` in an object array and the reader
+    dropped every ``None`` *or* ``""`` cell, so a genuinely empty tag vanished.
+    """
+    writer = AudioWriter(tmp_path)
+    writer.write(_one_second(), tags={"split": "train", "score": -1})
+    writer.write(_one_second(), tags={"split": ""})
+    writer.close()
+
+    with np.load(tmp_path / "manifest.npz", allow_pickle=False) as npz:
+        data = dict(npz)
+
+    np.testing.assert_array_equal(data[f"{_manifest.MASK_PREFIX}tags_score"], [1, 0])
+    assert f"{_manifest.MASK_PREFIX}tags_split" not in data  # present in both rows
+
+    entries = _manifest.read_entries(tmp_path / "manifest.npz")
+    assert entries[0]["tags"] == {"split": "train", "score": -1}
+    assert entries[1]["tags"] == {"split": ""}
+
+
+def test_manifest_only_run_records_no_subtype(tmp_path):
+    """With no audio file there is no encoding, and the column says so."""
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        writer.write(_one_second())
+
+    with np.load(tmp_path / "manifest.npz", allow_pickle=False) as npz:
+        data = dict(npz)
+    np.testing.assert_array_equal(data[f"{_manifest.MASK_PREFIX}subtype"], [0])
+
+    (entry,) = _manifest.read_entries(tmp_path / "manifest.npz")
+    assert "subtype" not in entry
+
+
+def test_pre_1_0_pickled_manifest_is_refused(tmp_path):
+    """An old object-array manifest fails with re-render advice, not a pickle."""
+    manifest_path = tmp_path / "manifest.npz"
+    arrays = {
+        "index": np.array([0], dtype=np.int32),
+        "filename": np.array(["audio_0000.wav"], dtype=object),
+    }
+    for key, value in _format.header(_format.MANIFEST).items():
+        arrays[f"{_format.NPZ_HEADER_PREFIX}{key}"] = np.array(json.dumps(value))
+    np.savez(manifest_path, **arrays)
+
+    with pytest.raises(ValueError, match="re-render the dataset"):
+        _manifest.read_entries(manifest_path)
+
+
+def test_manifest_row_count_is_declared_not_guessed(tmp_path):
+    """A column shorter than the declared row count is a corrupt manifest."""
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        writer.write(AudioTree.create(np.zeros((3, 1, 800), dtype=np.float32), 16000))
+
+    with np.load(tmp_path / "manifest.npz", allow_pickle=False) as npz:
+        data = dict(npz)
+    data["index"] = data["index"][:2]
+    np.savez(tmp_path / "manifest.npz", **data)
+
+    with pytest.raises(ValueError, match=r"column 'index' has 2 rows"):
+        _manifest.read_entries(tmp_path / "manifest.npz")
+
+
+# === Subtype: a default that does not destroy float model output ===
+
+
+def test_default_subtype_keeps_out_of_range_audio(tmp_path):
+    """The default must not hard-clip; PCM_16 would silently discard the peak."""
+    with AudioWriter(tmp_path) as writer:
+        writer.write(_one_second(peak=2.5))
+
+    info = soundfile.info(str(tmp_path / "audio_0000.wav"))
+    assert info.subtype == "FLOAT"
+    audio, _ = soundfile.read(str(tmp_path / "audio_0000.wav"))
+    np.testing.assert_allclose(np.abs(audio).max(), 2.5, atol=1e-6)
+
+
+def test_default_subtype_falls_back_to_pcm_24_for_flac(tmp_path):
+    """FLAC admits no float subtype, so take its widest fixed-point one."""
+    with AudioWriter(tmp_path, pattern="audio_{index:04d}.flac") as writer:
+        writer.write(_one_second(peak=0.5))
+
+    assert soundfile.info(str(tmp_path / "audio_0000.flac")).subtype == "PCM_24"
+
+
+def test_written_subtype_is_recorded_in_the_manifest(tmp_path):
+    """Which encoding the audio is in is part of what the dataset describes."""
+    with AudioWriter(tmp_path, subtype="PCM_24") as writer:
+        writer.write(_one_second())
+
+    (entry,) = _manifest.read_entries(tmp_path / "manifest.npz")
+    assert entry["subtype"] == "PCM_24"
+    assert soundfile.info(str(tmp_path / "audio_0000.wav")).subtype == "PCM_24"
+
+
+def test_clipping_subtype_warns_when_audio_exceeds_range(tmp_path):
+    """An explicit fixed-point subtype must be loud about what it destroys."""
+    with AudioWriter(tmp_path, subtype="PCM_16") as writer:
+        with pytest.warns(RuntimeWarning, match=r"clipped 1 of 2 items"):
+            writer.write(
+                AudioTree.batch([_one_second(peak=0.5), _one_second(peak=2.5)])
+            )
+
+
+def test_in_range_audio_does_not_warn(tmp_path):
+    """The warning tracks actual clipping, not the choice of subtype."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with AudioWriter(tmp_path, subtype="PCM_16") as writer:
+            writer.write(_one_second(peak=0.5))

@@ -42,7 +42,8 @@ CURRENT_VERSION: Tuple[int, int] = (1, 0)
 
 # NPZ has no place for scalars alongside per-entry columns, so the AudioWriter
 # manifest stores its header as JSON-encoded 0-d arrays under this prefix. The
-# reader strips these before deciding how many entries the manifest holds.
+# rest of that layout -- columns, fixed-width strings, presence masks -- lives in
+# `audiotree._manifest`, which is the only module that reads or writes it.
 NPZ_HEADER_PREFIX = "__audiotree_"
 
 _HUMAN_NAMES = {

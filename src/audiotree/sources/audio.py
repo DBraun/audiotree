@@ -7,9 +7,7 @@ from typing import Callable, Dict, List, Literal, Optional, SupportsIndex, Union
 import numpy as np
 from grain import python as grain
 
-import json
-
-from audiotree import AudioTree, _format
+from audiotree import AudioTree, _manifest
 from audiotree._fs import safe_join
 from audiotree.core import LABEL_FIELDS
 
@@ -148,66 +146,25 @@ class AudioDataSource(grain.RandomAccessDataSource):
         return entries
 
     def _load_npz_manifest(self) -> List[Dict]:
-        """Load manifest from NPZ format using vectorized operations.
+        """Load manifest entries from NPZ, then shape them for this source.
+
+        Parsing the file -- header check, presence masks, string decoding -- is
+        :func:`audiotree._manifest.read_entries`. All that is left here is the
+        scalar convention this source's callers rely on.
 
         Returns:
             List of manifest entry dictionaries
         """
-        # Eager dict, not the lazy NpzFile: an open NpzFile holds the archive
-        # open, which leaks a descriptor per source and blocks deletion on Windows.
-        with np.load(self.manifest_path, allow_pickle=True) as npz:
-            data = dict(npz)
+        entries = _manifest.read_entries(self.manifest_path)
 
-        # Validate the format header, and strip it before classifying columns:
-        # its entries are 0-d scalars, not per-entry arrays, so leaving them in
-        # `regular_keys` would corrupt the entry count taken from `regular_keys[0]`.
-        header = {
-            key[len(_format.NPZ_HEADER_PREFIX) :]: json.loads(str(data[key]))
-            for key in data.keys()
-            if key.startswith(_format.NPZ_HEADER_PREFIX)
-        }
-        _format.check(header, _format.MANIFEST, source=str(self.manifest_path))
-
-        # Pre-classify keys outside the loop - O(k) instead of O(n×k)
-        regular_keys = []
-        metadata_keys = []
-        tag_keys = []
-
-        for key in data.keys():
-            if key.startswith(_format.NPZ_HEADER_PREFIX):
-                continue
-            if key.startswith("tags_"):
-                tag_keys.append(key)
-            elif key.startswith("metadata_"):
-                metadata_keys.append(key)
-            else:
-                regular_keys.append(key)
-
-        # Get number of entries
-        if not regular_keys:
-            return []
-        num_entries = len(data[regular_keys[0]])
-
-        # Pre-fetch all arrays - single numpy operation per key
-        regular_arrays = {k: data[k] for k in regular_keys}
-        metadata_arrays = {k: data[k] for k in metadata_keys}
-        tag_arrays = {k: data[k] for k in tag_keys}
-
-        # Build entries efficiently
-        entries = []
-        for i in range(num_entries):
-            entry = {}
-
-            # Process regular fields
-            for key in regular_keys:
-                value = regular_arrays[key][i]
-
+        for entry in entries:
+            for key, value in entry.items():
                 # AudioTree fields are user data: keep the stored array and its
                 # dtype exactly. Demoting them to Python scalars loses both the
                 # dtype and, for a size-1 array, the shape (a one-window
-                # ``lufs_windows`` would come back 0-d).
-                if key in LABEL_FIELDS:
-                    entry[key] = value
+                # ``lufs_windows`` would come back 0-d). Metadata columns are
+                # kept whole for the same reason, and tags are already decoded.
+                if key in LABEL_FIELDS or key.startswith("metadata_") or key == "tags":
                     continue
 
                 # Bookkeeping columns (filename, sample_rate, channels, ...) are
@@ -222,36 +179,6 @@ class AudioDataSource(grain.RandomAccessDataSource):
                     entry[key] = float(value)
                 else:
                     entry[key] = value
-
-            # Process metadata fields - keep as-is for batching
-            for key in metadata_keys:
-                value = metadata_arrays[key][i]
-                entry[key] = value
-
-            # Process tag fields
-            tags = {}
-            for key in tag_keys:
-                tag_key = key[5:]  # Remove 'tags_' prefix
-                value = tag_arrays[key][i]
-                # A tag column is an object array of *scalars*. A container cell
-                # (written by ``AudioWriter(..., tags={...})`` without
-                # complaint) would make the comparison below raise an opaque
-                # "truth value of an array is ambiguous", so name the offender.
-                if isinstance(value, (np.ndarray, list, tuple, set, dict)):
-                    raise ValueError(
-                        f"Manifest {self.manifest_path} stores a non-scalar value "
-                        f"for tag {tag_key!r} in entry {i} "
-                        f"(type {type(value).__name__}). Tag values must be scalars "
-                        "(str, int, float, bool or None); store array-valued "
-                        "information as AudioTree metadata instead."
-                    )
-                if value is not None and value != "":
-                    tags[tag_key] = value
-
-            if tags:
-                entry["tags"] = tags
-
-            entries.append(entry)
 
         return entries
 

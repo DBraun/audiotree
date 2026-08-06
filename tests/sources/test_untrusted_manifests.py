@@ -115,3 +115,23 @@ def test_safe_join_rejects_symlink_escape(tmp_path):
     (data_dir / "link.bin").symlink_to(outside)
     with pytest.raises(ValueError, match="resolves outside"):
         safe_join(data_dir, "link.bin")
+
+
+def test_backslash_traversal_is_named_not_merely_caught(tmp_path):
+    """A Windows-style ``..`` traversal is refused for the right reason.
+
+    ``safe_join`` checked ``".." in PurePosixPath(relative).parts``, but to
+    PurePosixPath ``..\\..\\etc\\hosts`` is one opaque part -- so the named check
+    missed it and only the resolve()-based containment check below caught it.
+    Refused either way, but with a message that did not say why, on the one
+    platform where backslashes are the native separator.
+    """
+    with pytest.raises(ValueError, match=r"containing '\.\.'"):
+        safe_join(tmp_path, r"..\..\etc\hosts", description="audio file")
+
+    # The POSIX spelling keeps naming itself too.
+    with pytest.raises(ValueError, match=r"containing '\.\.'"):
+        safe_join(tmp_path, "../../etc/hosts", description="audio file")
+
+    # A backslash that is not a traversal stays a legal (if odd) filename.
+    assert safe_join(tmp_path, r"weird\name.wav", description="audio file")

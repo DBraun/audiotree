@@ -687,3 +687,59 @@ def test_sentinel_values_are_not_dropped():
 
         batched = AudioTree.batch([source[i] for i in range(3)])
         np.testing.assert_array_equal(batched.velocity.ravel(), [100, -1, 64])
+
+
+def test_manifest_is_read_without_unpickling(tmp_path, monkeypatch):
+    """Reading a manifest must never unpickle it.
+
+    A manifest travels with the data it describes, so a mirrored or downloaded
+    dataset would otherwise run whatever it contains, in every data worker.
+    """
+    with AudioWriter(tmp_path) as writer:
+        writer.write(
+            AudioTree.create(np.zeros((2, 1, 8000), dtype=np.float32), 8000),
+            tags={"dataset": "test"},
+        )
+
+    real_load = np.load
+
+    def refuse_pickle(*args, **kwargs):
+        assert not kwargs.get("allow_pickle", False), "manifest read with pickling on"
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(np, "load", refuse_pickle)
+    source = AudioDataSource.from_writer_output(tmp_path)
+    assert len(source) == 2
+    assert source.get_entry(0)["tags"] == {"dataset": "test"}
+
+
+def test_empty_tag_value_survives_the_round_trip(tmp_path):
+    """``""`` is a tag value, not a missing marker; absence comes from the mask.
+
+    The reader used to drop every ``None`` *or* ``""`` tag cell, which made an
+    empty tag indistinguishable from an unset one.
+    """
+    writer = AudioWriter(tmp_path)
+    writer.write(
+        AudioTree.create(np.zeros((1, 1, 8000), dtype=np.float32), 8000),
+        tags={"split": "", "note": "kept"},
+    )
+    writer.write(
+        AudioTree.create(np.zeros((1, 1, 8000), dtype=np.float32), 8000),
+        tags={"note": "kept"},
+    )
+    writer.close()
+
+    source = AudioDataSource.from_writer_output(tmp_path)
+    assert source.get_entry(0)["tags"] == {"split": "", "note": "kept"}
+    assert source.get_entry(1)["tags"] == {"note": "kept"}
+    assert len(source.filter_by_tag("split", "")) == 1
+
+
+def test_entries_report_the_subtype_the_audio_was_written_in(tmp_path):
+    """The manifest records the encoding, so a reader need not open every file."""
+    with AudioWriter(tmp_path) as writer:
+        writer.write(AudioTree.create(np.zeros((1, 1, 8000), dtype=np.float32), 8000))
+
+    source = AudioDataSource.from_writer_output(tmp_path)
+    assert source.get_entry(0)["subtype"] == "FLOAT"

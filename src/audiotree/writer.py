@@ -1,15 +1,14 @@
 """AudioWriter class for writing AudioTree objects to disk with manifest support."""
 
-import json
-import os
+import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import soundfile
 
-from . import _format
+from . import _manifest
 from ._fs import refuse_to_clobber
 from .core import LABEL_FIELDS, AudioTree
 
@@ -18,6 +17,35 @@ from .core import LABEL_FIELDS, AudioTree
 _SKIPPED_METADATA_KEYS = frozenset(
     {"filepath", "offset", "duration", "manifest_index", "tags"}
 )
+
+# Subtypes that store a sample as written. Every other subtype quantizes onto a
+# fixed-point grid and hard-clips anything outside [-1, 1].
+_FLOATING_SUBTYPES = frozenset({"FLOAT", "DOUBLE"})
+
+
+def _widest_subtype(suffix: str) -> Optional[str]:
+    """Pick the least destructive subtype a container supports.
+
+    Float model output routinely leaves [-1, 1], and libsndfile's own default is
+    ``PCM_16`` for most containers, which silently destroys it. Prefer 32-bit
+    float where the container allows it (WAV, AIFF, CAF, W64, RF64...), then
+    24-bit PCM (FLAC), and only then fall back to the container's default
+    (compressed containers such as OGG, which admit no PCM subtype at all).
+
+    Args:
+        suffix: Output filename suffix, with or without its leading dot.
+
+    Returns:
+        A soundfile subtype, or ``None`` if libsndfile does not know the
+        container -- in which case ``soundfile.write`` is left to report it.
+    """
+    fmt = suffix.lstrip(".").upper()
+    if fmt not in soundfile.available_formats():
+        return None
+    for candidate in ("FLOAT", "PCM_24"):
+        if soundfile.check_format(fmt, candidate):
+            return candidate
+    return soundfile.default_subtype(fmt)
 
 
 def _column_value(name: str, value: Any, batch_index: int) -> Any:
@@ -69,12 +97,17 @@ class AudioWriter:
         compress_manifest: Whether to compress NPZ manifest files (only applies to npz format)
         write_audio: Whether to write audio files to disk (default True). When False,
             only manifest is generated with metadata
-        subtype: Optional soundfile subtype string (e.g. ``"PCM_16"``, ``"PCM_24"``,
-            ``"FLOAT"``). Forwarded to ``soundfile.write``. When ``None`` (default),
-            soundfile picks its format default — ``PCM_16`` for WAV. Use ``"PCM_24"``
-            or ``"FLOAT"`` when writing quiet / high-dynamic-range material that will
-            be read back after further processing, to avoid 16-bit quantization
-            artifacts.
+        subtype: soundfile subtype string (e.g. ``"PCM_16"``, ``"PCM_24"``,
+            ``"FLOAT"``), forwarded to ``soundfile.write`` and recorded in the
+            manifest's ``subtype`` column. When ``None`` (default) the writer
+            picks the least destructive subtype the container supports —
+            ``"FLOAT"`` for WAV/AIFF/CAF/…, ``"PCM_24"`` for FLAC, the
+            container's own default otherwise. That is deliberately *not*
+            libsndfile's default of ``PCM_16``, which hard-clips the
+            out-of-[-1, 1] samples that float model output routinely contains.
+            Passing a fixed-point subtype explicitly is fine; the writer then
+            warns (``RuntimeWarning``) whenever an item it clips actually
+            exceeds the representable range.
         pbar: Optional tqdm progress bar instance to update during writing
         close_pbar: Whether to close the progress bar on exit (default False)
         show_progress: Create an internal tqdm progress bar. Raises ``ImportError``
@@ -157,6 +190,7 @@ class AudioWriter:
         self.compress_manifest = compress_manifest
         self.write_audio = write_audio
         self.subtype = subtype
+        self._resolved_subtypes: Dict[str, Optional[str]] = {}
         self.index = 0
         self.written_paths = []
         self.manifest_data = []
@@ -248,31 +282,53 @@ class AudioWriter:
 
         batch_size = tree.waveform.shape[0]
         paths = []
+        # (filename, peak, subtype) for every item this write clips.
+        clipped: List[Tuple[str, float, Optional[str]]] = []
 
         for i in range(batch_size):
             # Generate filename
             # todo: need a way to pass more kwargs to this formatter
             filename = self.pattern.format(index=self.index)
             filepath = self.directory / filename
+            # Only a file that exists has a subtype; a manifest-only run records
+            # none rather than claiming an encoding nothing was written in.
+            subtype = self._resolve_subtype(filepath) if self.write_audio else None
 
             # Collect the manifest entry first: a column this writer cannot
             # store raises, and doing that before the WAV exists keeps the
             # directory free of audio no manifest row points at.
-            entry = self._create_manifest_entry(tree, i, filename, tags)
+            entry = self._create_manifest_entry(tree, i, filename, tags, subtype)
 
             # Write audio file if requested
             if self.write_audio:
                 # Convert to numpy and transpose for soundfile (channels, samples) -> (samples, channels)
                 audio = np.array(tree.waveform[i].T)
-                soundfile.write(
-                    str(filepath), audio, tree.sample_rate, subtype=self.subtype
-                )
+                # A fixed-point subtype silently hard-clips out-of-range samples,
+                # so measure the peak before handing the audio to libsndfile and
+                # report it rather than let the data disappear.
+                if subtype not in _FLOATING_SUBTYPES and audio.size:
+                    peak = float(np.abs(audio).max())
+                    if peak > 1.0:
+                        clipped.append((filename, peak, subtype))
+                soundfile.write(str(filepath), audio, tree.sample_rate, subtype=subtype)
                 self.written_paths.append(filepath)
 
             paths.append(filepath)
             self.manifest_data.append(entry)
 
             self.index += 1
+
+        if clipped:
+            worst = max(clipped, key=lambda item: item[1])
+            warnings.warn(
+                f"AudioWriter clipped {len(clipped)} of {batch_size} items: subtype "
+                f"{worst[2]!r} represents only [-1, 1], and {worst[0]} peaks at "
+                f"{worst[1]:.4g}. Those samples are gone from the file on disk. "
+                f"Pass subtype='FLOAT' to store the audio as written, or scale it "
+                f"down before writing.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
         # Update progress bar if available
         if self.pbar is not None:
@@ -288,12 +344,27 @@ class AudioWriter:
 
         return paths
 
+    def _resolve_subtype(self, filepath: Path) -> Optional[str]:
+        """The soundfile subtype this writer will encode ``filepath`` with.
+
+        An explicit ``subtype=`` is used verbatim; otherwise the container's
+        widest subtype is chosen (see :func:`_widest_subtype`). Results are
+        cached per suffix, since ``pattern`` fixes the container for a run.
+        """
+        if self.subtype is not None:
+            return self.subtype
+        suffix = filepath.suffix.lower()
+        if suffix not in self._resolved_subtypes:
+            self._resolved_subtypes[suffix] = _widest_subtype(suffix)
+        return self._resolved_subtypes[suffix]
+
     def _create_manifest_entry(
         self,
         tree: AudioTree,
         batch_index: int,
         filename: str,
         tags: Optional[Dict] = None,
+        subtype: Optional[str] = None,
     ) -> Dict:
         """Create a manifest entry for a single audio file.
 
@@ -302,6 +373,8 @@ class AudioWriter:
             batch_index: Index within the batch
             filename: Output filename
             tags: Optional custom metadata
+            subtype: soundfile subtype the audio was encoded with, or ``None``
+                when no audio file was written
 
         Returns:
             Dictionary containing manifest entry data
@@ -314,6 +387,9 @@ class AudioWriter:
             "samples": np.int32(tree.waveform.shape[2]),
             "duration_seconds": np.float32(tree.waveform.shape[2] / tree.sample_rate),
             "files_written": self.write_audio,
+            # Absent (masked out) for a manifest-only run; a reader must not
+            # guess PCM_16 the way libsndfile's default would.
+            "subtype": subtype,
         }
 
         # Add timestamp only if requested
@@ -364,37 +440,26 @@ class AudioWriter:
         if not self.manifest_data:
             return None
 
-        manifest_path = self.directory / "manifest.npz"
-
-        # Convert manifest data to arrays for efficient NPZ storage
-        arrays_dict = self._manifest_to_arrays()
-
-        # Stamp the format header. NPZ has no place for scalars, so each value
-        # is a 0-d array under the reserved `__audiotree_` prefix, which the
-        # reader strips before classifying the per-entry columns.
-        for key, value in _format.header(_format.MANIFEST).items():
-            arrays_dict[f"{_format.NPZ_HEADER_PREFIX}{key}"] = np.array(
-                json.dumps(value)
-            )
-
-        # Save as compressed or uncompressed NPZ. The temp name is dotted so it
-        # does not look like a dataset to `refuse_to_clobber`.
-        tmp_path = manifest_path.with_name(f".{manifest_path.name}.tmp")
-        with open(tmp_path, "wb") as f:
-            if self.compress_manifest:
-                np.savez_compressed(f, **arrays_dict)
-            else:
-                np.savez(f, **arrays_dict)
-        os.replace(tmp_path, manifest_path)
+        manifest_path = _manifest.write(
+            self.directory / "manifest.npz",
+            self._manifest_to_columns(),
+            len(self.manifest_data),
+            compress=self.compress_manifest,
+        )
 
         self._manifest_index = self.index
         return manifest_path
 
-    def _manifest_to_arrays(self) -> Dict[str, np.ndarray]:
-        """Convert manifest data to numpy arrays for NPZ storage.
+    def _manifest_to_columns(self) -> Dict[str, List[Any]]:
+        """Pivot the accumulated entries into one list of values per column.
+
+        Encoding those values -- dtypes, fixed-width strings, presence masks --
+        belongs to :mod:`audiotree._manifest`, which is also what reads them
+        back. This method only decides *which* columns exist and in what order.
 
         Returns:
-            Dictionary of numpy arrays ready for NPZ storage
+            Column name to its per-item values, ``None`` where an item has no
+            value for that column (only tags can be missing this way).
         """
         if not self.manifest_data:
             return {}
@@ -408,15 +473,10 @@ class AudioWriter:
         for entry in self.manifest_data:
             all_fields.update(entry.keys())
 
-        # Separate scalar fields from tag fields
-        scalar_fields = sorted(f for f in all_fields if f != "tags")
+        columns: Dict[str, List[Any]] = {}
 
-        # Initialize result dictionary
-        arrays = {}
-
-        # Process scalar fields
-        for field in scalar_fields:
-            # Collect values from all entries
+        # Per-item columns, tags excepted: those are pivoted out below.
+        for field in sorted(f for f in all_fields if f != "tags"):
             values = [entry[field] for entry in self.manifest_data if field in entry]
             if len(values) != n_entries:
                 raise ValueError(
@@ -425,67 +485,22 @@ class AudioWriter:
                     f"absent on others cannot be stored as a manifest column; "
                     f"write every entry with the same fields."
                 )
+            columns[field] = values
 
-            # Infer dtype from first value
-            first_val = values[0]
+        # Tags, in contrast, are genuinely per-item: an item may carry a tag its
+        # neighbours lack, and `None` here becomes a False in that column's
+        # presence mask rather than a sentinel value.
+        all_tag_keys = set()
+        for entry in self.manifest_data:
+            if isinstance(entry.get("tags"), dict):
+                all_tag_keys.update(entry["tags"].keys())
 
-            # Convert to appropriate numpy array type
-            if isinstance(first_val, str):
-                # String fields - use object dtype
-                arrays[field] = np.array(values, dtype=object)
-            elif isinstance(first_val, bool):
-                # Boolean fields
-                arrays[field] = np.array(values, dtype=bool)
-            elif isinstance(first_val, np.ndarray):
-                # Array fields (e.g., metadata arrays, codes, latents)
-                arrays[field] = np.stack(values)
-            elif isinstance(first_val, (np.generic, int, float)):
-                # Numeric scalars - preserve dtype
-                if isinstance(first_val, np.generic):
-                    # numpy scalar - use its dtype
-                    arrays[field] = np.array(values, dtype=first_val.dtype)
-                else:
-                    # Python scalar - convert to numpy type
-                    if isinstance(first_val, int):
-                        arrays[field] = np.array(values, dtype=np.int32)
-                    else:
-                        arrays[field] = np.array(values, dtype=np.float32)
-            else:
-                raise ValueError(
-                    f"Manifest column {field!r} holds "
-                    f"{type(first_val).__name__} values, which cannot be stored "
-                    f"as a manifest column."
-                )
+        for tag_key in sorted(all_tag_keys):
+            columns[f"{_manifest.TAG_PREFIX}{tag_key}"] = [
+                entry.get("tags", {}).get(tag_key) for entry in self.manifest_data
+            ]
 
-            # Every column indexes the manifest by row, so a column of any other
-            # length would silently misalign labels with audio.
-            if len(arrays[field]) != n_entries:
-                raise ValueError(
-                    f"Manifest column {field!r} became {len(arrays[field])} rows "
-                    f"for {n_entries} entries."
-                )
-
-        # Process tags if present
-        if any("tags" in entry for entry in self.manifest_data):
-            # Collect all unique tag keys (sorted, for a deterministic NPZ)
-            all_tag_keys = set()
-            for entry in self.manifest_data:
-                if "tags" in entry and isinstance(entry["tags"], dict):
-                    all_tag_keys.update(entry["tags"].keys())
-
-            # Store each tag as a separate array
-            for tag_key in sorted(all_tag_keys):
-                tag_values = []
-                for entry in self.manifest_data:
-                    if "tags" in entry and tag_key in entry["tags"]:
-                        tag_values.append(entry["tags"][tag_key])
-                    else:
-                        tag_values.append(None)
-
-                # Store with 'tags_' prefix
-                arrays[f"tags_{tag_key}"] = np.array(tag_values, dtype=object)
-
-        return arrays
+        return columns
 
     def get_stats(self) -> Dict:
         """Get statistics about written files.
