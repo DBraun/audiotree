@@ -171,7 +171,11 @@ def test_mini_batch_round_trip(bare: bool):
     mini = tree.reshape_mini_batches(2)
 
     # String leaves nest per mini-batch, mirroring the arrays' leading axes.
-    assert mini.metadata["tag"] == [["tag0", "tag1"], ["tag2", "tag3"], ["tag4", "tag5"]]
+    assert mini.metadata["tag"] == [
+        ["tag0", "tag1"],
+        ["tag2", "tag3"],
+        ["tag4", "tag5"],
+    ]
     assert mini.metadata["nested"]["group"][1] == ["group2", "group3"]
 
     # Indexing the rank-4 tree selects whole mini-batches, strings included.
