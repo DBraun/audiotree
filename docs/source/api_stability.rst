@@ -27,11 +27,13 @@ attributes and methods of the classes those names resolve to.
      - ``AudioTree``, ``ExcerptConfig``, ``AudioWriter``, ``TreeWriter``,
        ``sources``, ``transforms``
    * - ``audiotree.sources``
-     - ``create_audio_dataset``, ``create_balanced_audio_dataset``,
-       ``create_windowed_audio_dataset``, ``find_audio_files``,
-       ``build_window_lufs_cache``, ``load_window_lufs``, ``save_window_lufs``,
-       ``precompute_window_lufs``, ``scan_durations``, ``WindowLufsCache``,
-       ``WindowParams``, ``AudioDataSource``, ``TreeDataSource``
+     - ``ExcerptConfig``, ``AudioReadError``, ``OnReadError``,
+       ``READ_ERROR_KEY``, ``create_audio_dataset``,
+       ``create_balanced_audio_dataset``, ``create_windowed_audio_dataset``,
+       ``find_audio_files``, ``build_window_lufs_cache``, ``load_window_lufs``,
+       ``save_window_lufs``, ``precompute_window_lufs``, ``scan_durations``,
+       ``WindowLufsCache``, ``WindowParams``, ``AudioDataSource``,
+       ``TreeDataSource``
    * - ``audiotree.transforms``
      - ``AudioCodec``, ``LatentAudioCodec``, ``identity``, ``mono``, ``stereo``,
        ``resample``, ``volume_change``, ``volume_norm``, ``rescale_audio``,
@@ -40,6 +42,22 @@ attributes and methods of the classes those names resolve to.
        ``encode_latents``, ``trim``, ``map_transform``, ``random_transform``
    * - ``audiotree.transforms.jax``
      - the same list, minus ``choose``
+
+Four of the ``audiotree.sources`` exports are types and constants rather than
+dataset builders:
+
+* ``ExcerptConfig`` — the one object that says how an excerpt is chosen,
+  accepted as ``excerpt=`` by the dataset builders and by
+  ``AudioTree.excerpt()`` / ``AudioTree.loudest_excerpt()``; also exported from
+  ``audiotree``.
+* ``AudioReadError`` — the ``OSError`` subclass every read failure surfaces as,
+  carrying the offending path as ``.file_path`` and the original exception as
+  ``__cause__``.
+* ``OnReadError`` — the ``Literal["raise", "skip", "warn"]`` type of the
+  dataset builders' ``on_read_error`` parameter.
+* ``READ_ERROR_KEY`` — the metadata key (``"read_error"``), ``True`` on a
+  silence stand-in substituted for an unreadable file and ``False`` on every
+  item that really came off disk.
 
 The exported name is the contract, not the module it happens to live in. Import
 from these namespaces:

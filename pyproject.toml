@@ -119,7 +119,7 @@ path = "src/audiotree/__init__.py"
 packages = ["src/audiotree"]
 
 # Policy: the sdist ships **no tests**. Running them needs `tests/conftest.py`,
-# the `tests/{sources,datasources,transforms}` subpackages and 3.7 MB of audio
+# the `tests/{sources,transforms}` subpackages and 3.7 MB of audio
 # under `tests/assets/` -- and those assets are carved out of the MIT grant (the
 # MUSDB18-HQ excerpt is CC BY-NC-SA 4.0), so shipping them would make the sdist
 # something a downstream redistributor cannot ship commercially. The suite lives

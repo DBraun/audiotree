@@ -494,8 +494,12 @@ training.
      - accepted directly in Python
 
 The pre-1.0 spellings ``"ExcerptConfig.search_uniform"`` and
-``"ExcerptConfig.search_bias_early"`` remain registered, so existing configs keep
-resolving.
+``"ExcerptConfig.search_bias_early"`` are **not** carried over: they are not
+registered names, and because they contain a dot the resolver treats them as
+import paths — there is no importable ``ExcerptConfig`` module, so a config still
+using them raises ``ValueError`` the moment it is built. Update them to the short
+names: ``"ExcerptConfig.search_uniform"`` → ``"uniform"``, and
+``"ExcerptConfig.search_bias_early"`` → ``"bias_early"``.
 
 ``ExcerptConfig.enabled`` is gone, replaced by ``strategy``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
