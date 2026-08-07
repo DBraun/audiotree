@@ -57,10 +57,10 @@ _LUFS_REQUIRED_KEYS = ("lufs_window_sec", "filepaths", "durations", "bagz_file")
 
 
 @dataclass(frozen=True)
-class WindowParams:
+class WindowConfig:
     """Windowing knobs for length-aware sampling, bundled for reuse.
 
-    Pass an instance as ``window_params=`` to
+    Pass an instance as ``window=`` to
     :func:`~audiotree.sources.create_balanced_audio_dataset` to build every
     file-based group with :func:`create_windowed_audio_dataset` instead of the
     default one-excerpt-per-file behavior. The fields mirror that function's

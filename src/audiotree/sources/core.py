@@ -16,7 +16,7 @@ from audiotree import AudioTree
 from audiotree.core import ExcerptConfig, _leading_axis_size
 
 if TYPE_CHECKING:
-    from audiotree.sources.windowed import WindowParams
+    from audiotree.sources.windowed import WindowConfig
 
 _default_extensions = [".wav", ".flac"]
 
@@ -722,7 +722,7 @@ def create_balanced_audio_dataset(
     | None = "constant",
     extensions: Optional[List[str]] = None,
     excerpt: ExcerptConfig = _DEFAULT_EXCERPT,
-    window_params: Optional["WindowParams"] = None,
+    window: Optional["WindowConfig"] = None,
     channels: Optional[int] = None,
     on_read_error: OnReadError = "raise",
 ) -> grain.MapDataset:
@@ -776,14 +776,14 @@ def create_balanced_audio_dataset(
         mono: Whether to convert audio to mono (only applies to file-based sources, 0 or 1).
         duration: Duration in seconds to load from each file (only applies to
             file-based sources). Defaults to 1.0. Mutually exclusive with
-            ``window_params``, which carries its own ``duration``.
+            ``window``, which carries its own ``duration``.
         pad_mode: Padding mode for files shorter than duration (only applies to file-based sources).
             Options: "constant" (zeros), "edge" (repeat edge), "reflect" (mirror),
             "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
         extensions: List of audio file extensions to search for (only applies to file-based sources).
         excerpt: Which part of each file to take; see :class:`ExcerptConfig`.
             Defaults to a uniformly random offset. Only applies to file-based sources.
-        window_params: Optional :class:`~audiotree.sources.WindowParams`. When
+        window: Optional :class:`~audiotree.sources.WindowConfig`. When
             given, each file-based group is built with
             :func:`~audiotree.sources.create_windowed_audio_dataset` (length-aware,
             evenly-covering window sampling) instead of one excerpt per file, using
@@ -793,12 +793,12 @@ def create_balanced_audio_dataset(
             length weighting. Mutually exclusive with a customized ``excerpt``
             and with ``duration``.
         channels: Expected channel count of every file (only applies to file-based
-            sources built without ``window_params``); see
+            sources built without ``window``); see
             :func:`create_audio_dataset`.
         on_read_error: What to do when one file cannot be read; see
             :func:`create_audio_dataset`. Applies to every file-based group
             (and, like ``channels``, is not supported alongside
-            ``window_params``). Pre-constructed ``datasets`` keep whatever
+            ``window``). Pre-constructed ``datasets`` keep whatever
             policy they were built with -- mixing a ``"raise"`` dataset with a
             ``"skip"`` one produces items with different metadata keys, which
             :meth:`AudioTree.batch` cannot collate.
@@ -875,24 +875,24 @@ def create_balanced_audio_dataset(
             f"(got sources={sources!r}, datasets={datasets!r})."
         )
 
-    if window_params is not None and excerpt != _DEFAULT_EXCERPT:
+    if window is not None and excerpt != _DEFAULT_EXCERPT:
         raise ValueError(
-            "Pass at most one of `window_params` or a customized `excerpt`; "
+            "Pass at most one of `window` or a customized `excerpt`; "
             "windowed sampling chooses its own offsets and does its loudness "
-            "filtering through `window_params` instead."
+            "filtering through `window` instead."
         )
 
-    if window_params is not None and duration is not None:
+    if window is not None and duration is not None:
         raise ValueError(
-            "Pass at most one of `window_params` or `duration`; windowed "
-            "sampling takes its excerpt length from `window_params.duration` "
-            f"(got duration={duration!r}, window_params.duration="
-            f"{window_params.duration!r})."
+            "Pass at most one of `window` or `duration`; windowed "
+            "sampling takes its excerpt length from `window.duration` "
+            f"(got duration={duration!r}, window.duration="
+            f"{window.duration!r})."
         )
 
-    if window_params is not None and on_read_error != "raise":
+    if window is not None and on_read_error != "raise":
         raise ValueError(
-            "`window_params` does not support `on_read_error`: windowed "
+            "`window` does not support `on_read_error`: windowed "
             "sampling has its own loader, which always raises on an unreadable "
             f"file (got on_read_error={on_read_error!r})."
         )
@@ -945,19 +945,19 @@ def create_balanced_audio_dataset(
     # Create datasets from file-based sources
     sources = sources or {}
     for group_name, folders in sources.items():
-        if window_params is not None:
+        if window is not None:
             # Length-aware windowed sampling within this group.
             from audiotree.sources.windowed import create_windowed_audio_dataset
 
             ds = create_windowed_audio_dataset(
                 sources=folders,
-                duration=window_params.duration,
-                hop=window_params.hop,
-                alpha=window_params.alpha,
-                jitter=window_params.jitter,
-                lufs_cache=window_params.lufs_cache,
-                lufs_cutoff=window_params.lufs_cutoff,
-                lufs_window_sec=window_params.lufs_window_sec,
+                duration=window.duration,
+                hop=window.hop,
+                alpha=window.alpha,
+                jitter=window.jitter,
+                lufs_cache=window.lufs_cache,
+                lufs_cutoff=window.lufs_cutoff,
+                lufs_window_sec=window.lufs_window_sec,
                 shuffle=shuffle,
                 num_epochs=num_epochs,
                 shuffle_seed=_derive_group_seed(shuffle_seed, group_name, "shuffle"),

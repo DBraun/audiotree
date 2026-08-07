@@ -32,7 +32,7 @@ attributes and methods of the classes those names resolve to.
        ``create_balanced_audio_dataset``, ``create_windowed_audio_dataset``,
        ``find_audio_files``, ``build_window_lufs_cache``, ``load_window_lufs``,
        ``save_window_lufs``, ``precompute_window_lufs``, ``scan_durations``,
-       ``WindowLufsCache``, ``WindowParams``, ``AudioDataSource``,
+       ``WindowLufsCache``, ``WindowConfig``, ``AudioDataSource``,
        ``TreeDataSource``
    * - ``audiotree.transforms``
      - ``AudioCodec``, ``LatentAudioCodec``, ``identity``, ``mono``, ``stereo``,

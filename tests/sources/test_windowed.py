@@ -13,7 +13,7 @@ import soundfile as sf
 from audiotree import AudioTree
 from audiotree.sources import (
     WindowLufsCache,
-    WindowParams,
+    WindowConfig,
     build_window_lufs_cache,
     create_balanced_audio_dataset,
     create_windowed_audio_dataset,
@@ -596,7 +596,7 @@ def test_lufs_cache_mono_mismatch_raises():
 # --------------------------------------------------------------------------- #
 
 
-def test_window_params_in_balanced_dataset():
+def test_window_in_balanced_dataset():
     with tempfile.TemporaryDirectory() as tmp:
         a_dir = Path(tmp) / "groupA"
         b_dir = Path(tmp) / "groupB"
@@ -608,22 +608,22 @@ def test_window_params_in_balanced_dataset():
             weights={"A": 0.5, "B": 0.5},
             sample_rate=8000,
             mono=True,
-            window_params=WindowParams(duration=1.0, alpha=0.5),
+            window=WindowConfig(duration=1.0, alpha=0.5),
         )
         item = ds[0]
         assert item.waveform.shape == (1, 1, 8000)
         assert item.source[0] in ("A", "B")
 
 
-def test_window_params_and_saliency_params_mutually_exclusive():
+def test_window_and_saliency_params_mutually_exclusive():
     from audiotree.core import ExcerptConfig
 
     with tempfile.TemporaryDirectory() as tmp:
         a_dir = Path(tmp) / "g"
         _mixed_corpus(a_dir, {"a": 4.0}, sample_rate=8000)
-        with pytest.raises(ValueError, match="window_params"):
+        with pytest.raises(ValueError, match="window"):
             create_balanced_audio_dataset(
                 sources={"A": [str(a_dir)]},
-                window_params=WindowParams(),
+                window=WindowConfig(),
                 excerpt=ExcerptConfig(strategy="start"),
             )

@@ -285,7 +285,7 @@ before batching.
 Two combinations are refused up front with a ``ValueError`` rather than
 half-supported:
 
-- ``window_params`` with a non-raising policy. Windowed sampling reads slot
+- ``window`` with a non-raising policy. Windowed sampling reads slot
   durations for the whole corpus before the first item, and a substitute has no
   meaningful duration; see :ref:`windowed_datasets`.
 - ``mono=False`` with ``channels=None`` and a non-raising policy, when the

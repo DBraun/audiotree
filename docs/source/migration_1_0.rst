@@ -112,7 +112,7 @@ ways, in signatures that sit side by side in one pipeline. Everything is now
        ``save_window_lufs()``, ``load_window_lufs()``, ``WindowLufsCache``
        (with a ``.lufs`` attribute)
    * - ``loudness_cache=`` / ``loudness_cutoff=`` on
-       ``create_windowed_audio_dataset()`` and ``WindowParams``
+       ``create_windowed_audio_dataset()`` and ``WindowConfig``
      - ``lufs_cache=`` / ``lufs_cutoff=``
    * - ``window_duration_sec=`` on ``build_window_lufs_cache()``,
        ``precompute_window_lufs()``, ``save_window_lufs()`` and

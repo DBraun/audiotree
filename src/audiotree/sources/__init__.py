@@ -15,7 +15,7 @@ from .windowed import (
     save_window_lufs,
     scan_durations,
     WindowLufsCache,
-    WindowParams,
+    WindowConfig,
 )
 
 __all__ = [
@@ -33,7 +33,7 @@ __all__ = [
     "precompute_window_lufs",
     "scan_durations",
     "WindowLufsCache",
-    "WindowParams",
+    "WindowConfig",
     "AudioDataSource",
     "TreeDataSource",
 ]

@@ -12,7 +12,7 @@ import soundfile as sf
 
 from audiotree import AudioTree
 from audiotree.sources import (
-    WindowParams,
+    WindowConfig,
     create_balanced_audio_dataset,
     find_audio_files,
 )
@@ -560,16 +560,16 @@ class TestBalancedDatasetValidation:
             with pytest.raises(TypeError, match="repeat"):
                 create_balanced_audio_dataset(sources=sources, repeat=True)
 
-    def test_duration_with_window_params_raises(self):
+    def test_duration_with_window_raises(self):
         """`duration` is meaningless under windowed sampling, so it must not be ignored."""
         with tempfile.TemporaryDirectory() as tmpdir:
             group_dir = _create_test_audio_files(tmpdir, "group1", 2)
 
-            with pytest.raises(ValueError, match="window_params.*duration"):
+            with pytest.raises(ValueError, match="window.*duration"):
                 create_balanced_audio_dataset(
                     sources={"group1": [group_dir]},
                     duration=0.25,
-                    window_params=WindowParams(duration=1.0),
+                    window=WindowConfig(duration=1.0),
                 )
 
     def test_unknown_weight_key_raises(self):
@@ -774,7 +774,7 @@ class TestBalancedDatasetValidation:
             for waveform, flag in zip(batch.waveform, flags):
                 assert bool(np.any(np.asarray(waveform))) is not bool(flag)
 
-    def test_on_read_error_is_rejected_with_window_params(self):
+    def test_on_read_error_is_rejected_with_window(self):
         """Windowed sampling has its own loader, so the knob must not look wired."""
         with tempfile.TemporaryDirectory() as tmpdir:
             a_dir = _create_test_audio_files(tmpdir, "a", 2)
@@ -782,7 +782,7 @@ class TestBalancedDatasetValidation:
             with pytest.raises(ValueError, match="does not support `on_read_error`"):
                 create_balanced_audio_dataset(
                     sources={"a": [a_dir]},
-                    window_params=WindowParams(duration=0.5),
+                    window=WindowConfig(duration=0.5),
                     on_read_error="skip",
                 )
 

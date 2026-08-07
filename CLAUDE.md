@@ -50,7 +50,7 @@ It includes metadata like sample rate and provides methods for loading files, re
 The key functions are `create_audio_dataset()` for simple loading and `create_balanced_audio_dataset()` for multi-group balanced sampling.
 Both use grain's `random_map` for proper RNG seeding.
 Excerpt selection is configured with an `ExcerptConfig` passed to these constructors — a fresh random offset per read gives infinite RNG variety even when files repeat.
-`create_windowed_audio_dataset()` (in `audiotree.sources.windowed`) instead makes the *window* the unit of sampling: each file is tiled into `round(n_windows ** alpha)` jittered slots, globally shuffled for even coverage, length-aware frequency (`alpha`), and batch diversity. Optional build-time loudness filtering reads a `build_window_lufs_cache()` bagz cache of ragged per-file windowed-LUFS arrays. It composes with `create_balanced_audio_dataset()` via `WindowParams`.
+`create_windowed_audio_dataset()` (in `audiotree.sources.windowed`) instead makes the *window* the unit of sampling: each file is tiled into `round(n_windows ** alpha)` jittered slots, globally shuffled for even coverage, length-aware frequency (`alpha`), and batch diversity. Optional build-time loudness filtering reads a `build_window_lufs_cache()` bagz cache of ragged per-file windowed-LUFS arrays. It composes with `create_balanced_audio_dataset()` via `WindowConfig`.
 
 1. **Transforms (`audiotree.transforms`)**: Audio augmentations with dual backends: NumPy (`audiotree.transforms`) for CPU grain pipelines using `np.random.Generator`, and JAX (`audiotree.transforms.jax`) for GPU/JIT training using `jax.random.key`.
 

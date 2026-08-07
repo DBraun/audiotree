@@ -168,7 +168,7 @@ is done.
 Composing with Balanced Datasets
 --------------------------------
 
-Pass a :class:`~audiotree.sources.WindowParams` to
+Pass a :class:`~audiotree.sources.WindowConfig` to
 :func:`~audiotree.sources.create_balanced_audio_dataset` to build every group
 with windowed sampling. The group ``weights`` balance *across* categories while
 ``alpha`` controls length bias *within* each category -- the two compose
@@ -176,18 +176,18 @@ multiplicatively:
 
 .. code-block:: python
 
-    from audiotree.sources import create_balanced_audio_dataset, WindowParams
+    from audiotree.sources import create_balanced_audio_dataset, WindowConfig
 
     ds = create_balanced_audio_dataset(
         sources={"speech": ["/data/speech"], "music": ["/data/music"]},
         weights={"speech": 0.7, "music": 0.3},   # across-group balance
         sample_rate=44100,
         mono=True,
-        window_params=WindowParams(duration=1.0, alpha=0.5),  # within-group coverage
+        window=WindowConfig(duration=1.0, alpha=0.5),  # within-group coverage
     )
 
 .. note::
-   ``window_params`` cannot be combined with a non-raising ``on_read_error``
+   ``window`` cannot be combined with a non-raising ``on_read_error``
    (see :ref:`unreadable-files`); the combination raises ``ValueError`` rather
    than half-working. Windowed sampling reads every file's duration up front to
    build the window index, and a file that cannot be read contributes no
