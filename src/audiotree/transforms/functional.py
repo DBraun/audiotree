@@ -58,6 +58,9 @@ def volume_norm(
     Returns:
         AudioTree with normalized loudness
 
+    Raises:
+        ValueError: If ``min_db > max_db``.
+
     Example:
         transform = volume_norm(min_db=-20, max_db=-15)
         ds = ds.random_map(transform, seed=42)
@@ -83,6 +86,9 @@ def volume_change(
 
     Returns:
         AudioTree with volume changed
+
+    Raises:
+        ValueError: If ``min_db > max_db``.
 
     Example:
         transform = volume_change(min_db=-12, max_db=12, prob=0.9)
@@ -338,6 +344,10 @@ def corrupt_phase(
     Returns:
         AudioTree with corrupted phase
 
+    Raises:
+        ValueError: If ``amount`` is negative, or the audio is shorter than
+            ``frame_length`` samples.
+
     Example:
         transform = corrupt_phase(amount=0.5, hop_factor=0.5)
         ds = ds.random_map(transform, seed=42)
@@ -372,6 +382,10 @@ def shift_phase(
 
     Returns:
         AudioTree with shifted phase
+
+    Raises:
+        ValueError: If ``amount`` is negative, or the audio is shorter than
+            one STFT frame (2048 samples).
 
     Example:
         transform = shift_phase(amount=0.5)
@@ -433,7 +447,7 @@ class choose(grain.transforms.RandomMap):
             is what every ``audiotree`` transform constructor returns.
         c: Number of transforms to choose
         weights: Optional probability weights for each transform. Must be one
-            weight per transform and sum to 1.
+            weight per transform, each non-negative, summing to 1.
         prob: Probability of applying any transforms at all
 
     Raises:
@@ -463,11 +477,28 @@ class choose(grain.transforms.RandomMap):
                     f"not a grain Map/RandomMap transform. Pass a constructed "
                     f"transform, e.g. choose(invert_phase(), swap_stereo())."
                 )
-        if weights is not None and len(weights) != len(transforms):
-            raise ValueError(
-                f"choose() got {len(weights)} weights for {len(transforms)} "
-                f"transforms; there must be exactly one weight per transform."
-            )
+        if weights is not None:
+            if len(weights) != len(transforms):
+                raise ValueError(
+                    f"choose() got {len(weights)} weights for {len(transforms)} "
+                    f"transforms; there must be exactly one weight per transform."
+                )
+            # Validated here, with a clear message, rather than surfacing as
+            # numpy's "probabilities do not sum to 1" on the first element
+            # inside a grain worker.
+            if any(weight < 0 for weight in weights):
+                raise ValueError(
+                    f"choose() weights must be non-negative, but got {list(weights)!r}."
+                )
+            total = float(sum(weights))
+            if abs(total - 1.0) > 1e-6:
+                raise ValueError(
+                    f"choose() weights must sum to 1, but got {list(weights)!r} "
+                    f"(sum {total})."
+                )
+            # Renormalize the float32-ish residue away: `rng.choice` checks the
+            # sum to ~1.5e-8, tighter than the tolerance above.
+            weights = [weight / total for weight in weights]
         if not 0 <= c <= len(transforms):
             raise ValueError(
                 f"choose() cannot pick c={c} of {len(transforms)} transforms."

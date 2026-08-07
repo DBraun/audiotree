@@ -440,6 +440,38 @@ def test_scope_rejects_bad_types():
         volume_change(scope=[123])
 
 
+def test_scope_dict_with_parameter_override_raises():
+    """Parameters inside a scope entry never worked as per-key overrides.
+
+    The docs used to teach ``{'dry': {'scope': True, 'min_db': -30}}`` as a
+    per-key parameter override, but a non-scope key in a scope dict was read as
+    an extra scope marker, not as an override -- the example ran and silently
+    used the default parameters everywhere. That spelling now raises at
+    construction; per-key parameters mean one transform instance per key.
+    """
+    with pytest.raises(ValueError, match="overrides.*not supported"):
+        volume_norm(scope={"dry": {"scope": True, "min_db": -30}})
+    # Even without a 'scope' marker alongside it.
+    with pytest.raises(ValueError, match="overrides.*not supported"):
+        volume_norm(scope={"dry": {"min_db": -30}})
+
+
+def test_scope_dict_nested_exclusion_still_works():
+    """The legitimate dict-form keys -- nested paths ending in 'scope' -- stay valid."""
+    element = {
+        "d": {
+            "e": AudioTree(np.ones((1, 1, 4), dtype=np.float32), 16000),
+            "f": AudioTree(np.ones((1, 1, 4), dtype=np.float32), 16000),
+        }
+    }
+    scope = {"d": {"scope": True, "f": {"scope": False}}}
+    out = volume_change(min_db=6, max_db=6, scope=scope).random_map(
+        element, np.random.default_rng(0)
+    )
+    changed = {k: not np.allclose(out["d"][k].waveform, 1.0) for k in ("e", "f")}
+    assert changed == {"e": True, "f": False}
+
+
 # === output_key + scope regressions (both backends) ===
 
 
@@ -517,3 +549,34 @@ def test_output_key_overwriting_existing_key_writes_transformed(backend):
     assert np.allclose(np.asarray(result["wet"].waveform), -1.0)
     # The transformed key's source is left untouched.
     assert np.allclose(np.asarray(result["dry"].waveform), 1.0)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_string_output_key_with_multiple_in_scope_leaves_raises(backend):
+    """m8: a string `output_key` used to keep only the last transformed leaf.
+
+    ``rename_node`` mapped every in-scope key to the same output name, so the
+    rebuilt dict silently discarded all but one result (whichever came last in
+    jax's sorted-key order). Now it raises and points at a callable
+    ``output_key``.
+    """
+    invert_phase, make_rng = _backend(backend)
+    element = {"dry": _const(1.0), "wet": _const(0.5)}
+
+    with pytest.raises(ValueError, match="callable output_key"):
+        invert_phase(output_key="aug").random_map(element, make_rng())
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_callable_output_key_names_each_in_scope_leaf(backend):
+    """m8 control: a callable that gives distinct names keeps every result."""
+    invert_phase, make_rng = _backend(backend)
+    element = {"dry": _const(1.0), "wet": _const(0.5)}
+
+    result = invert_phase(output_key=lambda path: path[-1] + "_aug").random_map(
+        element, make_rng()
+    )
+
+    assert set(result) == {"dry", "wet", "dry_aug", "wet_aug"}
+    assert np.allclose(np.asarray(result["dry_aug"].waveform), -1.0)
+    assert np.allclose(np.asarray(result["wet_aug"].waveform), -0.5)

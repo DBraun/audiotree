@@ -26,6 +26,62 @@ def _db2linear_np(decibels):
     return np.power(10.0, decibels / 20.0)
 
 
+def _check_uniform_range(
+    name: str, min_name: str, max_name: str, min_value: float, max_value: float
+) -> None:
+    """Reject an inverted sampling range so both backends fail identically.
+
+    The NumPy backends draw with ``rng.uniform(min, max)``, which raises
+    numpy's generic ``ValueError: high - low < 0`` for an inverted range --
+    on the first element, inside a grain worker. ``jax.random.uniform`` does
+    not error at all: it silently clamps every draw to ``minval``, so the
+    transform applies a constant parameter instead. Validating here, ahead of
+    either draw, keeps the two backends consistent with a single clear error
+    (see ``_check_roll_range`` for the integer-draw equivalent).
+    """
+    if min_value > max_value:
+        raise ValueError(
+            f"{name} requires {min_name} <= {max_name}, but got "
+            f"{min_name}={min_value} > {max_name}={max_value}."
+        )
+
+
+def _check_phase_amount(name: str, amount: float) -> None:
+    """Reject a negative phase amount so both backends fail identically.
+
+    The phase transforms draw from ``[-pi * amount, pi * amount]``, which is
+    an inverted range when ``amount`` is negative: numpy raises its generic
+    ``high - low < 0`` and ``jax.random.uniform`` silently pins every draw to
+    ``minval``. A negative amount also has no meaning of its own -- the range
+    is symmetric, so ``-a`` could only ever mean ``a``.
+    """
+    if amount < 0:
+        raise ValueError(
+            f"{name} requires amount >= 0, but got amount={amount}: the phase "
+            f"offsets are drawn from [-pi * amount, pi * amount], which is "
+            f"inverted for a negative amount."
+        )
+
+
+def _check_stft_length(name: str, num_samples: int, frame_length: int) -> None:
+    """Reject audio shorter than one STFT frame so both backends fail identically.
+
+    On a too-short clip ``librosa.stft`` only warns (``n_fft=... is too large
+    for input signal``) and zero-pads, while ``librosax.stft`` raises jax's
+    ``ValueError: window is longer than input signal`` -- and whether the JAX
+    path survives depends on how much ``_pad_to_hop_multiple`` happens to pad.
+    A clip shorter than one frame cannot be analyzed at the requested
+    resolution, so both backends refuse it identically instead of one of them
+    silently analyzing zero-padding.
+    """
+    if num_samples < frame_length:
+        raise ValueError(
+            f"{name} requires audio of at least frame_length={frame_length} "
+            f"samples, but got {num_samples} samples. Use a shorter "
+            f"frame_length or longer audio."
+        )
+
+
 # =============================================================================
 # Volume Norm - JAX and NumPy implementations
 # =============================================================================
@@ -35,6 +91,7 @@ def _volume_norm_jax(
     audio_tree: AudioTree, key: jax.Array, min_db: float, max_db: float
 ) -> AudioTree:
     """JAX implementation of volume normalization."""
+    _check_uniform_range("volume_norm", "min_db", "max_db", min_db, max_db)
     waveform = audio_tree.waveform
     B = waveform.shape[0]
 
@@ -55,6 +112,7 @@ def _volume_norm_np(
     audio_tree: AudioTree, rng: np.random.Generator, min_db: float, max_db: float
 ) -> AudioTree:
     """NumPy implementation of volume normalization."""
+    _check_uniform_range("volume_norm", "min_db", "max_db", min_db, max_db)
     waveform = audio_tree.waveform
     B = waveform.shape[0]
 
@@ -79,6 +137,7 @@ def _volume_change_jax(
     audio_tree: AudioTree, key: jax.Array, min_db: float, max_db: float
 ) -> Tuple[AudioTree, jnp.ndarray]:
     """JAX implementation of volume change."""
+    _check_uniform_range("volume_change", "min_db", "max_db", min_db, max_db)
     waveform = audio_tree.waveform
     B = waveform.shape[0]
 
@@ -92,6 +151,7 @@ def _volume_change_np(
     audio_tree: AudioTree, rng: np.random.Generator, min_db: float, max_db: float
 ) -> Tuple[AudioTree, np.ndarray]:
     """NumPy implementation of volume change."""
+    _check_uniform_range("volume_change", "min_db", "max_db", min_db, max_db)
     waveform = audio_tree.waveform
     B = waveform.shape[0]
 
@@ -236,8 +296,10 @@ def _corrupt_phase_jax(
     keep_lufs: bool = False,
 ) -> AudioTree:
     """JAX implementation of phase corruption."""
+    _check_phase_amount("corrupt_phase", amount)
     waveform = audio_tree.waveform
     B, C, length = waveform.shape
+    _check_stft_length("corrupt_phase", length, frame_length)
 
     hop_length = int(frame_length * hop_factor)
 
@@ -280,8 +342,10 @@ def _corrupt_phase_np(
     keep_lufs: bool = False,
 ) -> AudioTree:
     """NumPy implementation of phase corruption."""
+    _check_phase_amount("corrupt_phase", amount)
     waveform = audio_tree.waveform
     B, C, length = waveform.shape
+    _check_stft_length("corrupt_phase", length, frame_length)
 
     hop_length = int(frame_length * hop_factor)
 
@@ -328,8 +392,10 @@ def _shift_phase_jax(
     keep_lufs: bool = False,
 ) -> AudioTree:
     """JAX implementation of phase shift."""
+    _check_phase_amount("shift_phase", amount)
     waveform = audio_tree.waveform
     B, C, length = waveform.shape
+    _check_stft_length("shift_phase", length, frame_length)
 
     hop_length = int(frame_length * hop_factor)
 
@@ -377,8 +443,10 @@ def _shift_phase_np(
     keep_lufs: bool = False,
 ) -> AudioTree:
     """NumPy implementation of phase shift."""
+    _check_phase_amount("shift_phase", amount)
     waveform = audio_tree.waveform
     B, C, length = waveform.shape
+    _check_stft_length("shift_phase", length, frame_length)
 
     hop_length = int(frame_length * hop_factor)
 

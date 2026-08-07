@@ -321,6 +321,89 @@ def test_degenerate_shapes_agree(name: str):
 
 
 # =============================================================================
+# Shared validation: bad parameters fail identically on both backends
+# =============================================================================
+
+#: ``(id, transform name, kwargs, match)``: parameters that must raise the
+#: *same* ValueError on both backends. Without the shared checks in
+#: ``helpers.py`` the NumPy backend surfaced numpy's generic
+#: ``high - low < 0`` while ``jax.random.uniform`` silently clamped every draw
+#: to ``minval`` -- a constant gain instead of an error.
+INVALID_PARAMETER_CASES = [
+    (
+        "volume_norm-inverted",
+        "volume_norm",
+        {"min_db": -10.0, "max_db": -20.0},
+        r"volume_norm requires min_db <= max_db",
+    ),
+    (
+        "volume_change-inverted",
+        "volume_change",
+        {"min_db": 6.0, "max_db": -6.0},
+        r"volume_change requires min_db <= max_db",
+    ),
+    (
+        "corrupt_phase-negative-amount",
+        "corrupt_phase",
+        {"amount": -0.5},
+        r"corrupt_phase requires amount >= 0",
+    ),
+    (
+        "shift_phase-negative-amount",
+        "shift_phase",
+        {"amount": -0.5},
+        r"shift_phase requires amount >= 0",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "name,kwargs,match",
+    [(name, kwargs, match) for _, name, kwargs, match in INVALID_PARAMETER_CASES],
+    ids=[case_id for case_id, _, _, _ in INVALID_PARAMETER_CASES],
+)
+def test_invalid_ranges_raise_identically(name: str, kwargs: dict, match: str):
+    """An inverted (or negative-width) sampling range raises the same error."""
+    np_tree, jax_tree = _pair(_waveform(1, 2))
+
+    with pytest.raises(ValueError, match=match) as np_err:
+        _apply(getattr(np_transforms, name)(**kwargs), np_tree, 0, "np")
+    with pytest.raises(ValueError, match=match) as jax_err:
+        _apply(getattr(jax_transforms, name)(**kwargs), jax_tree, 0, "jax")
+
+    assert str(np_err.value) == str(jax_err.value)
+
+
+@pytest.mark.parametrize("name", ["corrupt_phase", "shift_phase"])
+def test_short_clip_is_rejected_identically(name: str):
+    """A clip shorter than one STFT frame raises the same error on both backends.
+
+    ``librosa.stft`` used to warn (``n_fft=... is too large``) and analyze the
+    zero-padding, while ``librosax.stft`` raised jax's ``window is longer than
+    input signal`` -- so with default parameters any clip under 2048 samples
+    diverged.
+    """
+    np_tree, jax_tree = _pair(_waveform(1, 2, length=1000))
+
+    with pytest.raises(ValueError, match=r"at least frame_length=2048") as np_err:
+        _apply(getattr(np_transforms, name)(), np_tree, 0, "np")
+    with pytest.raises(ValueError, match=r"at least frame_length=2048") as jax_err:
+        _apply(getattr(jax_transforms, name)(), jax_tree, 0, "jax")
+
+    assert str(np_err.value) == str(jax_err.value)
+
+
+@pytest.mark.parametrize("name", ["corrupt_phase", "shift_phase"])
+def test_one_frame_clip_is_accepted_on_both_backends(name: str):
+    """Exactly one frame is the boundary: allowed, and in numerical parity."""
+    waveform = _waveform(1, 2, length=2048)
+    np_out, jax_out = _run_both(name, {"amount": 0.0}, waveform)
+    np.testing.assert_allclose(
+        np.asarray(jax_out.waveform), np.asarray(np_out.waveform), atol=1e-5
+    )
+
+
+# =============================================================================
 # The list above has to keep up with the modules
 # =============================================================================
 

@@ -475,6 +475,32 @@ class TestChoose:
         with pytest.raises(ValueError, match="one weight per transform"):
             choose(invert_phase(), swap_stereo(), c=1, weights=[1.0])
 
+    def test_rejects_negative_weights(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            choose(self._louder(), self._quieter(), c=1, weights=[1.5, -0.5])
+
+    def test_rejects_weights_that_do_not_sum_to_one(self):
+        """A bad sum used to surface as numpy's generic 'probabilities do not
+        sum to 1' on the first element, inside a grain worker."""
+        with pytest.raises(ValueError, match="sum to 1"):
+            choose(self._louder(), self._quieter(), c=1, weights=[0.5, 0.6])
+
+    def test_weights_with_float_residue_are_renormalized(self):
+        """A rounding error away from 1 passes validation *and* the draw.
+
+        ``rng.choice`` checks the sum to ~1.5e-8, tighter than the
+        constructor's tolerance, so without renormalizing, a residue the
+        constructor accepts would still blow up at apply time.
+        """
+        audio_tree = _tree()
+        transform = choose(
+            self._louder(), self._quieter(), c=1, weights=[1.0 + 5e-7, 0.0]
+        )
+        result = transform.random_map(audio_tree, np.random.default_rng(0))
+        np.testing.assert_allclose(
+            np.asarray(result.waveform), 10.0 * audio_tree.waveform, rtol=1e-5
+        )
+
     def test_rejects_out_of_range_prob(self):
         with pytest.raises(ValueError, match=r"prob=1.5"):
             choose(invert_phase(), c=1, prob=1.5)

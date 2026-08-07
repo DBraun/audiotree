@@ -830,25 +830,31 @@ Configure different pipelines for train vs validation:
 Advanced: Different Configs per Key
 ------------------------------------
 
-Apply different parameter values to different keys:
+``scope`` only selects *which* keys a transform applies to — it cannot carry
+parameter overrides. To use different parameter values for different keys,
+build one transform instance per key, each with its own parameters and each
+scoped to its key:
 
-**YAML:**
+.. testcode::
 
-.. code-block:: yaml
+    from audiotree.transforms import volume_norm
 
-    volume_norm.min_db: -20  # Default
-    volume_norm.max_db: -15  # Default
-    volume_norm.scope:
-      dry:
-        scope: true
-        min_db: -30  # Override for 'dry'
-      wet:
-        scope: true
-        max_db: -10  # Override for 'wet'
+    batch = {'dry': audio1, 'wet': audio2}
 
-This creates:
-- 'dry': normalized to [-30, -15] LUFS
-- 'wet': normalized to [-20, -10] LUFS
+    # 'dry' is normalized into [-30, -15] LUFS ...
+    batch = volume_norm(min_db=-30, max_db=-15, scope=['dry']).random_map(batch, rng)
+
+    # ... and 'wet' into [-20, -10] LUFS, with its own parameters.
+    batch = volume_norm(min_db=-20, max_db=-10, scope=['wet']).random_map(batch, rng)
+
+    assert np.all(batch['dry'].lufs >= -31) and np.all(batch['dry'].lufs <= -14)
+    assert np.all(batch['wet'].lufs >= -21) and np.all(batch['wet'].lufs <= -9)
+
+Putting parameter values *inside* a scope entry — e.g.
+``scope={'dry': {'scope': True, 'min_db': -30}}`` — raises a ``ValueError``:
+per-key parameter overrides are not supported, and older versions read such
+keys as extra scope markers rather than overrides, so the pipeline silently
+ran with the default parameters everywhere.
 
 Testing Dict Batches
 ---------------------

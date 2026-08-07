@@ -93,7 +93,11 @@ class _EncodeWithCodec(_CodecTransform):
         if audio_tree.codes is not None:
             return audio_tree
         codes, scale = self.codec.encode(audio_tree)
-        metadata = audio_tree.metadata
+        # Fresh codes invalidate any previous codec's scale: a re-encode with a
+        # scale-less codec must not leave the old metadata["codec_scale"]
+        # paired with the new codes, or a decoder honoring it would silently
+        # rescale this codec's output by the previous codec's factor.
+        metadata = {k: v for k, v in audio_tree.metadata.items() if k != "codec_scale"}
         if scale is not None:
             metadata = {**metadata, "codec_scale": scale}
         return audio_tree.replace(codes=codes, metadata=metadata)

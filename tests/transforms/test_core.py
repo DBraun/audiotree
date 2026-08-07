@@ -1145,3 +1145,38 @@ def test_map_transforms_reject_prob(name):
     """
     with pytest.raises(TypeError, match="unexpected parameter|prob"):
         getattr(audiotree.transforms, name)(prob=0.5)
+
+
+def test_unknown_parameter_message_lists_only_accepted_reserved():
+    """The error's "plus ..." list must match what the transform kind accepts.
+
+    It used to always append "plus prob, split_seed, scope, output_key", but a
+    map transform rejects ``prob``/``split_seed``, so following the message
+    walked the user straight into the next TypeError.
+    """
+    with pytest.raises(TypeError, match=r"plus scope, output_key\.") as excinfo:
+        trim(lengthh=1.0)
+    assert "prob" not in str(excinfo.value)
+    assert "split_seed" not in str(excinfo.value)
+
+    with pytest.raises(TypeError, match=r"plus prob, split_seed, scope, output_key\."):
+        volume_norm(min_dB=-20)
+
+
+def test_repr_includes_non_default_reserved_settings():
+    """The repr renders as a constructor call, so it must not drop settings.
+
+    It used to omit ``prob``/``split_seed``/``scope``/``output_key``, so the
+    repr of a transform with non-default reserved settings reconstructed a
+    different transform.
+    """
+    transform = volume_norm(min_db=-20.0, prob=0.5, scope=["dry"])
+    assert repr(transform) == "volume_norm(min_db=-20.0, prob=0.5, scope=['dry'])"
+
+    # Settings left at their defaults stay out of the repr.
+    assert repr(volume_norm(min_db=-20.0)) == "volume_norm(min_db=-20.0)"
+
+    # A map transform renders its own reserved settings (there is no prob).
+    assert repr(trim(length=2.0, output_key="out")) == (
+        "trim(length=2.0, output_key='out')"
+    )

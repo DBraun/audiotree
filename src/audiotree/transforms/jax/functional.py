@@ -59,6 +59,9 @@ def volume_norm(
 
     Returns:
         AudioTree with normalized loudness
+
+    Raises:
+        ValueError: If ``min_db > max_db``.
     """
     audio_tree = audio_tree.replace_lufs()
     return _volume_norm_jax(audio_tree, rng, min_db, max_db)
@@ -81,6 +84,9 @@ def volume_change(
 
     Returns:
         AudioTree with volume changed
+
+    Raises:
+        ValueError: If ``min_db > max_db``.
     """
     audio_tree, gain_db = _volume_change_jax(audio_tree, rng, min_db, max_db)
     if audio_tree.lufs is not None:
@@ -218,6 +224,10 @@ def corrupt_phase(
 
     Returns:
         AudioTree with corrupted phase
+
+    Raises:
+        ValueError: If ``amount`` is negative, or the audio is shorter than
+            ``frame_length`` samples.
     """
     return _corrupt_phase_jax(
         audio_tree, rng, amount, hop_factor, frame_length, window, keep_lufs
@@ -249,6 +259,10 @@ def shift_phase(
 
     Returns:
         AudioTree with shifted phase
+
+    Raises:
+        ValueError: If ``amount`` is negative, or the audio is shorter than
+            one STFT frame (2048 samples).
     """
     return _shift_phase_jax(audio_tree, rng, amount, keep_lufs=keep_lufs)
 

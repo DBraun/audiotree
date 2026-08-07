@@ -124,6 +124,13 @@ def normalize_scope(scope) -> KeyLeafPairs:
     above where it sits, the obvious shorthand ``{"wet": True}`` matches *every*
     leaf rather than only ``"wet"`` — silently transforming the target signal in
     a dry/wet pipeline. That spelling now raises and points at the list form.
+
+    Every leaf of the dict form must sit under a ``"scope"`` key. In
+    particular, a parameter override inside a scope entry — e.g.
+    ``{"dry": {"scope": True, "min_db": -30}}`` — is rejected: per-key
+    parameters are not supported, and such keys used to be read as extra scope
+    markers rather than as overrides. Use one transform instance per key, each
+    with its own parameters and scope, instead.
     """
     if scope is None:
         return []
@@ -148,6 +155,18 @@ def normalize_scope(scope) -> KeyLeafPairs:
                     f"{key!r}, because a scope entry is matched one level above "
                     f"where it sits. Write scope=[{key!r}] instead, or the "
                     f"explicit scope={{{key!r}: {{'scope': {value!r}}}}}."
+                )
+            last_key = getattr(config_path[-1], "key", None)
+            if last_key != _SCOPE_SENTINEL:
+                location = "".join(str(key) for key in config_path)
+                raise ValueError(
+                    f"scope{location} = {value!r}: the only value a scope dict "
+                    f"may set is the {_SCOPE_SENTINEL!r} marker. Per-key "
+                    f"parameter overrides inside `scope` are not supported "
+                    f"(and were previously misread as scope markers, not "
+                    f"applied as overrides). To use different parameters per "
+                    f"key, build one transform instance per key, each scoped "
+                    f"to that key."
                 )
         return flat
 
@@ -353,12 +372,27 @@ class BaseTransformMixIn:
         # Use output_key to rename the nodes in the tree
         def rename_node(path: KeyPath, leaf):
             full_path = [k.key for k in path]
-            leaf = {
-                output_key(full_path + [k]): v
-                for k, v in leaf.items()
-                if _is_in_scope(self.scope, tuple(path) + (DictKey(k),))
-            }
-            return leaf
+            renamed = {}
+            sources = {}  # output name -> the input key that produced it
+            for k, v in leaf.items():
+                if not _is_in_scope(self.scope, tuple(path) + (DictKey(k),)):
+                    continue
+                name = output_key(full_path + [k])
+                if name in renamed:
+                    # A `raise`, not a silent overwrite: a string `output_key`
+                    # meeting several in-scope leaves would keep only one
+                    # transformed result and drop the rest.
+                    raise ValueError(
+                        f"output_key maps both {sources[name]!r} and {k!r} to "
+                        f"{name!r}, so all but one transformed value would be "
+                        f"silently discarded. With more than one in-scope "
+                        f"leaf, pass a callable output_key that returns a "
+                        f"distinct name per path, e.g. "
+                        f"lambda path: path[-1] + '_augmented'."
+                    )
+                renamed[name] = v
+                sources[name] = k
+            return renamed
 
         # Rename the deepest keys in the new tree using the `output_key` function.
         new_tree = map_with_path(rename_node, new_tree, is_leaf=is_leaf)
@@ -390,7 +424,9 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
             prob (float, optional): Probability of applying the transform. Defaults to 1.0.
             scope (Dict[str, Any], optional): Dictionary indicating which modalities to apply the transform to
             output_key (Union[str, Callable[[List[str]], str]], optional): Key under which to store the transformed
-                value. By default, the values will be transformed in-place.
+                value. By default, the values will be transformed in-place. A plain string names exactly one output,
+                so it requires a single in-scope leaf; with several, pass a callable that maps each leaf's path to a
+                distinct name.
         """
         # A `raise`, not an `assert`: `python -O` strips asserts, and `prob` outside
         # [0, 1] then silently becomes "always" or "never". Matches `choose()`.
@@ -558,7 +594,9 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
             config (Dict[str, Dict[str, Any]]): Configuration dictionary for the transform
             scope (Dict[str, Dict[str, Any]]): Dictionary indicating which modalities to apply the transform to
             output_key (Union[str, Callable[[List[str]], str]], optional): Key under which to store the transformed
-                value. By default, the values will be transformed in-place.
+                value. By default, the values will be transformed in-place. A plain string names exactly one output,
+                so it requires a single in-scope leaf; with several, pass a callable that maps each leaf's path to a
+                distinct name.
         """
         self.default_config = self.get_default_config()
         self.config = flatten_config(config or {}, self.default_config)

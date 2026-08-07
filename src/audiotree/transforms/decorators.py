@@ -47,7 +47,9 @@ _RESERVED_DOC_ENTRIES = {
     ),
     "output_key": (
         "output_key: Write the result under a new key instead of replacing the\n"
-        "    input."
+        "    input. A plain string names exactly one output, so it requires a\n"
+        "    single in-scope leaf; with several, pass a callable that maps each\n"
+        "    leaf's path to a distinct name."
     ),
 }
 
@@ -93,12 +95,16 @@ def _transform_parameters(fn: Callable, drop: tuple) -> Dict[str, Any]:
     return parameters
 
 
-def _check_parameter_names(fn_name: str, given, known) -> None:
+def _check_parameter_names(fn_name: str, given, known, reserved: Sequence[str]) -> None:
     """Reject misspelled or unknown transform parameters.
 
     Unknown keys used to be accepted and silently dropped, so
     ``volume_change(min_dB=40)`` (capital B) ran with the defaults and the
     augmentation the caller configured simply never happened.
+
+    ``reserved`` is the subset of the reserved parameters this transform kind
+    actually accepts: suggesting ``prob`` to a map transform, which rejects it,
+    would send the caller straight into the next TypeError.
     """
     unknown = [name for name in given if name not in known]
     if not unknown:
@@ -110,7 +116,7 @@ def _check_parameter_names(fn_name: str, given, known) -> None:
     raise TypeError(
         f"{fn_name}() got unexpected parameter(s): {', '.join(hints)}. "
         f"Valid parameters: {', '.join(sorted(known)) or '(none)'}, "
-        f"plus {', '.join(_RESERVED)}."
+        f"plus {', '.join(reserved)}."
     )
 
 
@@ -240,10 +246,17 @@ def _build_wrapper(fn, base_class, drop, make_transform):
             return param_defaults.copy()
 
         def __repr__(self):
-            settings = ", ".join(
-                f"{k}={v!r}" for k, v in sorted(self.config_dict.items())
-            )
-            return f"{fn.__name__}({settings})"
+            # The function's own parameters, then the reserved settings that
+            # differ from their defaults -- so the repr reads as a constructor
+            # call that rebuilds this transform, not a different one.
+            settings = sorted(self.config_dict.items())
+            settings += [
+                (name, self.reserved_dict[name])
+                for name in _RESERVED
+                if name in self.reserved_dict
+            ]
+            rendered = ", ".join(f"{k}={v!r}" for k, v in settings)
+            return f"{fn.__name__}({rendered})"
 
     make_transform(FunctionBasedTransform, fn)
     FunctionBasedTransform.__name__ = f"{fn.__name__}_Transform"
@@ -285,7 +298,7 @@ def _build_wrapper(fn, base_class, drop, make_transform):
                 )
             kwargs = {**bound.arguments, **kwargs}
 
-        _check_parameter_names(fn.__name__, kwargs, param_defaults)
+        _check_parameter_names(fn.__name__, kwargs, param_defaults, accepted_reserved)
         config = {**param_defaults, **kwargs}
         # A parameter with no default has to be supplied here; leaving the
         # sentinel in the config would defer the failure to the first batch,
@@ -302,6 +315,18 @@ def _build_wrapper(fn, base_class, drop, make_transform):
             instance, base_class, config, prob, split_seed, scope, output_key
         )
         instance.config_dict = dict(kwargs)
+        # Reserved settings that differ from their defaults, as passed (before
+        # any normalization), for the repr.
+        instance.reserved_dict = {
+            name: value
+            for name, value, default in (
+                ("prob", prob, 1.0),
+                ("split_seed", split_seed, True),
+                ("scope", scope, None),
+                ("output_key", output_key, None),
+            )
+            if name in accepted_reserved and value != default
+        }
         return instance
 
     reserved_signature = [
