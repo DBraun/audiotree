@@ -7,23 +7,22 @@
 # add these directories to sys.path here.
 import pathlib
 import sys
-import os.path
 
-basedir = os.path.abspath(os.path.join(pathlib.Path(__file__).parents[2], "src"))
-sys.path.insert(0, basedir)
+basedir = (pathlib.Path(__file__).parents[2] / "src").resolve()
+sys.path.insert(0, str(basedir))
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "AudioTree"
-copyright = "2025, David Braun"
+copyright = "2024-%Y, David Braun"  # Sphinx substitutes %Y with the build year.
 author = "David Braun"
-first_line = open(
-    os.path.join(pathlib.Path(__file__).parents[2], "src/audiotree/__init__.py"), "r"
-).readline()
-# first_line is '__version__ = "1.2.3"'
-assert first_line.startswith("__version__ = ")
-release = first_line.split("=")[1].strip()[1:-1]
+
+# Read the version from the package itself (importable via the sys.path insert
+# above), the same source pyproject.toml uses (`attr = "audiotree.__version__"`).
+import audiotree  # noqa: E402
+
+version = release = audiotree.__version__
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -32,7 +31,29 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
+    "sphinx.ext.doctest",
+    "myst_parser",
 ]
+
+# Execute the ``>>>`` / ``.. testcode::`` examples at ``make doctest`` so the docs stay correct.
+# These names are pre-imported so each example can stay concise.
+doctest_global_setup = """
+# grain 0.2.17+ reads absl flags in its multiprocessing prefetch; the doctest
+# runner is not an ``absl.app`` entry point, so parse them with defaults.
+from absl import flags
+flags.FLAGS.mark_as_parsed()
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+from audiotree import AudioTree, AudioWriter, TreeWriter
+from audiotree.sources import (
+    AudioDataSource,
+    TreeDataSource,
+    create_audio_dataset,
+    create_balanced_audio_dataset,
+)
+"""
 
 templates_path = ["_templates"]
 exclude_patterns = []
