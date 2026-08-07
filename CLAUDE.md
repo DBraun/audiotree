@@ -89,4 +89,4 @@ GPU required — pass `backend="cpu"` where a device is implied).
 
 ## Changelog
 
-User-facing changes (public API, behavior, or dependencies) are tracked in `CHANGELOG.md`. Add a bullet under its `## Unreleased` section, following the category conventions documented at the top of that file.
+User-facing changes (public API, behavior, or dependencies) are tracked in `CHANGELOG.md`. Add a bullet under its `## [Unreleased]` section, following the category conventions documented at the top of that file.

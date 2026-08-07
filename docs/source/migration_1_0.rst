@@ -13,7 +13,7 @@ changed at once, deliberately, so that the names and conventions the 1.x stabili
 contract freezes are the ones worth freezing. From 1.0 onward removals go through
 the deprecation policy in :ref:`api_stability`.
 
-This guide is derived from the ``Unreleased`` section of the :doc:`changelog`,
+This guide is derived from the 1.0.0 section of the :doc:`changelog`,
 which remains the exhaustive list.
 
 .. note::

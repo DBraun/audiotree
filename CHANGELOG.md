@@ -4,11 +4,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 (categories: Added, Changed, Deprecated, Removed, Fixed, Security), and AudioTree
 follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
-## Unreleased
+## [Unreleased]
 
 Nothing yet.
 
-## audiotree 1.0.0 (2026-08-06)
+## [1.0.0] - 2026-08-06
 
 The first stable release, and a near-total rewrite of the public surface. 0.2.x was a handful
 of grain data sources with class-based transforms; 1.0 is a typed `AudioTree` container with
@@ -234,7 +234,7 @@ the post-mix shuffle.
 * **`AudioTree.from_manifest` no longer opens arbitrary files**: it joined manifest-supplied filenames with `audio_dir / filename`, and `pathlib` discards the left operand when the right is absolute and does not normalize `..` — so a tampered manifest returned the contents of any readable file as `waveform`. The 1.0 traversal guard covered `sources/` and missed this call site, because `from_manifest` was a *second, divergent reader* of the same file; it is now expressed on the shared parser and routed through `_fs.safe_join`. `safe_join`'s `..` check also consulted only `PurePosixPath`, to which `..\..\etc\hosts` is one opaque part; it checks both flavours now.
 * **Breaking — `ExcerptConfig.search` is resolved by name, not `eval()`**: `loudest_excerpt` called `eval()` on a field deliberately typed `str` so argbind can bind it from YAML, making a config file arbitrary code execution in every data worker. It was not even usable as an extension point, since `eval` ran in `audiotree.core`'s namespace and only the two built-ins ever resolved. Names are now looked up in a registry (`"uniform"`, `"bias_early"`) with an `importlib` dotted-path fallback (`"mypkg.offsets.my_search"`), and resolution happens in `__post_init__` so a typo raises when the config is built rather than minutes into training. The default is `"uniform"`. The pre-1.0 spellings (`"SaliencyParams.search_uniform"`, `"SaliencyParams.search_bias_early"`) are *not* carried over — `SaliencyParams` itself became `ExcerptConfig` and `search_function` became `search` — so an existing config has to be updated; the migration guide lists the mapping.
 
-## audiotree 0.2.0 (Feb 17, 2025)
+## [0.2.0] - 2025-02-17
 
 * `jit` has been removed in most places. We encourage users to jit as late as possible.
 * New class: `AudioDataBalancedDataset`, which is a grain Dataset, **not a Data Source**.
@@ -245,7 +245,7 @@ the post-mix shuffle.
 * `cpu` has a kwarg has been removed in most places. You should think of AudioTrees as existing on CPU by default. If you pass them to a jitted function then they will be put on device.
 * In, `AudioDataSimpleSource` and `AudioDataBalancedSource`, `num_steps` arg is now `num_records`. Also `._filepaths` property is now `.filepaths`.
 
-## audiotree 0.1.0 (Aug 22, 2024)
+## [0.1.0] - 2024-08-22
 
 ### **Breaking changes:**
 * `SaliencyParams` has moved from `audiotree.datasources.SaliencyParams` to `audiotree.SaliencyParams`
@@ -257,6 +257,6 @@ SaliencyParams has a new `search_function` parameter.
 The two valid strings are `SaliencyParams.search_uniform` and `SaliencyParams.search_early_bias`.
 You can also plug in your own Callable function.
 
-## audiotree 0.0.5 (Aug 8, 2024)
+## [0.0.5] - 2024-08-08
 
 First release.

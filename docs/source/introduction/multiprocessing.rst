@@ -36,6 +36,35 @@ Audio data loading can be CPU-bound due to:
 
 Parallelization allows these operations to run concurrently while the GPU trains your model.
 
+Synchronous reads are the right baseline
+----------------------------------------
+
+Grain's *default* ``ReadOptions`` is ``num_threads=16, prefetch_buffer_size=500``
+-- sized for corpora of small records, not decoded audio. A 3-second stereo
+excerpt at 44.1 kHz float32 is ~1 MB, so the default buffer alone can hold
+~0.5 GB of decoded audio, and it applies **per worker process** once
+``mp_prefetch`` is involved (8 workers -> ~4 GB of prefetched waveforms). The
+read threads also compete with the training process for the GIL.
+
+Start every pipeline with fully synchronous reads, and add parallelism only
+where measurement says it pays:
+
+.. skip-snippet-exec: fragment; ``ds`` is any MapDataset from this page.
+
+.. code-block:: python
+
+    read_options = grain.ReadOptions(num_threads=0, prefetch_buffer_size=0)
+    iter_ds = ds.to_iter_dataset(read_options=read_options)
+
+* **Training with** ``mp_prefetch``: keep reads synchronous inside each worker
+  -- the worker processes *are* the parallelism, and per-worker thread pools
+  mostly add memory and GIL churn.
+* **Evaluation and pre-rendering scripts**: synchronous reads keep memory flat
+  and behavior deterministic.
+* **Genuinely I/O-bound reads** (network storage, cold disks) are the case for
+  ``num_threads > 0`` -- the next section -- and even then prefer a small
+  explicit ``prefetch_buffer_size`` over the default 500.
+
 Multithreading with ReadOptions
 --------------------------------
 
@@ -102,7 +131,11 @@ Use multiprocessing for CPU-bound operations:
         num_workers=8,              # 8 worker processes
         per_worker_buffer_size=4,   # Each worker buffers 4 items
     )
-    iter_ds = ds.to_iter_dataset().mp_prefetch(options=mp_options)
+    # Synchronous reads inside each worker: the processes are the parallelism.
+    read_options = grain.ReadOptions(num_threads=0, prefetch_buffer_size=0)
+    iter_ds = ds.to_iter_dataset(read_options=read_options).mp_prefetch(
+        options=mp_options
+    )
 
     # Iterate with parallel loading
     for audio_tree in iter_ds:
@@ -182,7 +215,10 @@ Weight-based balancing is preserved with multiprocessing:
 
     # Add multiprocessing
     mp_options = grain.MultiprocessingOptions(num_workers=8)
-    iter_ds = ds.to_iter_dataset().mp_prefetch(options=mp_options)
+    read_options = grain.ReadOptions(num_threads=0, prefetch_buffer_size=0)
+    iter_ds = ds.to_iter_dataset(read_options=read_options).mp_prefetch(
+        options=mp_options
+    )
 
     # Verify proportions are maintained
     from collections import Counter
@@ -234,7 +270,7 @@ General guidelines:
 
 **Thread Count**
 
-For I/O-bound workloads:
+``0`` (synchronous) is the baseline -- see above. For I/O-bound workloads:
 
 .. skip-snippet-exec: fragment; ``grain`` comes from the block above, which opts out.
 
@@ -312,8 +348,9 @@ Common Patterns
         num_workers=8,
         per_worker_buffer_size=4,
     )
+    read_options = grain.ReadOptions(num_threads=0, prefetch_buffer_size=0)
     iter_ds = (
-        ds.to_iter_dataset()
+        ds.to_iter_dataset(read_options=read_options)
         .batch(32, batch_fn=AudioTree.batch)
         .mp_prefetch(options=mp_options)
     )
@@ -345,8 +382,9 @@ Common Patterns
 
     # Add batching and multiprocessing
     mp_options = grain.MultiprocessingOptions(num_workers=4)
+    read_options = grain.ReadOptions(num_threads=0, prefetch_buffer_size=0)
     val_iter_ds = (
-        val_ds.to_iter_dataset()
+        val_ds.to_iter_dataset(read_options=read_options)
         .batch(32, batch_fn=AudioTree.batch)
         .mp_prefetch(options=mp_options)
     )
@@ -373,7 +411,8 @@ Perform setup in each worker process before loading data:
         np.random.seed(42 + worker_id)
 
     mp_options = grain.MultiprocessingOptions(num_workers=4)
-    iter_ds = ds.to_iter_dataset().mp_prefetch(
+    read_options = grain.ReadOptions(num_threads=0, prefetch_buffer_size=0)
+    iter_ds = ds.to_iter_dataset(read_options=read_options).mp_prefetch(
         options=mp_options,
         worker_init_fn=worker_init_fn,
     )
@@ -486,11 +525,9 @@ Complete example with batching and all optimizations:
         excerpt=excerpt,
     )
 
-    # Multithreading for I/O
-    read_options = grain.ReadOptions(
-        num_threads=4,
-        prefetch_buffer_size=8,
-    )
+    # Synchronous reads: the mp_prefetch workers below are the parallelism.
+    # (Raise num_threads only for genuinely I/O-bound storage.)
+    read_options = grain.ReadOptions(num_threads=0, prefetch_buffer_size=0)
     iter_ds = ds.to_iter_dataset(read_options=read_options)
 
     # Batch with AudioTree.batch
