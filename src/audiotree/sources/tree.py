@@ -417,6 +417,43 @@ class TreeDataSource(RandomAccessDataSource):
         self.__dict__.update(state)
         self._open_lock = threading.Lock()
 
+    def close(self) -> None:
+        """Release this process's memmaps and readers.
+
+        Holding the mappings open is what makes reads fast, but a mapped file
+        cannot be deleted, moved, or replaced on Windows until it is unmapped --
+        so a run that reads a dataset and then tries to clean it up fails with
+        ``PermissionError: [WinError 32]`` while the source is alive. POSIX
+        allows the unlink and hides the problem entirely.
+
+        Reading again reopens transparently, so this is a release rather than a
+        teardown; ``TreeDataSource`` is also a context manager, which is the
+        tidier way to scope the handles::
+
+            with TreeDataSource(directory) as source:
+                tree = source[0]
+        """
+        with self._open_lock:
+            self._leaf_memmaps = {}
+            self._bagz_readers = {}
+            self._leaf_names = []
+            self._data_files_opened = False
+
+    def __enter__(self) -> "TreeDataSource":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+    def __del__(self):
+        # A backstop, not the contract: interpreter shutdown may already have
+        # torn down what close() touches, and refcount timing is not something
+        # to rely on for releasing OS handles.
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def __len__(self) -> int:
         return self._num_samples
 

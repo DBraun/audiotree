@@ -290,6 +290,7 @@ def test_overflow_error_leaves_the_written_prefix_readable():
         source = TreeDataSource(tmpdir)
         assert len(source) == 2
         np.testing.assert_array_equal(source[1]["x"].ravel(), [1.0, 1.0, 1.0])
+        source.close()
 
 
 def test_overflow_grows_by_default():
@@ -321,6 +322,7 @@ def test_overflow_grows_by_default():
                 np.testing.assert_array_equal(
                     source[i * 4 + j]["x"].ravel(), [float(i)] * 3
                 )
+        source.close()
 
 
 def test_grow_preserves_data_across_several_leaves():
@@ -347,6 +349,7 @@ def test_grow_preserves_data_across_several_leaves():
             np.testing.assert_array_equal(sample["a"].ravel(), [i, i])
             np.testing.assert_array_equal(sample["b"].waveform.ravel(), [float(i)] * 5)
         assert source[0]["b"].sample_rate == 16000
+        source.close()
 
 
 def test_grow_from_a_zero_sample_allocation():
@@ -360,6 +363,7 @@ def test_grow_from_a_zero_sample_allocation():
         source = TreeDataSource(tmpdir)
         assert len(source) == 2
         np.testing.assert_array_equal(source[1]["x"].ravel(), [7.0] * 3)
+        source.close()
 
 
 @requires_bagz
@@ -376,6 +380,7 @@ def test_grow_keeps_string_leaves_aligned():
         assert len(source) == 6
         assert [source[i]["s"] for i in range(6)] == list("abcdef")
         np.testing.assert_array_equal(source[5]["x"].ravel(), [2.0, 2.0])
+        source.close()
 
 
 def test_grown_dataset_is_readable_before_close():
@@ -431,6 +436,7 @@ def test_failed_grow_keeps_the_prefix_and_refuses_further_writes(monkeypatch):
         assert len(source) == 2
         np.testing.assert_array_equal(source[1]["x"].ravel(), [1.0] * 3)
         np.testing.assert_array_equal(source[1]["y"].ravel(), [2.0] * 3)
+        source.close()
 
 
 def test_get_stats_reports_the_grown_allocation():
@@ -746,6 +752,7 @@ def test_write_accepts_identical_structure():
         source = TreeDataSource(tmpdir)
         assert len(source) == 4
         np.testing.assert_array_equal(source[2]["a"].ravel(), [9.0, 9.0, 9.0])
+        source.close()
 
 
 def test_manifest_is_readable_before_close():
@@ -775,6 +782,7 @@ def test_manifest_is_readable_before_close():
 
         writer.close()
         assert len(TreeDataSource(tmpdir)) == 50
+        source.close()
 
 
 def test_writer_refuses_to_clobber_an_existing_dataset():
@@ -811,6 +819,7 @@ def test_non_native_endian_leaf_round_trips():
 
         source = TreeDataSource(tmpdir)
         np.testing.assert_array_equal(source[1]["x"].ravel(), [2.0, 3.0])
+        source.close()
 
 
 def test_unreadable_dtype_fails_on_the_first_write():

@@ -50,6 +50,7 @@ def test_round_trip_audiotree():
             )
             np.testing.assert_array_almost_equal(sample.lufs[0], loudness[i], decimal=5)
             assert sample.pitch is None
+        source.close()
 
 
 def test_round_trip_audiotree_with_metadata():
@@ -74,6 +75,7 @@ def test_round_trip_audiotree_with_metadata():
             np.testing.assert_array_almost_equal(
                 sample.metadata["mel"][0], mel[i], decimal=5
             )
+        source.close()
 
 
 def test_round_trip_nested_metadata():
@@ -104,6 +106,7 @@ def test_round_trip_nested_metadata():
         np.testing.assert_array_almost_equal(
             sample.metadata["features"]["mfcc"][0], mfcc[0], decimal=5
         )
+        source.close()
 
 
 def test_round_trip_dict_of_audiotrees():
@@ -132,6 +135,7 @@ def test_round_trip_dict_of_audiotrees():
         np.testing.assert_array_almost_equal(
             sample["wet"].waveform[0], wet_audio[0], decimal=5
         )
+        source.close()
 
 
 def test_round_trip_plain_dict():
@@ -152,6 +156,7 @@ def test_round_trip_plain_dict():
             assert isinstance(sample, dict)
             np.testing.assert_array_almost_equal(sample["x"][0], x[i], decimal=5)
             assert sample["y"][0] == y[i]
+        source.close()
 
 
 def test_round_trip_multiple_writes():
@@ -181,6 +186,7 @@ def test_round_trip_multiple_writes():
             np.testing.assert_array_almost_equal(
                 sample.waveform[0], audio2[i], decimal=5
             )
+        source.close()
 
 
 # === Missing manifest ===
@@ -215,6 +221,7 @@ def test_index_out_of_range():
 
         with pytest.raises(IndexError):
             _ = source[-1]
+        source.close()
 
 
 def test_rejects_headerless_manifest():
@@ -281,6 +288,7 @@ def test_get_metadata():
         meta = source.get_metadata()
         assert meta["description"] == "test"
         assert meta["version"] == 1
+        source.close()
 
 
 # === Empty/minimal structures ===
@@ -303,6 +311,7 @@ def test_empty_metadata_round_trip():
         sample = source[0]
         assert isinstance(sample, AudioTree)
         assert sample.metadata == {}
+        source.close()
 
 
 def test_none_fields_default():
@@ -324,6 +333,7 @@ def test_none_fields_default():
         assert sample.lufs is None
         assert sample.codes is None
         assert sample.latents is None
+        source.close()
 
 
 # === String leaf round-trip tests ===
@@ -356,6 +366,7 @@ def test_round_trip_string_list_with_audiotree():
             np.testing.assert_array_almost_equal(
                 sample["wet"].waveform[0], audio[i], decimal=5
             )
+        source.close()
 
 
 @requires_bagz
@@ -380,6 +391,7 @@ def test_round_trip_multiple_string_leaves():
         s1 = source[1]
         assert s1["labels"] == "dog"
         assert s1["sources"] == "val"
+        source.close()
 
 
 @requires_bagz
@@ -398,6 +410,7 @@ def test_round_trip_single_string():
         source = TreeDataSource(output_dir)
         sample = source[0]
         assert sample["label"] == "cat"
+        source.close()
 
 
 @requires_bagz
@@ -411,6 +424,7 @@ def test_round_trip_long_strings():
 
         source = TreeDataSource(output_dir)
         assert source[0]["s"] == long_str
+        source.close()
 
 
 @requires_bagz
@@ -429,6 +443,7 @@ def test_round_trip_empty_string():
         source = TreeDataSource(output_dir)
         assert source[0]["s"] == ""
         assert source[1]["s"] == "hello"
+        source.close()
 
 
 @requires_bagz
@@ -443,6 +458,7 @@ def test_round_trip_unicode_strings():
         source = TreeDataSource(output_dir)
         for i, expected in enumerate(strings):
             assert source[i]["s"] == expected
+        source.close()
 
 
 @requires_bagz
@@ -470,6 +486,7 @@ def test_round_trip_strings_multiple_writes():
         assert source[2]["s"] == "c"
         assert source[3]["s"] == "d"
         assert source[4]["s"] == "e"
+        source.close()
 
 
 @requires_bagz
@@ -497,6 +514,7 @@ def test_batch_with_strings():
         assert batched["strings"] == ["a", "b", "c", "d"]
         assert isinstance(batched["wet"], AudioTree)
         assert batched["wet"].waveform.shape == (4, 1, 100)
+        source.close()
 
 
 def test_backward_compat_no_string_leaves():
@@ -524,6 +542,7 @@ def test_backward_compat_no_string_leaves():
         source = TreeDataSource(output_dir)
         sample = source[0]
         assert isinstance(sample, AudioTree)
+        source.close()
 
 
 # === Grain integration ===
@@ -551,6 +570,7 @@ def test_grain_protocol():
         # Iteration via indexing
         items = [source[i] for i in range(5)]
         assert len(items) == 5
+        source.close()
 
 
 # === exclude_prefixes ===
@@ -582,6 +602,7 @@ def test_exclude_audio_data():
         np.testing.assert_array_almost_equal(
             sample["dry"].waveform[0], dry_audio[0], decimal=5
         )
+        source.close()
 
 
 def test_exclude_metadata_field():
@@ -607,6 +628,7 @@ def test_exclude_metadata_field():
         np.testing.assert_array_almost_equal(
             sample.metadata["mfcc"][0], mfcc[0], decimal=5
         )
+        source.close()
 
 
 @requires_bagz
@@ -627,6 +649,7 @@ def test_exclude_string_leaf():
 
         assert "label" not in sample
         assert "x" in sample
+        source.close()
 
 
 def test_exclude_prefix_with_subtree():
@@ -654,6 +677,7 @@ def test_exclude_prefix_with_subtree():
         assert sample["dry"].metadata == {}
         # wet is untouched
         assert sample["wet"].waveform is not None
+        source.close()
 
 
 def test_exclude_pickle_roundtrip():
@@ -681,6 +705,7 @@ def test_exclude_pickle_roundtrip():
         np.testing.assert_array_almost_equal(
             sample.metadata["mel"][0], mel[0], decimal=5
         )
+        source.close()
 
 
 def test_exclude_empty_default():
@@ -700,6 +725,7 @@ def test_exclude_empty_default():
             s1 = source_default[i]
             s2 = source_empty[i]
             np.testing.assert_array_equal(s1.waveform, s2.waveform)
+        source_default.close()
 
 
 # === load_into_memory ===
@@ -726,6 +752,7 @@ def test_load_into_memory_matches_lazy():
             np.testing.assert_array_equal(
                 s_lazy.metadata["mel"], s_eager.metadata["mel"]
             )
+        lazy.close()
 
 
 def test_load_into_memory_with_exclude():
@@ -750,6 +777,7 @@ def test_load_into_memory_with_exclude():
         np.testing.assert_array_almost_equal(
             sample.metadata["mel"][0], mel[0], decimal=5
         )
+        source.close()
 
 
 @requires_bagz
@@ -769,6 +797,7 @@ def test_load_into_memory_with_strings():
         assert source[0]["label"] == "cat"
         assert source[1]["label"] == "dog"
         assert source[2]["label"] == "bird"
+        source.close()
 
 
 def test_load_into_memory_pickle_roundtrip():
@@ -788,6 +817,7 @@ def test_load_into_memory_pickle_roundtrip():
 
         sample = restored[0]
         np.testing.assert_array_almost_equal(sample.waveform[0], audio[0], decimal=5)
+        source.close()
 
 
 def test_excluding_string_leaves_works_without_bagz(tmp_path, monkeypatch):
@@ -837,6 +867,7 @@ def test_excluding_string_leaves_works_without_bagz(tmp_path, monkeypatch):
     sample = source[0]
     assert sample["audio"].waveform.shape == (1, 1, 16)
     assert "caption" not in sample
+    source.close()
 
 
 def test_manifest_json_is_utf8_regardless_of_locale(tmp_path, monkeypatch):
@@ -896,6 +927,7 @@ def test_leaf_memmaps_are_held_open_and_reused(tmp_path):
     for i in range(1, 64):
         source[i]
     assert {name: id(mm) for name, mm in source._leaf_memmaps.items()} == first
+    source.close()
 
 
 def test_held_memmap_is_not_aliased_by_returned_samples(tmp_path):
@@ -906,6 +938,7 @@ def test_held_memmap_is_not_aliased_by_returned_samples(tmp_path):
 
     tree["waveform"][:] = -1.0
     assert source[3]["waveform"].max() > 0  # the dataset is untouched
+    source.close()
 
 
 def test_concurrent_first_reads_are_consistent(tmp_path):
@@ -929,6 +962,7 @@ def test_concurrent_first_reads_are_consistent(tmp_path):
     for i, tree in enumerate(trees):
         assert set(tree) == {"waveform", "lufs"}, f"sample {i} lost a leaf"
         assert tree["lufs"][0] == float(i)
+    source.close()
 
 
 def test_source_survives_a_pickle_round_trip(tmp_path):
@@ -948,6 +982,7 @@ def test_source_survives_a_pickle_round_trip(tmp_path):
     assert not revived._data_files_opened
     np.testing.assert_array_equal(revived[5]["waveform"], expected)
     assert revived._leaf_memmaps  # rebuilt on demand
+    source.close()
 
 
 # === Manifest size validation ===
@@ -1041,6 +1076,7 @@ def test_in_progress_dataset_is_readable_after_flush(tmp_path):
         source = TreeDataSource(data_dir)
         assert len(source) == 8
         np.testing.assert_array_equal(source[7]["x"], np.full((1, 4), 7.0, np.float32))
+        source.close()
     finally:
         writer.close()
 
@@ -1065,6 +1101,7 @@ def test_in_memory_samples_do_not_alias_the_shared_store(tmp_path):
 
     tree["waveform"][:] = -1.0
     assert source[3]["waveform"].max() > 0  # the store is untouched
+    source.close()
 
 
 class _StubBagzWriter:
@@ -1167,3 +1204,44 @@ def test_in_memory_source_reads_in_a_real_spawned_worker(tmp_path, stub_bagz):
         assert queue.get(timeout=120) == {"label": "dog"}
     finally:
         process.join(timeout=120)
+
+
+def test_close_releases_the_mappings(tmp_path):
+    """A held memmap makes the dataset undeletable on Windows.
+
+    POSIX lets you unlink an open mapped file, so the leak is invisible here --
+    which is exactly why it reached CI and failed 41 Windows tests with
+    ``PermissionError: [WinError 32]``. This asserts the release directly rather
+    than via a deletion that always succeeds on this platform.
+    """
+    directory = _tiny_dataset(tmp_path / "ds")
+    source = TreeDataSource(directory=directory)
+    source[0]
+    assert source._leaf_memmaps, "expected the read to open and hold mappings"
+
+    source.close()
+    assert source._leaf_memmaps == {}
+    assert source._bagz_readers == {}
+    assert not source._data_files_opened
+
+
+def test_close_is_a_release_not_a_teardown(tmp_path):
+    """Reading after close() reopens, so close() is safe to call early."""
+    source = TreeDataSource(directory=_tiny_dataset(tmp_path / "ds"))
+    expected = source[2]["waveform"]
+    source.close()
+
+    np.testing.assert_array_equal(source[2]["waveform"], expected)
+    assert source._leaf_memmaps, "reopened on demand"
+    source.close()
+    source.close()  # idempotent
+
+
+def test_context_manager_scopes_the_handles(tmp_path):
+    """The tidier spelling, and the one the docstring points at."""
+    directory = _tiny_dataset(tmp_path / "ds")
+    with TreeDataSource(directory=directory) as source:
+        assert len(source) == 64
+        source[0]
+        assert source._leaf_memmaps
+    assert source._leaf_memmaps == {}

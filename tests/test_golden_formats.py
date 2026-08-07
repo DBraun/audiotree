@@ -85,6 +85,7 @@ def test_golden_tree_reads_with_expected_values():
         )
         np.testing.assert_array_equal(sample["label"].ravel(), [index])
         assert sample["label"].dtype == np.int32
+    source.close()
 
 
 def test_golden_tree_exclude_prefixes():
@@ -93,6 +94,7 @@ def test_golden_tree_exclude_prefixes():
     sample = source[0]
     assert "label" not in sample
     assert sample["audio"].waveform.shape == (1, 1, 8)
+    source.close()
 
 
 # === AudioWriter manifest format ===

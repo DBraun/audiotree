@@ -432,12 +432,17 @@ class TreeWriter:
             }
 
             full_shape = (self._allocated_samples,) + shape_per_sample
-            mm = np.memmap(
-                path,
-                dtype=dtype,
-                mode="w+",
-                shape=full_shape,
-            )
+            # Size the file first, then map it read-write. `mode="w+"` would do
+            # both, but it cannot create a zero-byte mapping -- and
+            # `expected_samples=0` is legal when the writer may grow. numpy 2.2+
+            # pads such a file to one byte itself; the declared floor (2.1.3)
+            # hands `mmap` a length of 0 and gets "cannot mmap an empty file",
+            # so only the lowest-direct CI leg ever saw it. Same `max(..., 1)`
+            # the grow path already applies.
+            nbytes = int(np.prod(full_shape, dtype=np.int64)) * dtype.itemsize
+            with open(path, "wb") as fh:
+                fh.truncate(max(nbytes, 1))
+            mm = np.memmap(path, dtype=dtype, mode="r+", shape=full_shape)
             self._memmaps.append(mm)
 
         # Create bagz writers for string leaves

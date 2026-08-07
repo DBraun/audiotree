@@ -276,6 +276,25 @@ actually train on. Two knobs keep such datasets cheap:
    the arrays it reads, exactly as the memmap path does, so nothing downstream
    aliases the shared store.
 
+.. note::
+   ``TreeDataSource`` keeps one memmap per leaf open for the life of the process
+   — that is what makes random reads fast — and a mapped file cannot be deleted,
+   moved, or replaced **on Windows** while it is open. For a training run that
+   never matters, but if you render a dataset, read it, and then clean it up in
+   the same process, release the handles first:
+
+   .. skip-snippet-exec: fragment; "dataset/" is illustrative.
+
+   .. code-block:: python
+
+       with TreeDataSource("dataset/") as ds:
+           tree = ds[0]
+       # handles released here, so the directory can now be removed
+
+   :meth:`~audiotree.sources.TreeDataSource.close` does the same without the
+   ``with``. It is a release rather than a teardown: reading again reopens
+   transparently, and calling it twice is fine.
+
 ----
 
 AudioWriter
