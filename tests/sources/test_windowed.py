@@ -415,6 +415,41 @@ def test_bagz_cache_round_trip():
             np.testing.assert_array_equal(cache.lufs[fp], ref[fp])
 
 
+def test_save_window_lufs_temp_file_keeps_bagz_extension(tmp_path, monkeypatch):
+    # bagz selects compression from the file extension, so the atomic-write
+    # temp file must end in ".bagz" — a ".tmp" suffix would write uncompressed
+    # records that the renamed lufs.bagz then fails to decompress. Stubbed so
+    # the contract is enforced even where bagz has no wheel (macOS, Windows).
+    import audiotree.sources.windowed as windowed_mod
+
+    writer_paths = []
+
+    class FakeWriter:
+        def __init__(self, path):
+            writer_paths.append(Path(path))
+            self._f = open(path, "wb")
+
+        def write(self, record):
+            self._f.write(record)
+
+        def close(self):
+            self._f.close()
+
+    class FakeBagz:
+        Writer = FakeWriter
+
+    monkeypatch.setattr(windowed_mod, "require_bagz", lambda purpose: FakeBagz)
+
+    out = save_window_lufs(
+        tmp_path / "c",
+        {"x.wav": np.array([-14.0], np.float32)},
+        lufs_window_sec=1.0,
+    )
+    assert writer_paths and all(p.suffix == ".bagz" for p in writer_paths)
+    assert (out / "lufs.bagz").exists()
+    assert [p.name for p in out.iterdir() if p.name.startswith(".")] == []
+
+
 @requires_bagz
 def test_save_window_lufs_handles_empty_arrays():
     with tempfile.TemporaryDirectory() as tmp:

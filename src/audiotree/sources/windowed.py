@@ -258,9 +258,12 @@ def save_window_lufs(
 
     # Write to a temp file and rename into place (mirroring write_json_atomic)
     # so a failed write can't leave a partial lufs.bagz paired with the manifest,
-    # and always close the writer even if a record raises.
+    # and always close the writer even if a record raises. bagz selects
+    # compression from the file extension, so the temp name must keep ".bagz"
+    # or the renamed file would hold uncompressed records under a name readers
+    # decompress.
     bagz_path = out_dir / _LUFS_BAGZ
-    tmp_bagz = bagz_path.with_name(f".{bagz_path.name}.tmp")
+    tmp_bagz = bagz_path.with_name(f".{bagz_path.stem}.tmp{bagz_path.suffix}")
     writer = require_bagz("writing windowed-LUFS caches").Writer(str(tmp_bagz))
     try:
         for fp in filepaths:

@@ -1016,6 +1016,9 @@ def test_write_failure_mid_commit_poisons_the_writer():
             writer.write({"a": _f32(5.0), "b": _f32(6.0)})
 
         writer._memmaps[1] = real  # let close() finalize the readable prefix
+        # close() releases memmaps by dropping references; shed ours too, or an
+        # alive memmap blocks the tempdir unlink on Windows (WinError 32).
+        del real
         writer.close()
 
 
