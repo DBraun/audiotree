@@ -1,5 +1,6 @@
 """AudioWriter class for writing AudioTree objects to disk with manifest support."""
 
+import string
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -46,6 +47,25 @@ def _widest_subtype(suffix: str) -> Optional[str]:
         if soundfile.check_format(fmt, candidate):
             return candidate
     return soundfile.default_subtype(fmt)
+
+
+def _pattern_has_index(pattern: str) -> bool:
+    """Whether ``pattern`` has an ``{index}`` replacement field.
+
+    ``str.format`` silently ignores kwargs a pattern does not reference, so a
+    pattern lacking ``{index}`` formats to the *same* filename for every item --
+    each write clobbering the last. Detect that by parsing the pattern's fields
+    rather than trusting ``.format`` to complain.
+    """
+    for _, field_name, _, _ in string.Formatter().parse(pattern):
+        if field_name is None:
+            continue
+        # Field names may be dotted/indexed (``index[0]``); the root is what
+        # ``.format(index=...)`` binds.
+        root = field_name.split(".")[0].split("[")[0]
+        if root == "index":
+            return True
+    return False
 
 
 def _column_value(name: str, value: Any, batch_index: int) -> Any:
@@ -183,6 +203,18 @@ class AudioWriter:
         if not exist_ok:
             refuse_to_clobber(self.directory, ("manifest.npz", "manifest.json"))
         self.exist_ok = exist_ok
+        # Without an {index} field the pattern formats to one filename for the
+        # whole run, so every item would overwrite the last on disk while the
+        # manifest still recorded a distinct row per (lost) item. A manifest-only
+        # run writes no audio, so the filename is a bookkeeping label there and
+        # need not be unique.
+        if write_audio and not _pattern_has_index(pattern):
+            raise ValueError(
+                f"pattern {pattern!r} has no '{{index}}' field, so every item "
+                f"would be written to the same file and all but the last lost. "
+                f"Include '{{index}}' (e.g. 'audio_{{index:04d}}.wav') so each "
+                f"item gets a unique filename."
+            )
         self.pattern = pattern
         # Inferred from the first written tree; every later write must match it.
         self.sample_rate = None
@@ -195,6 +227,10 @@ class AudioWriter:
         self.written_paths = []
         self.manifest_data = []
         self._expected_fields = None  # Track which AudioTree fields should be present
+        # The metadata-column schema (which metadata_* columns, and whether a
+        # filepath column) is fixed by the first write; later writes must match.
+        self._expected_metadata_keys = None
+        self._expected_has_filepath = None
         self.manifest_every = manifest_every
         self._manifest_index = 0  # self.index as of the last manifest write
 
@@ -233,6 +269,27 @@ class AudioWriter:
             if getattr(tree, field_name, None) is not None:
                 present.add(field_name)
         return present
+
+    def _get_metadata_column_keys(self, tree: AudioTree) -> set:
+        """The metadata keys that become ``metadata_*`` manifest columns.
+
+        Mirrors the column-selection logic in :meth:`_create_manifest_entry`:
+        internal keys are skipped, and nested dicts have no column representation.
+
+        Args:
+            tree: AudioTree to inspect
+
+        Returns:
+            Set of metadata keys that will be written as columns
+        """
+        keys = set()
+        for key, value in tree.metadata.items():
+            if key in _SKIPPED_METADATA_KEYS:
+                continue
+            if isinstance(value, dict):
+                continue
+            keys.add(key)
+        return keys
 
     def write(self, tree: AudioTree, tags: Optional[Dict] = None) -> List[Path]:
         """Write all items in an AudioTree batch to disk.
@@ -288,7 +345,56 @@ class AudioWriter:
                     f"All AudioTrees written to the same manifest must have consistent fields."
                 )
 
+        # Validate the metadata-column schema eagerly, exactly as LABEL_FIELDS
+        # are validated above. A metadata key present on some writes and absent
+        # on others cannot be stored as one column; caught here, the drifting
+        # write fails at its own call -- before its WAVs land -- rather than at
+        # the next save/close, which would abort with the manifest unwritten.
+        metadata_keys = self._get_metadata_column_keys(tree)
+        has_filepath = bool(tree.filepath)
+        if self._expected_metadata_keys is None:
+            self._expected_metadata_keys = metadata_keys
+            self._expected_has_filepath = has_filepath
+        else:
+            if metadata_keys != self._expected_metadata_keys:
+                missing = self._expected_metadata_keys - metadata_keys
+                extra = metadata_keys - self._expected_metadata_keys
+                error_parts = []
+                if missing:
+                    error_parts.append(
+                        f"missing keys: {sorted('metadata_' + k for k in missing)}"
+                    )
+                if extra:
+                    error_parts.append(
+                        f"extra keys: {sorted('metadata_' + k for k in extra)}"
+                    )
+                raise ValueError(
+                    f"AudioTree metadata keys don't match previous writes. "
+                    f"{', '.join(error_parts)}. "
+                    f"All AudioTrees written to the same manifest must carry the "
+                    f"same metadata keys."
+                )
+            if has_filepath != self._expected_has_filepath:
+                had = "had" if self._expected_has_filepath else "had no"
+                now = "has" if has_filepath else "has no"
+                raise ValueError(
+                    f"AudioTree 'filepath' presence doesn't match previous writes: "
+                    f"the first write {had} filepaths but this one {now}. The "
+                    f"'filepath' column must cover every entry or none."
+                )
+
         batch_size = tree.waveform.shape[0]
+
+        # A filepath list shorter than the batch would populate the 'filepath'
+        # column for only some items in this very write, producing a ragged
+        # column. Reject it here rather than at save time, with the WAVs unwritten.
+        filepaths = tree.filepath
+        if filepaths and len(filepaths) < batch_size:
+            raise ValueError(
+                f"AudioTree has {len(filepaths)} filepaths for a batch of "
+                f"{batch_size}; the 'filepath' column would cover only part of "
+                f"this write. Provide one filepath per item, or none."
+            )
         paths = []
         # (filename, peak, subtype) for every item this write clips.
         clipped: List[Tuple[str, float, Optional[str]]] = []

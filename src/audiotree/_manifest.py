@@ -81,6 +81,29 @@ class ManifestColumns(NamedTuple):
         return True if mask is None else bool(mask[row])
 
 
+def _scalar_kind(value: Any) -> str:
+    """The logical type of a scalar manifest value, for homogeneity checks.
+
+    A column stores one logical type: ``bool`` is distinct from ``int`` (``True``
+    is an ``int`` in Python, but a bool column stores booleans) and ``int`` is
+    distinct from ``float`` (an int column cannot hold a float without truncating
+    it). A numpy scalar reports the kind of its dtype, so an ``int16`` and an
+    ``int32`` both count as ``"int"`` -- differing widths are legitimate within a
+    column, differing kinds are not.
+    """
+    if isinstance(value, (bool, np.bool_)):
+        return "bool"
+    if isinstance(value, np.generic):
+        return {"i": "int", "u": "int", "f": "float"}.get(
+            value.dtype.kind, value.dtype.kind
+        )
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    return type(value).__name__
+
+
 def _encode_column(
     name: str, values: Sequence[Any]
 ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
@@ -119,14 +142,42 @@ def _encode_column(
                 f"{type(next(v for v in provided if not isinstance(v, str))).__name__} "
                 f"values. A column must hold one type."
             )
+        offender = next((value for value in provided if value.endswith("\x00")), None)
+        if offender is not None:
+            raise ValueError(
+                f"Manifest column {name!r} holds a string ending in a NUL "
+                f"character ({offender!r}). NumPy fixed-width '<U' storage cannot "
+                f"tell a trailing NUL from padding, so it is dropped on read and "
+                f"the value would not round-trip; store it without a trailing NUL."
+            )
         filled = [value if value is not None else "" for value in values]
         return np.array(filled, dtype=np.str_), mask
 
     if isinstance(sample, bytes):
+        if not all(isinstance(value, bytes) for value in provided):
+            raise ValueError(
+                f"Manifest column {name!r} mixes bytes with "
+                f"{type(next(v for v in provided if not isinstance(v, bytes))).__name__} "
+                f"values. A column must hold one type."
+            )
+        offender = next((value for value in provided if value.endswith(b"\x00")), None)
+        if offender is not None:
+            raise ValueError(
+                f"Manifest column {name!r} holds a bytes value ending in a NUL "
+                f"byte ({offender!r}). NumPy fixed-width '|S' storage cannot tell "
+                f"a trailing NUL from padding, so it is dropped on read and the "
+                f"value would not round-trip; store it without a trailing NUL."
+            )
         filled = [value if value is not None else b"" for value in values]
         return np.array(filled, dtype=np.bytes_), mask
 
     if isinstance(sample, (bool, np.bool_)):
+        offender = next((v for v in provided if _scalar_kind(v) != "bool"), None)
+        if offender is not None:
+            raise ValueError(
+                f"Manifest column {name!r} mixes bool values with "
+                f"{type(offender).__name__} values. A column must hold one type."
+            )
         filled = [bool(value) if value is not None else False for value in values]
         return np.array(filled, dtype=bool), mask
 
@@ -148,6 +199,13 @@ def _encode_column(
         return stacked, mask
 
     if isinstance(sample, (np.generic, int, float)):
+        kind = _scalar_kind(sample)
+        offender = next((v for v in provided if _scalar_kind(v) != kind), None)
+        if offender is not None:
+            raise ValueError(
+                f"Manifest column {name!r} mixes {kind} values with "
+                f"{type(offender).__name__} values. A column must hold one type."
+            )
         if isinstance(sample, np.generic):
             # A numpy scalar carries its own width; keep it (an int16 velocity
             # stays int16). A bare Python int/float has no width, so widen to
@@ -192,6 +250,13 @@ def encode(
                 f"Manifest column {name!r} uses a reserved prefix "
                 f"({MASK_PREFIX!r} marks presence masks and "
                 f"{_format.NPZ_HEADER_PREFIX!r} marks the format header)."
+            )
+        if name == "tags":
+            raise ValueError(
+                f"Manifest column name 'tags' is reserved: read_entries "
+                f"synthesizes the 'tags' key from the {TAG_PREFIX!r} columns, so a "
+                f"data column named 'tags' would be clobbered. Store the value "
+                f"under a '{TAG_PREFIX}...' name (or a different column name)."
             )
         if len(values) != num_entries:
             raise ValueError(

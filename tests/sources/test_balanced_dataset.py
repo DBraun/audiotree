@@ -586,6 +586,34 @@ class TestBalancedDatasetValidation:
                     duration=0.5,
                 )
 
+    def test_group_name_in_both_sources_and_datasets_raises(self):
+        """A name in both `sources` and `datasets` silently doubled its share.
+
+        Each build loop appends a dataset and looks up the same
+        ``weights.get(name)``, so a colliding name produced two parents at one
+        weight -- doubling its effective proportion. The unknown-weight-key
+        check can't catch it (the key *is* known), so it needs its own guard.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from audiotree.sources import create_audio_dataset
+
+            music_dir = _create_test_audio_files(tmpdir, "music", 4)
+            prebuilt = create_audio_dataset(
+                sources=music_dir,
+                num_epochs=None,
+                sample_rate=44100,
+                duration=0.5,
+            )
+
+            with pytest.raises(ValueError, match="music"):
+                create_balanced_audio_dataset(
+                    sources={"music": [music_dir]},
+                    datasets={"music": prebuilt},
+                    weights={"music": 0.3},
+                    sample_rate=44100,
+                    duration=0.5,
+                )
+
     def test_empty_sources_raises(self):
         """An empty mapping used to die inside grain with `min() iterable argument is empty`."""
         with pytest.raises(ValueError, match="No groups to mix"):

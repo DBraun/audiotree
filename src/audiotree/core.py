@@ -581,17 +581,27 @@ class AudioTree:
         # instead of only item 0 carrying it.
         batch_size = _leading_axis_size(waveform, codes, latents)
 
-        def _encode_provenance(value):
+        def _encode_provenance(field, value):
             encoded = cls._encode_filepaths(value)
-            if isinstance(value, (str, Path)) and batch_size is not None:
-                encoded = np.repeat(encoded, batch_size, axis=0)
+            if isinstance(value, (str, Path)):
+                if batch_size is not None:
+                    encoded = np.repeat(encoded, batch_size, axis=0)
+            elif batch_size is not None and len(encoded) != batch_size:
+                # A list encodes one row per item, so a wrong-length list would
+                # silently misalign provenance with the batch -- fewer (or more)
+                # strings than items. Same failure the rank-4 guard rejects.
+                raise ValueError(
+                    f"AudioTree.create got {len(encoded)} {field} for a batch of "
+                    f"{batch_size}. Pass a single value to tag the whole batch, "
+                    f"or a list with one per batch item."
+                )
             return encoded
 
         if filepath is not None:
-            metadata["filepath"] = _encode_provenance(filepath)
+            metadata["filepath"] = _encode_provenance("filepath", filepath)
 
         if source is not None:
-            metadata["source"] = _encode_provenance(source)
+            metadata["source"] = _encode_provenance("source", source)
 
         return cls(
             waveform=waveform,
@@ -1872,7 +1882,7 @@ class AudioTree:
             >>> split_trees[0].waveform.shape  # each tree has half the original batch size
             (6, 1, 44100)
         """
-        total_batch_size = self.waveform.shape[0]
+        total_batch_size = self.batch_size
         if total_batch_size % n_splits != 0:
             raise ValueError(
                 f"Total batch size {total_batch_size} must be divisible by the "
@@ -1921,7 +1931,7 @@ class AudioTree:
             (4, 3, 1, 44100)
         """
         _require_batched_rank(self.waveform, "reshape_mini_batches")
-        B = self.waveform.shape[0]
+        B = self.batch_size
 
         if B % mini_batch_size != 0:
             raise ValueError(
@@ -1969,8 +1979,10 @@ class AudioTree:
         # Assuming the waveform has shape (num_mini_batches, mini_batch_size, C, T)
         # We want to reshape to (num_mini_batches * mini_batch_size, C, T)
 
-        # Get the current shape
-        shape = self.waveform.shape
+        # Read the rank from whichever leaf is present (waveform first, then
+        # codes / latents for a token-only tree).
+        leaf = next(self._array_leaves(), None)
+        shape = () if leaf is None else leaf.shape
 
         # We expect at least 4 dimensions for mini-batched data
         if len(shape) < 4:
@@ -2017,7 +2029,7 @@ class AudioTree:
             1
         """
         _require_batched_rank(self.waveform, "AudioTree.filter")
-        B = self.waveform.shape[0]
+        B = self.batch_size
         audio_trees = [tree for tree in self.split(B) if predicate(tree)]
 
         if len(audio_trees) == 0:

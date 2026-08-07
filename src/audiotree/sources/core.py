@@ -400,9 +400,7 @@ def _derive_seed_pair(base_seed: int) -> tuple[int, int]:
     Returns:
         ``(shuffle_seed, excerpt_seed)``, each in ``[0, 2**31)``.
     """
-    state = np.random.SeedSequence(int(base_seed) & 0xFFFFFFFF).generate_state(
-        2, dtype=np.uint32
-    )
+    state = np.random.SeedSequence(int(base_seed)).generate_state(2, dtype=np.uint32)
     return int(state[0]) & 0x7FFFFFFF, int(state[1]) & 0x7FFFFFFF
 
 
@@ -658,7 +656,7 @@ def _derive_group_seed(base_seed: int, group_name: str, role: str) -> int:
         A seed in ``[0, 2**31)``.
     """
     entropy = [
-        int(base_seed) & 0xFFFFFFFF,
+        int(base_seed),
         zlib.crc32(group_name.encode("utf-8")),
         zlib.crc32(role.encode("utf-8")),
     ]
@@ -882,6 +880,15 @@ def create_balanced_audio_dataset(
 
     if duration is None:
         duration = 1.0
+
+    collisions = sorted(set(sources or {}) & set(datasets or {}))
+    if collisions:
+        raise ValueError(
+            f"Group name(s) appear in both `sources` and `datasets`: {collisions}. "
+            "Each group name must be unique across the two; a name in both would "
+            "build two separate datasets sharing one weight, doubling that group's "
+            "effective proportion."
+        )
 
     group_names = list(sources or {}) + list(datasets or {})
     if weights is not None:

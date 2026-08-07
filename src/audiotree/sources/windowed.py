@@ -24,6 +24,7 @@ windows never run past end-of-file -- clamping is built into the tiling.
 import functools
 import json
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Literal, Mapping, Optional
@@ -148,8 +149,8 @@ def precompute_window_lufs(
     kernel :meth:`AudioTree.replace_lufs` uses for NumPy waveforms). This is a
     one-time offline pass that runs entirely on the CPU -- it performs no
     JAX/GPU computation -- so it is safe to run before forking grain workers and
-    keeps the data-source layer free of GPU work. For large corpora it
-    parallelizes across files with a process pool.
+    keeps the data-source layer free of GPU work. Files are processed serially in
+    a single pass; there is no cross-file parallelism.
 
     The arrays are **ragged** (length scales with file duration); files shorter
     than one window get an empty array, which downstream filtering treats as
@@ -255,12 +256,18 @@ def save_window_lufs(
     out_dir.mkdir(parents=True, exist_ok=True)
     filepaths = list(lufs_per_file.keys())
 
-    writer = require_bagz("writing windowed-LUFS caches").Writer(
-        str(out_dir / _LUFS_BAGZ)
-    )
-    for fp in filepaths:
-        writer.write(np.asarray(lufs_per_file[fp], dtype=np.float32).tobytes())
-    writer.close()
+    # Write to a temp file and rename into place (mirroring write_json_atomic)
+    # so a failed write can't leave a partial lufs.bagz paired with the manifest,
+    # and always close the writer even if a record raises.
+    bagz_path = out_dir / _LUFS_BAGZ
+    tmp_bagz = bagz_path.with_name(f".{bagz_path.name}.tmp")
+    writer = require_bagz("writing windowed-LUFS caches").Writer(str(tmp_bagz))
+    try:
+        for fp in filepaths:
+            writer.write(np.asarray(lufs_per_file[fp], dtype=np.float32).tobytes())
+    finally:
+        writer.close()
+    os.replace(tmp_bagz, bagz_path)
 
     manifest = {
         **_format.header(_format.LUFS_WINDOWS_CACHE),
@@ -556,6 +563,10 @@ def create_windowed_audio_dataset(
     Returns:
         A grain.MapDataset over audio windows.
     """
+    # Validate duration before hop defaults from it, so a duration=0 mistake is
+    # reported as a duration error rather than being blamed on hop below.
+    if duration <= 0:
+        raise ValueError(f"duration must be positive, got {duration}.")
     if hop is None:
         hop = duration
     num_epochs = _validate_num_epochs(num_epochs)
@@ -614,11 +625,16 @@ def create_windowed_audio_dataset(
         if durations is None:
             durations = cache.durations
 
-    if lufs_per_file is not None and lufs_window_sec is None:
-        raise ValueError(
-            "lufs_window_sec is required when lufs_per_file is provided "
-            "without a lufs_cache."
-        )
+    if lufs_per_file is not None:
+        if lufs_window_sec is None:
+            raise ValueError(
+                "lufs_window_sec is required when lufs_per_file is provided "
+                "without a lufs_cache."
+            )
+        if lufs_window_sec <= 0:
+            raise ValueError(
+                f"lufs_window_sec must be positive, got {lufs_window_sec}."
+            )
 
     if durations is None:
         durations = scan_durations(filepaths)
@@ -630,8 +646,9 @@ def create_windowed_audio_dataset(
         hop=hop,
         alpha=alpha,
         lufs_per_file=lufs_per_file,
-        # Unused when lufs_per_file is None; coalesce to keep arithmetic valid.
-        lufs_window_sec=lufs_window_sec if lufs_window_sec else 1.0,
+        # Unused when lufs_per_file is None; a placeholder keeps arithmetic valid.
+        # Validated positive above whenever filtering is actually active.
+        lufs_window_sec=1.0 if lufs_window_sec is None else lufs_window_sec,
         lufs_cutoff=lufs_cutoff,
     )
 

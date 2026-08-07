@@ -16,7 +16,7 @@ from typing import Callable, List, Optional, Protocol, Tuple, Union, runtime_che
 from jax.typing import ArrayLike
 
 from audiotree import AudioTree
-from audiotree.transforms.decorators import map_transform
+from audiotree.transforms.base import BaseMapTransform
 
 #: A ``scope`` argument: a list of paths into a dict element (``["wet"]``,
 #: ``["input.dry"]``) or the nested-dict spelling. See
@@ -64,6 +64,49 @@ class LatentAudioCodec(Protocol):
     def encode_to_latent(self, audio: AudioTree) -> ArrayLike: ...
 
 
+class _CodecTransform(BaseMapTransform):
+    """Base for the codec transforms.
+
+    The codec is held as an instance attribute rather than captured in a
+    closure, so the transform pickles by reference to this module-level class
+    (its ``codec`` attribute travels with it) -- which grain needs, since its
+    worker processes are spawned, not forked. Picklability of the whole
+    transform still requires the stored ``codec`` to be picklable, which is the
+    caller's responsibility.
+
+    These are parameterless ``Map`` transforms: the only configuration is
+    ``scope``/``output_key``, handled by the base class, so the per-leaf config
+    is empty and ``_apply_transform`` takes just the leaf.
+    """
+
+    def __init__(self, codec, *, scope: Scope = None, output_key: OutputKey = None):
+        self.codec = codec
+        super().__init__(scope=scope, output_key=output_key)
+
+    @staticmethod
+    def get_default_config():
+        return {}
+
+
+class _EncodeWithCodec(_CodecTransform):
+    def _apply_transform(self, audio_tree: AudioTree) -> AudioTree:
+        if audio_tree.codes is not None:
+            return audio_tree
+        codes, scale = self.codec.encode(audio_tree)
+        metadata = audio_tree.metadata
+        if scale is not None:
+            metadata = {**metadata, "codec_scale": scale}
+        return audio_tree.replace(codes=codes, metadata=metadata)
+
+
+class _EncodeLatents(_CodecTransform):
+    def _apply_transform(self, audio_tree: AudioTree) -> AudioTree:
+        if audio_tree.latents is not None:
+            return audio_tree
+        latents = self.codec.encode_to_latent(audio_tree)
+        return audio_tree.replace(latents=latents)
+
+
 def encode_with_codec(
     codec: AudioCodec,
     *,
@@ -94,18 +137,7 @@ def encode_with_codec(
         transform = encode_with_codec(codec)
         ds = ds.map(transform)
     """
-
-    @map_transform
-    def _encode_with_codec_transform(audio_tree: AudioTree) -> AudioTree:
-        if audio_tree.codes is not None:
-            return audio_tree
-        codes, scale = codec.encode(audio_tree)
-        metadata = audio_tree.metadata
-        if scale is not None:
-            metadata = {**metadata, "codec_scale": scale}
-        return audio_tree.replace(codes=codes, metadata=metadata)
-
-    return _encode_with_codec_transform(scope=scope, output_key=output_key)
+    return _EncodeWithCodec(codec, scope=scope, output_key=output_key)
 
 
 def encode_latents(
@@ -135,12 +167,4 @@ def encode_latents(
         transform = encode_latents(codec)
         ds = ds.map(transform)
     """
-
-    @map_transform
-    def _encode_latents_transform(audio_tree: AudioTree) -> AudioTree:
-        if audio_tree.latents is not None:
-            return audio_tree
-        latents = codec.encode_to_latent(audio_tree)
-        return audio_tree.replace(latents=latents)
-
-    return _encode_latents_transform(scope=scope, output_key=output_key)
+    return _EncodeLatents(codec, scope=scope, output_key=output_key)

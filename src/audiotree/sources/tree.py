@@ -1,6 +1,7 @@
 """TreeDataSource: pytree-native reader for memory-mapped datasets."""
 
 import json
+import math
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, NoReturn, Optional, SupportsIndex, Union
@@ -38,6 +39,19 @@ _ALLOWED_DTYPES = frozenset(
     ]
 )
 
+# AudioTree fields ``_reconstruct`` passes to the constructor itself (see
+# ``_reconstruct``). A structure child of the same name is a valid dataclass
+# field but reaches ``AudioTree(...)`` twice, so it must be rejected here rather
+# than dying at the first ``__getitem__`` with "multiple values for keyword
+# argument".
+_RECONSTRUCTED_FIELDS = frozenset(["sample_rate"])
+
+# Top-level keys ``TreeDataSource.__init__`` reads without a fallback. Missing
+# any of them is a corrupt manifest, and validating them here turns a later raw
+# ``KeyError`` into a named "Invalid manifest" error. ``string_leaves`` is
+# deliberately absent: it is optional and defaults to ``{}``.
+_REQUIRED_KEYS = ("num_samples", "structure", "leaves")
+
 
 def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
     """Check a manifest's declared shapes, dtypes and names before using them.
@@ -68,6 +82,10 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
     def fail(message: str) -> NoReturn:
         raise ValueError(f"Invalid manifest {manifest_path}: {message}")
 
+    for key in _REQUIRED_KEYS:
+        if key not in manifest:
+            fail(f"missing required top-level key {key!r}")
+
     num_samples = manifest.get("num_samples")
     if not isinstance(num_samples, int) or isinstance(num_samples, bool):
         fail(f"num_samples must be an int, got {num_samples!r}")
@@ -91,7 +109,10 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
         # Measure the file against the declaration. See the docstring for why
         # this is `>=` and what that deliberately does not catch.
         itemsize = np.dtype(info["dtype"]).itemsize
-        required = num_samples * int(np.prod(shape, dtype=np.int64)) * itemsize
+        # math.prod is arbitrary precision. np.prod(dtype=np.int64) silently
+        # wraps, so a shape like [2**62, 4] multiplied out to 0, made `required`
+        # 0, and let the size check pass -- the file then blew up at first read.
+        required = num_samples * math.prod(shape) * itemsize
         leaf_path = safe_join(data_dir, info["file"], description="leaf file")
         try:
             actual = leaf_path.stat().st_size
@@ -104,6 +125,34 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
                 f"{info['file']!r} is only {actual} bytes. The dataset is "
                 f"truncated or the manifest does not describe it."
             )
+
+    # String leaves live in bagz files, which cannot be opened everywhere (bagz
+    # ships manylinux x86-64 wheels only). The type, safe_join and existence
+    # checks need no bagz, so they run unconditionally; the record-count check
+    # needs the file opened, so it runs only where bagz is importable.
+    try:
+        import bagz
+    except ImportError:
+        bagz = None
+    for name, info in (manifest.get("string_leaves") or {}).items():
+        if not isinstance(info.get("file"), str):
+            fail(f"string leaf {name!r} has a non-string 'file' entry")
+        leaf_path = safe_join(data_dir, info["file"], description="string leaf")
+        try:
+            leaf_path.stat()
+        except OSError as e:
+            fail(
+                f"string leaf {name!r} names {info['file']!r}, which cannot be "
+                f"read: {e}"
+            )
+        if bagz is not None:
+            records = len(bagz.Reader(str(leaf_path)))
+            if records < num_samples:
+                fail(
+                    f"string leaf {name!r} declares {num_samples} samples but "
+                    f"{info['file']!r} holds only {records} records. The dataset "
+                    f"is truncated or the manifest does not describe it."
+                )
 
     def check_node(node, path: str):
         if not isinstance(node, dict):
@@ -122,6 +171,12 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
                     fail(
                         f"AudioTree at {path or '<root>'} declares child {key!r}, "
                         f"which is not an AudioTree field"
+                    )
+                if key in _RECONSTRUCTED_FIELDS:
+                    fail(
+                        f"AudioTree at {path or '<root>'} declares child {key!r}, "
+                        f"which the reader sets itself -- it would reach the "
+                        f"AudioTree constructor as a duplicate argument"
                     )
                 check_node(child, f"{path}.{key}" if path else key)
         elif node_type == "dict":

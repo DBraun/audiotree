@@ -37,12 +37,12 @@ def test_audiotree_create_with_filepaths():
     )  # Should be expanded to (batch, channels, samples)
     assert tree2.filepath == ["test2.wav"]
 
-    # Test with 3D audio data and list of filepaths
-    audio_3d = np.array([[[1.0, 2.0, 3.0]]])  # Already correct shape: (1, 1, 3)
+    # Test with 3D audio data and a list of one filepath per batch item.
+    audio_3d = np.zeros((3, 1, 3))  # (batch=3, channels, samples)
     filepaths = ["file1.wav", "file2.wav", Path("file3.wav")]
     tree3 = AudioTree.create(audio_3d, 44100, filepath=filepaths)
 
-    assert tree3.waveform.shape == (1, 1, 3)  # Should remain unchanged
+    assert tree3.waveform.shape == (3, 1, 3)  # Should remain unchanged
     assert tree3.filepath == ["file1.wav", "file2.wav", "file3.wav"]
 
     # Test with no filepaths (should work as before)
@@ -316,6 +316,54 @@ def test_write_without_waveform_raises():
     tree = AudioTree(waveform=None, sample_rate=16000, codes=np.zeros((1, 4, 8)))
     with pytest.raises(ValueError, match="needs a waveform"):
         tree.write("/dev/null")
+
+
+def test_batch_axis_ops_work_on_token_only_tree():
+    """split/filter/reshape/flatten read the batch axis from codes, not waveform.
+
+    A token-only tree (waveform=None) has its batch axis on ``codes`` /
+    ``latents``; these are pure batch-axis operations, so they must derive the
+    size from whichever leaf is present instead of dereferencing ``None.shape``.
+    """
+    tok = AudioTree.create(None, 16000, codes=np.zeros((4, 2, 10), dtype=np.int32))
+    assert len(tok) == 4
+
+    parts = tok.split(2)
+    assert [p.codes.shape for p in parts] == [(2, 2, 10), (2, 2, 10)]
+
+    assert tok.filter(lambda t: True).codes.shape == (4, 2, 10)
+
+    mini = tok.reshape_mini_batches(2)
+    assert mini.codes.shape == (2, 2, 2, 10)
+    assert mini.flatten_mini_batches().codes.shape == (4, 2, 10)
+
+
+def test_create_rejects_provenance_list_of_wrong_length():
+    """A per-item filepath/source list must match the batch, or provenance
+    silently misaligns (fewer strings than items). A scalar still broadcasts and
+    a correct-length list is accepted."""
+    waveform = np.zeros((4, 1, 8), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="2 filepath for a batch of 4"):
+        AudioTree.create(waveform, 16000, filepath=["x.wav", "y.wav"])
+
+    with pytest.raises(ValueError, match="2 source for a batch of 4"):
+        AudioTree.create(waveform, 16000, source=["a", "b"])
+
+    # A correct-length list is accepted and round-trips per item.
+    ok = AudioTree.create(
+        waveform,
+        16000,
+        filepath=["a", "b", "c", "d"],
+        source=["w", "x", "y", "z"],
+    )
+    assert ok.filepath == ["a", "b", "c", "d"]
+    assert ok.source == ["w", "x", "y", "z"]
+
+    # A single value still broadcasts across the whole batch.
+    bc = AudioTree.create(waveform, 16000, filepath="one.wav")
+    assert bc.metadata["filepath"].shape[0] == 4
+    assert bc.filepath == ["one.wav"] * 4
 
 
 def test_audiotree_create_audio_dimensionality():

@@ -25,6 +25,7 @@ import pytest
 import soundfile as sf
 
 from audiotree.sources import create_audio_dataset, create_balanced_audio_dataset
+from audiotree.sources.core import _derive_group_seed, _derive_seed_pair
 
 #: Corpus parameters. The offsets below are a function of these, so changing
 #: any of them invalidates every golden list in this file.
@@ -408,3 +409,34 @@ def test_balanced_group_streams_are_pinned_to_group_names(two_group_corpus):
     actual = _collect(dataset, grouped=True)
     speech_and_music = [item for item in actual if item[0] != "noise"]
     assert speech_and_music == GOLDEN_BALANCED_SHUFFLE_SEED_2024
+
+
+# --------------------------------------------------------------------------
+# Seed entropy: full 64-bit seeds must survive derivation
+# --------------------------------------------------------------------------
+
+
+def test_derived_seeds_distinguish_high_bits():
+    """Seeds differing only above bit 31 must derive to distinct results.
+
+    The helpers used to mask ``base_seed & 0xFFFFFFFF`` before feeding
+    ``SeedSequence``, so a caller seeding from ``time_ns()`` or a 64-bit hash
+    would alias distinct seeds to byte-identical shuffle orders and excerpt
+    offsets. ``SeedSequence`` accepts arbitrary non-negative ints, so the mask
+    only threw away entropy.
+    """
+    assert _derive_seed_pair(1) != _derive_seed_pair(2**32 + 1)
+    assert _derive_group_seed(1, "g", "shuffle") != _derive_group_seed(
+        2**32 + 1, "g", "shuffle"
+    )
+
+
+def test_derived_seeds_small_values_are_stable():
+    """Removing the mask must not move any small-seed output.
+
+    Masking a seed below ``2**32`` is a no-op, so these golden values pin that
+    the entropy fix stayed backward-compatible for the common small-seed case
+    (the golden data tests above depend on this).
+    """
+    assert _derive_seed_pair(1) == (1835504127, 1731038949)
+    assert _derive_group_seed(1, "g", "shuffle") == 475119945

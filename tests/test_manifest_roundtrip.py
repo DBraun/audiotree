@@ -10,12 +10,24 @@ Covers two bugs in :mod:`audiotree._manifest`:
   ``int32``/``float32``: a large int raised ``OverflowError`` at save time and a
   float64 value was silently rounded. Python ints/floats must widen to 64-bit,
   while numpy scalars keep their own width.
+* **m10** -- only the string branch of ``_encode_column`` validated type
+  homogeneity; the bool and numeric branches coerced contaminants (``[True, 5]``
+  stored ``[True, True]``, ``[1, 2.5]`` truncated to ``[1, 2]``). A mixed-type
+  column must be rejected at write time.
+* **m9** -- NumPy fixed-width ``<U``/``|S`` storage drops trailing NULs, so a
+  value ending in a NUL cannot round-trip. Such values must be rejected at write
+  time rather than silently truncated.
+* **n5** -- ``encode`` reserved the ``__mask_``/``__audiotree_`` prefixes but not
+  the name ``"tags"``, which ``read_entries`` synthesizes from ``tags_*``
+  columns and would silently clobber. A column named exactly ``"tags"`` must be
+  rejected.
 """
 
 import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from audiotree import AudioTree, AudioWriter, _manifest
 
@@ -161,3 +173,97 @@ def test_numpy_int32_scalar_keeps_its_dtype(tmp_path):
     assert columns.columns["metadata_narrow"].dtype == np.int32
     entries = _manifest.read_entries(path)
     assert entries[0]["metadata_narrow"] == 5
+
+
+# --- m10: bool/numeric columns reject non-homogeneous contaminants ---
+
+
+def test_bool_column_with_non_bool_raises(tmp_path):
+    """A bool column contaminated by an int must not coerce it to ``True``."""
+    path = tmp_path / "manifest.npz"
+    with pytest.raises(ValueError, match=r"column 'c' mixes bool"):
+        _manifest.write(path, {"c": [True, 5]}, 2)
+
+
+def test_int_column_with_float_raises(tmp_path):
+    """An int column contaminated by a float must not truncate it."""
+    path = tmp_path / "manifest.npz"
+    with pytest.raises(ValueError, match=r"column 'n' mixes int"):
+        _manifest.write(path, {"n": [1, 2.5]}, 2)
+
+
+def test_float_column_with_int_raises(tmp_path):
+    """Homogeneity is symmetric: a float column may not hold a bare int."""
+    path = tmp_path / "manifest.npz"
+    with pytest.raises(ValueError, match=r"column 'n' mixes float"):
+        _manifest.write(path, {"n": [2.5, 1]}, 2)
+
+
+def test_uniform_bool_int_float_columns_still_round_trip(tmp_path):
+    """The homogeneity check must not reject legitimately-uniform columns."""
+    path = tmp_path / "manifest.npz"
+    _manifest.write(
+        path,
+        {"flag": [True, False], "count": [1, 2], "amount": [1.5, 2.5]},
+        2,
+    )
+
+    columns = _manifest.read_columns(path)
+    assert columns.columns["flag"].dtype == np.bool_
+    assert columns.columns["count"].dtype == np.int64
+    assert columns.columns["amount"].dtype == np.float64
+
+    entries = _manifest.read_entries(path)
+    assert [e["flag"] for e in entries] == [True, False]
+    assert [e["count"] for e in entries] == [1, 2]
+    assert [e["amount"] for e in entries] == [1.5, 2.5]
+
+
+# --- m9: trailing NULs in string/bytes cells are rejected, not truncated ---
+
+
+def test_string_with_trailing_nul_raises(tmp_path):
+    """A ``<U`` cell ending in a NUL cannot round-trip, so it is rejected."""
+    path = tmp_path / "manifest.npz"
+    with pytest.raises(ValueError, match=r"column 's'.*NUL"):
+        _manifest.write(path, {"s": ["x\x00", "y"]}, 2)
+
+
+def test_bytes_with_trailing_nul_raises(tmp_path):
+    """A ``|S`` cell ending in a NUL byte cannot round-trip, so it is rejected."""
+    path = tmp_path / "manifest.npz"
+    with pytest.raises(ValueError, match=r"column 'b'.*NUL"):
+        _manifest.write(path, {"b": [b"ab\x00", b"\x00\x00"]}, 2)
+
+
+def test_strings_and_bytes_without_trailing_nul_unaffected(tmp_path):
+    """Ordinary values -- including internal NULs -- still round-trip exactly."""
+    path = tmp_path / "manifest.npz"
+    _manifest.write(
+        path,
+        {"s": ["a\x00b", "plain"], "b": [b"a\x00b", b"plain"]},
+        2,
+    )
+
+    entries = _manifest.read_entries(path)
+    assert [e["s"] for e in entries] == ["a\x00b", "plain"]
+    assert [e["b"] for e in entries] == [b"a\x00b", b"plain"]
+
+
+# --- n5: a column literally named 'tags' is reserved ---
+
+
+def test_column_named_tags_raises(tmp_path):
+    """A data column named exactly 'tags' would be clobbered, so it is rejected."""
+    path = tmp_path / "manifest.npz"
+    with pytest.raises(ValueError, match=r"'tags' is reserved"):
+        _manifest.write(path, {"tags": ["hello"], "tags_genre": ["rock"]}, 1)
+
+
+def test_tags_prefix_pivot_still_works(tmp_path):
+    """Reserving 'tags' must not disturb the ``tags_*`` -> ``tags`` synthesis."""
+    path = tmp_path / "manifest.npz"
+    _manifest.write(path, {"tags_genre": ["rock"], "tags_year": [1994]}, 1)
+
+    entries = _manifest.read_entries(path)
+    assert entries[0]["tags"] == {"genre": "rock", "year": 1994}

@@ -366,6 +366,30 @@ def test_grow_from_a_zero_sample_allocation():
         source.close()
 
 
+def test_zero_size_leaf_survives_close_and_reads_back():
+    """A ``(batch, 0)`` leaf must not be truncated to an unmappable 0-byte file.
+
+    close() floors every leaf file at one byte, matching the allocation floor
+    in _init_from_pytree/_grow, so a zero-size-per-sample leaf stays mappable.
+    Without the floor its .bin shrank to 0 bytes and np.memmap(mode="r") raised
+    "cannot mmap an empty file" -- blocking every leaf, since they open together.
+    """
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with TreeWriter(tmpdir, expected_samples=4) as w:
+            w.write({"empty": _f32(0.0, (4, 0)), "x": _f32(7.0, (4, 3))})
+
+        assert os.path.getsize(os.path.join(tmpdir, "empty.bin")) == 1
+
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 4
+        sample = source[0]
+        np.testing.assert_array_equal(sample["x"].ravel(), [7.0] * 3)
+        assert sample["empty"].shape == (1, 0)
+        source.close()
+
+
 @requires_bagz
 def test_grow_keeps_string_leaves_aligned():
     """Growing the memmaps must not desynchronize the append-only bagz files."""

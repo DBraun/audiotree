@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import argbind
+import jax
 import numpy as np
 import pytest
 import soundfile as sf
@@ -25,7 +26,9 @@ from audiotree.transforms.functional import (
     mono,
     stereo,
     swap_stereo,
+    roll,
 )
+from audiotree.transforms.jax.functional import roll as roll_jax
 
 
 def _create_test_audio_file(tmpdir, filename, duration=3.0, sample_rate=44100):
@@ -537,3 +540,31 @@ class TestCodecTransformScopeAndOutputKey:
         result = encode_latents(_LatentOnlyCodec()).map(element)
         assert result["dry"].latents is not None
         assert result["wet"].latents is not None
+
+
+class TestRoll:
+    """``roll`` validates its range identically on both backends.
+
+    ``_roll_np`` draws with ``rng.integers`` and ``_roll_jax`` with
+    ``jax.random.randint``; the latter silently clamps an inverted (min > max)
+    range to a constant roll instead of erroring, so both backends share one
+    range check that raises the same ``ValueError``.
+    """
+
+    # (build_transform, make_rng) for each backend; ``roll`` returns an argbind
+    # transform applied with ``random_map``, mirroring the other tests here.
+    _BACKENDS = [
+        pytest.param(roll, lambda: np.random.default_rng(0), id="numpy"),
+        pytest.param(roll_jax, lambda: jax.random.key(0), id="jax"),
+    ]
+
+    @pytest.mark.parametrize("build,make_rng", _BACKENDS)
+    def test_inverted_range_raises(self, build, make_rng):
+        with pytest.raises(ValueError, match="min_seconds <= max_seconds"):
+            build(min_seconds=0.5, max_seconds=0.1).random_map(_tree(), make_rng())
+
+    @pytest.mark.parametrize("build,make_rng", _BACKENDS)
+    def test_valid_range_works(self, build, make_rng):
+        tree = _tree()
+        result = build(min_seconds=-0.1, max_seconds=0.1).random_map(tree, make_rng())
+        assert np.asarray(result.waveform).shape == tree.waveform.shape

@@ -778,7 +778,10 @@ class TreeWriter:
                 self._leaf_info[name]["file"],
                 description="leaf file",
             )
-            actual_bytes = actual_samples * self._bytes_per_sample(name)
+            # max(..., 1): a zero-size-per-sample leaf needs no bytes, but an
+            # empty file cannot be mapped, so never truncate below the one-byte
+            # floor that _init_from_pytree and _grow allocate to.
+            actual_bytes = max(actual_samples * self._bytes_per_sample(name), 1)
             if filepath.stat().st_size > actual_bytes:
                 os.truncate(filepath, actual_bytes)
 

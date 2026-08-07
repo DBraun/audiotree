@@ -235,6 +235,40 @@ def test_alpha_out_of_range_raises():
             create_windowed_audio_dataset(filepaths=fps, alpha=1.5)
 
 
+@pytest.mark.parametrize("bad_duration", [0.0, -1.0])
+def test_nonpositive_duration_raises_with_explicit_hop(bad_duration):
+    """duration <= 0 is a duration error even when an explicit hop is given."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fps = _mixed_corpus(tmp, {"a": 4.0})
+        with pytest.raises(ValueError, match="duration must be positive"):
+            create_windowed_audio_dataset(filepaths=fps, duration=bad_duration, hop=1.0)
+
+
+def test_nonpositive_duration_raises_when_hop_defaults():
+    """A duration=0 mistake is blamed on duration, not on the hop it defaults to."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fps = _mixed_corpus(tmp, {"a": 4.0})
+        with pytest.raises(ValueError, match="duration must be positive"):
+            create_windowed_audio_dataset(filepaths=fps, duration=0.0)
+
+
+@pytest.mark.parametrize("bad_window", [0.0, -2.0])
+def test_nonpositive_lufs_window_sec_raises_when_filtering(bad_window):
+    """lufs_window_sec <= 0 raises when loudness filtering is active."""
+    with tempfile.TemporaryDirectory() as tmp:
+        fps = _mixed_corpus(tmp, {"a": 4.0}, sample_rate=8000)
+        lpf = precompute_window_lufs(fps, lufs_window_sec=1.0, sample_rate=8000)
+        with pytest.raises(ValueError, match="lufs_window_sec must be positive"):
+            create_windowed_audio_dataset(
+                filepaths=fps,
+                duration=1.0,
+                hop=1.0,
+                sample_rate=8000,
+                lufs_per_file=lpf,
+                lufs_window_sec=bad_window,
+            )
+
+
 def test_num_epochs_replaces_the_repeat_flag():
     """`num_epochs` counts passes over the slot index; None is truly infinite."""
     with tempfile.TemporaryDirectory() as tmp:

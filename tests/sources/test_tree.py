@@ -1088,6 +1088,114 @@ def test_in_progress_dataset_is_readable_after_flush(tmp_path):
     assert len(TreeDataSource(data_dir)) == 8
 
 
+# === Manifest structural validation (fail-at-construction contract) ===
+
+
+@pytest.mark.parametrize(
+    "file_value,match",
+    [
+        # A missing file is stat'd here rather than inside a grain worker.
+        ("nonexistent.bagz", r"string leaf 'note' names 'nonexistent.bagz'"),
+        # A non-string 'file' would blow up in safe_join later; caught by name.
+        (123, r"string leaf 'note' has a non-string 'file' entry"),
+        # safe_join is applied to string leaves too, so traversal is refused up
+        # front (the raw open would also refuse it, but only at first read).
+        ("../escape.bagz", r"containing '\.\.'"),
+    ],
+)
+def test_string_leaf_manifest_gaps_refused_at_construction(tmp_path, file_value, match):
+    """String leaves were never validated: bad ones passed construction.
+
+    The type, safe_join and existence checks need no bagz (which has no macOS
+    wheel), so they run everywhere -- unlike the record-count check, which is
+    gated behind bagz being importable.
+    """
+    data_dir = tmp_path / "ds"
+    with TreeWriter(data_dir, expected_samples=2) as w:
+        w.write({"x": np.zeros((2, 3), dtype=np.float32)})
+
+    # The unedited dataset constructs fine.
+    with TreeDataSource(data_dir) as source:
+        assert len(source) == 2
+
+    _rewrite_manifest(
+        data_dir,
+        lambda m: m.__setitem__("string_leaves", {"note": {"file": file_value}}),
+    )
+
+    with pytest.raises(ValueError, match=match):
+        TreeDataSource(data_dir)
+
+
+def test_int64_overflow_in_shape_cannot_bypass_the_size_check(tmp_path):
+    """``np.prod(dtype=np.int64)`` wrapped, so a huge shape made ``required`` 0.
+
+    ``[2**62, 4]`` passes the per-dim non-negative-int check, its product wrapped
+    to 0 in int64, and ``actual >= 0`` let the manifest through -- then ``ds[0]``
+    died with a bare "array is too big". ``math.prod`` is arbitrary precision, so
+    the shortfall is named at construction instead.
+    """
+    data_dir = tmp_path / "ds"
+    with TreeWriter(data_dir, expected_samples=2) as w:
+        w.write({"x": np.zeros((2, 3), dtype=np.float32)})
+
+    with TreeDataSource(data_dir) as source:
+        assert len(source) == 2
+
+    _rewrite_manifest(
+        data_dir,
+        lambda m: m["leaves"]["x"].__setitem__(
+            "shape_per_sample", [4611686018427387904, 4]
+        ),
+    )
+
+    with pytest.raises(ValueError, match=r"'x.bin' is only \d+ bytes"):
+        TreeDataSource(data_dir)
+
+
+def test_sample_rate_structure_child_refused_at_construction(tmp_path):
+    """``_reconstruct`` passes ``sample_rate=`` itself, so a child of that name
+    reached the AudioTree constructor twice.
+
+    ``sample_rate`` IS a dataclass field, so the "not an AudioTree field" check
+    waved it through; it then died at first ``__getitem__`` with "got multiple
+    values for keyword argument 'sample_rate'".
+    """
+    data_dir = tmp_path / "ds"
+    tree = AudioTree(waveform=np.zeros((2, 1, 10), dtype=np.float32), sample_rate=44100)
+    with TreeWriter(data_dir, expected_samples=2) as w:
+        w.write(tree)
+
+    with TreeDataSource(data_dir) as source:
+        assert isinstance(source[0], AudioTree)
+
+    _rewrite_manifest(
+        data_dir,
+        lambda m: m["structure"]["children"].__setitem__("sample_rate", "waveform"),
+    )
+
+    with pytest.raises(ValueError, match=r"child 'sample_rate', which the reader"):
+        TreeDataSource(data_dir)
+
+
+def test_manifest_missing_required_top_level_key_refused_at_construction(tmp_path):
+    """A header-only manifest missing 'structure'/'leaves' raised a raw KeyError.
+
+    ``_validate_manifest`` used ``.get`` with fallbacks, so it passed; ``__init__``
+    then indexed ``manifest['structure']`` and raised ``KeyError`` instead of a
+    named "Invalid manifest" ValueError.
+    """
+    from audiotree import _format
+
+    data_dir = tmp_path / "ds"
+    data_dir.mkdir()
+    header_only = {**_format.header(_format.TREE), "num_samples": 1}
+    (data_dir / "manifest.json").write_text(json.dumps(header_only), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"missing required top-level key 'structure'"):
+        TreeDataSource(data_dir)
+
+
 # === load_into_memory ===
 
 
@@ -1135,6 +1243,9 @@ class _StubBagzReader:
 
     def __getitem__(self, index: int) -> bytes:
         return self._records[index]
+
+    def __len__(self) -> int:
+        return len(self._records)
 
 
 @pytest.fixture

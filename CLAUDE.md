@@ -49,12 +49,12 @@ It includes metadata like sample rate and provides methods for loading files, re
 1. **Datasources (`audiotree.sources`)**: Provides integration with Google's Grain library for ML data pipelines.
 The key functions are `create_audio_dataset()` for simple loading and `create_balanced_audio_dataset()` for multi-group balanced sampling.
 Both use grain's `random_map` for proper RNG seeding.
-The `load_audio_with_saliency()` function handles saliency-based excerpt selection with infinite RNG variety even when files repeat.
+Excerpt selection is configured with an `ExcerptConfig` passed to these constructors — a fresh random offset per read gives infinite RNG variety even when files repeat.
 `create_windowed_audio_dataset()` (in `audiotree.sources.windowed`) instead makes the *window* the unit of sampling: each file is tiled into `round(n_windows ** alpha)` jittered slots, globally shuffled for even coverage, length-aware frequency (`alpha`), and batch diversity. Optional build-time loudness filtering reads a `build_window_lufs_cache()` bagz cache of ragged per-file windowed-LUFS arrays. It composes with `create_balanced_audio_dataset()` via `WindowParams`.
 
 1. **Transforms (`audiotree.transforms`)**: Audio augmentations with dual backends: NumPy (`audiotree.transforms`) for CPU grain pipelines using `np.random.Generator`, and JAX (`audiotree.transforms.jax`) for GPU/JIT training using `jax.random.key`.
 
-1. **Writer (`audiotree.writer`)**: The `AudioWriter` class provides sequential writing of AudioTree batches to disk as individual audio files plus an NPZ manifest that tracks per-item metadata (loudness, pitch, source `filepath`, custom tags). `write_audio=False` writes the manifest alone (e.g. embeddings/features in `metadata`). Its output is read back with `audiotree.sources.ManifestDataSource` (a Grain `RandomAccessDataSource`) or `AudioTree.from_manifest()` (the whole manifest as one batched AudioTree, with an optional `filter_fn`); both restore the recorded metadata arrays and the source `filepath`.
+1. **Writer (`audiotree.writer`)**: The `AudioWriter` class provides sequential writing of AudioTree batches to disk as individual audio files plus an NPZ manifest that tracks per-item metadata (loudness, pitch, source `filepath`, custom tags). `write_audio=False` writes the manifest alone (e.g. embeddings/features in `metadata`). Its output is read back with `audiotree.sources.AudioDataSource` (a Grain `RandomAccessDataSource`) or `AudioTree.from_manifest()` (the whole manifest as one batched AudioTree, with an optional `filter_fn`); both restore the recorded metadata arrays and the source `filepath`.
 The `TreeWriter` class (`audiotree.tree_writer`) writes arbitrary pytrees — AudioTrees, dicts of AudioTrees, or nested structures — to memory-mapped binary files (with `bagz` for string leaves), enabling zero-copy random access via `audiotree.sources.TreeDataSource` as a Grain `RandomAccessDataSource`.
 
 ## Documentation & learning the library
@@ -70,7 +70,7 @@ a subsystem:
   annotations; resumable and accelerator-prefetched training.
 - `introduction/transform_chaining.rst` + `introduction/transforms.rst` — augmentations,
   and the NumPy (CPU data-loader) vs JAX (jitted, on-device) transform backends.
-- `introduction/writer.rst` — writing datasets: `AudioWriter`/`ManifestDataSource` (audio
+- `introduction/writer.rst` — writing datasets: `AudioWriter`/`AudioDataSource` (audio
   files + NPZ manifest) vs `TreeWriter`/`TreeDataSource` (memmapped pytrees).
 - `introduction/{balanced_datasets,windowed_datasets,dict_batches,argbind_guide,multiprocessing}.rst`
   — deeper topics.

@@ -1407,8 +1407,14 @@ def test_column_shorter_than_batch_raises():
                 writer.write(tree)
 
 
-def test_ragged_column_raises_naming_the_column():
-    """Every column must cover every entry, or the manifest misaligns silently."""
+def test_ragged_column_raises_at_the_offending_write():
+    """A metadata key present on some writes and absent on others is rejected.
+
+    The check is eager: a drifting write fails at its own ``write()`` call --
+    before its WAVs land and while the manifest is still consistent -- rather
+    than being deferred to ``save_manifest()``/``close()``, which would abort
+    with the whole manifest unwritten.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         tree1 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
         tree1 = tree1.replace(metadata={"frame_id": np.array([1, 2])})
@@ -1416,10 +1422,15 @@ def test_ragged_column_raises_naming_the_column():
 
         writer = AudioWriter(tmpdir, write_audio=False, manifest_every=0)
         writer.write(tree1)
-        writer.write(tree2)  # no metadata at all
 
-        with pytest.raises(ValueError, match="metadata_frame_id.* covers 2 of 4"):
-            writer.save_manifest()
+        with pytest.raises(ValueError, match="metadata keys.*missing keys.*frame_id"):
+            writer.write(tree2)  # no metadata at all
+
+        # The good first write still saves cleanly; the manifest is intact.
+        manifest_path = writer.save_manifest()
+        data = load_manifest(manifest_path)
+        assert len(data["index"]) == 2
+        np.testing.assert_array_equal(data["metadata_frame_id"], [1, 2])
 
 
 def test_manifest_is_written_during_the_run():
@@ -1707,3 +1718,121 @@ def test_mini_batched_tree_is_refused(tmp_path):
     entries = _manifest.read_entries(tmp_path / "flat" / "manifest.npz")
     assert len(entries) == 6
     assert all(e["channels"] == 1 and e["samples"] == 800 for e in entries)
+
+
+# === Filename pattern must be unique per item when writing audio ===
+
+
+def test_pattern_without_index_is_refused_when_writing_audio(tmp_path):
+    """A pattern with no ``{index}`` writes every item to one file, losing all
+    but the last while the manifest still records a row per lost item."""
+    with pytest.raises(ValueError, match=r"no '\{index\}' field"):
+        AudioWriter(tmp_path, pattern="out.wav")
+
+
+def test_pattern_with_index_writes_one_file_per_item(tmp_path):
+    """A pattern that does carry ``{index}`` gives each item a unique file."""
+    tree = AudioTree.create(np.zeros((3, 1, 800), dtype=np.float32), 16000)
+    with AudioWriter(tmp_path, pattern="clip_{index}.wav") as writer:
+        writer.write(tree)
+
+    assert sorted(p.name for p in tmp_path.glob("*.wav")) == [
+        "clip_0.wav",
+        "clip_1.wav",
+        "clip_2.wav",
+    ]
+
+
+def test_manifest_only_run_allows_pattern_without_index(tmp_path):
+    """With no audio on disk the filename is a label, so uniqueness is optional."""
+    tree = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+    with AudioWriter(tmp_path, pattern="out.wav", write_audio=False) as writer:
+        writer.write(tree)  # must not raise
+
+    data = load_manifest(tmp_path / "manifest.npz")
+    assert list(data["filename"]) == ["out.wav", "out.wav"]
+
+
+# === Metadata / filepath drift is rejected eagerly, not at save ===
+
+
+def test_metadata_key_drift_raises_at_the_write_not_at_close(tmp_path):
+    """A write whose metadata keys differ from the first is rejected immediately,
+    before its WAVs land, so a long render never loses its manifest at close()."""
+    tree1 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+    tree1 = tree1.replace(metadata={"snr": np.array([10.0, 20.0])})
+    tree2 = AudioTree.create(
+        np.zeros((2, 1, 800), dtype=np.float32), 16000
+    )  # no metadata
+
+    writer = AudioWriter(tmp_path, manifest_every=0)
+    writer.write(tree1)
+
+    with pytest.raises(ValueError, match="metadata keys.*missing keys.*snr"):
+        writer.write(tree2)
+
+    # The drifting write left no audio behind: only the first two items exist.
+    assert sorted(p.name for p in tmp_path.glob("*.wav")) == [
+        "audio_0000.wav",
+        "audio_0001.wav",
+    ]
+
+    # And close() still writes a manifest consistent with the first write.
+    writer.close()
+    data = load_manifest(tmp_path / "manifest.npz")
+    assert len(data["index"]) == 2
+    np.testing.assert_allclose(data["metadata_snr"], [10.0, 20.0])
+
+
+def test_extra_metadata_key_on_later_write_is_named(tmp_path):
+    """A later write introducing a new metadata key is rejected, naming the key."""
+    tree1 = AudioTree.create(np.zeros((1, 1, 800), dtype=np.float32), 16000)
+    tree2 = AudioTree.create(np.zeros((1, 1, 800), dtype=np.float32), 16000)
+    tree2 = tree2.replace(metadata={"snr": np.array([5.0])})
+
+    writer = AudioWriter(tmp_path, write_audio=False, manifest_every=0)
+    writer.write(tree1)
+    with pytest.raises(ValueError, match="metadata keys.*extra keys.*snr"):
+        writer.write(tree2)
+
+
+def test_short_filepath_list_raises_at_the_write(tmp_path):
+    """A filepath list shorter than the batch is rejected at the write itself,
+    not deferred to save where it would abort with the manifest unwritten."""
+    tree = AudioTree.create(np.zeros((3, 1, 800), dtype=np.float32), 16000)
+    # Only two encoded paths for a three-item batch. (``create`` guards against
+    # this, so encode directly to reach the writer's own coverage check.)
+    tree = tree.replace(
+        metadata={"filepath": AudioTree._encode_filepaths(["a.wav", "b.wav"])}
+    )
+    writer = AudioWriter(tmp_path, write_audio=False, manifest_every=0)
+    with pytest.raises(ValueError, match="filepath"):
+        writer.write(tree)
+
+
+def test_filepath_presence_drift_raises_at_the_write(tmp_path):
+    """Whether a run carries filepaths is fixed by the first write."""
+    with_paths = AudioTree.create(
+        np.zeros((1, 1, 800), dtype=np.float32), 16000, filepath=["a.wav"]
+    )
+    without_paths = AudioTree.create(np.zeros((1, 1, 800), dtype=np.float32), 16000)
+
+    writer = AudioWriter(tmp_path, write_audio=False, manifest_every=0)
+    writer.write(with_paths)
+    with pytest.raises(ValueError, match="'filepath' presence"):
+        writer.write(without_paths)
+
+
+def test_consistent_metadata_sequence_still_writes_manifest(tmp_path):
+    """The eager check must not reject a genuinely consistent sequence."""
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        for snr in ([1.0, 2.0], [3.0, 4.0, 5.0]):
+            tree = AudioTree.create(
+                np.zeros((len(snr), 1, 800), dtype=np.float32), 16000
+            )
+            tree = tree.replace(metadata={"snr": np.array(snr)})
+            writer.write(tree)
+
+    data = load_manifest(tmp_path / "manifest.npz")
+    assert len(data["index"]) == 5
+    np.testing.assert_allclose(data["metadata_snr"], [1.0, 2.0, 3.0, 4.0, 5.0])

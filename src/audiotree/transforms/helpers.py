@@ -415,6 +415,24 @@ def _shift_phase_np(
 # =============================================================================
 
 
+def _check_roll_range(min_seconds: float, max_seconds: float) -> None:
+    """Reject an inverted roll range so both backends fail identically.
+
+    ``_roll_np`` draws with ``rng.integers(min, max + 1)``, which raises
+    ``ValueError: low >= high`` for an inverted range, while ``_roll_jax`` draws
+    with ``jax.random.randint``, which silently returns ``minval`` for every draw
+    when ``minval > maxval`` -- applying a constant roll of ``min_seconds``
+    instead of erroring. Validating here, ahead of either draw, keeps the two
+    backends consistent with a single clear error. Negative bounds are allowed
+    (a negative roll shifts left), so only their ordering is checked.
+    """
+    if min_seconds > max_seconds:
+        raise ValueError(
+            f"roll requires min_seconds <= max_seconds, but got "
+            f"min_seconds={min_seconds} > max_seconds={max_seconds}."
+        )
+
+
 def _invalidate_offset(metadata: dict) -> dict:
     """Drop a stale source-file ``offset`` after a time shift.
 
@@ -442,6 +460,7 @@ def _roll_jax(
     mode: str = "wrap",
 ) -> AudioTree:
     """JAX implementation of audio roll."""
+    _check_roll_range(min_seconds, max_seconds)
     B, C, T = audio_tree.waveform.shape
 
     min_samples = int(min_seconds * audio_tree.sample_rate)
@@ -489,6 +508,7 @@ def _roll_np(
     mode: str = "wrap",
 ) -> AudioTree:
     """NumPy implementation of audio roll."""
+    _check_roll_range(min_seconds, max_seconds)
     waveform = audio_tree.waveform
     B, C, T = waveform.shape
 
