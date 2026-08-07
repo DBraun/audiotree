@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2024 David Braun
+Copyright (c) 2024-2026 David Braun
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,36 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+================================================================================
+Third-party code
+================================================================================
+
+Portions of this distribution are derived from other projects and remain under
+their own (MIT) licenses. The full notices are in the LICENSES/ directory:
+
+  src/audiotree/resample.py  adapted from julius       LICENSES/julius-MIT.txt
+  src/audiotree/loudness.py  follows pyloudnorm        LICENSES/pyloudnorm-MIT.txt
+
+================================================================================
+Third-party assets (NOT covered by the MIT grant above)
+================================================================================
+
+Audio fixtures under tests/ are the property of their respective owners and are
+included under their own licenses. The MIT grant above does NOT apply to them.
+See tests/assets/README.md for provenance. In particular:
+
+  tests/assets/musdb18hq/...   MUSDB18-HQ excerpt
+                               Creative Commons Attribution-NonCommercial-
+                               ShareAlike 4.0 International (CC BY-NC-SA 4.0).
+                               NonCommercial and ShareAlike terms apply; this
+                               file may not be used commercially and is not
+                               relicensable under MIT.
+
+  tests/assets/vctk/...        VCTK excerpt
+                               Creative Commons Attribution 4.0 (CC BY 4.0).
+                               Attribution required on redistribution.
+
+These fixtures exist to run the test suite and are excluded from the published
+wheel and sdist.
