@@ -12,7 +12,7 @@ import numpy as np
 import soundfile
 
 from audiotree import AudioTree
-from audiotree.core import ExcerptConfig
+from audiotree.core import ExcerptConfig, _leading_axis_size
 
 if TYPE_CHECKING:
     from audiotree.sources.windowed import WindowParams
@@ -666,6 +666,32 @@ def _derive_group_seed(base_seed: int, group_name: str, role: str) -> int:
     return int(state[0]) & 0x7FFFFFFF
 
 
+def _stamp_source(tree: AudioTree | None, group_name: str) -> AudioTree | None:
+    """Stamp ``source=group_name`` onto one item of a pre-built dataset group.
+
+    File-based groups get their ``source`` from
+    :func:`create_audio_dataset`'s ``source=`` argument, but a pre-built
+    ``datasets`` entry (built with the default ``source=None``) carries no such
+    key. :meth:`AudioTree.batch` requires every item in a batch to expose the
+    same metadata keys, so a batch spanning a file group and a pre-built group
+    would fail its pytree check on the missing ``source`` -- intermittently,
+    since a single-group batch collates fine. Mapping this over each pre-built
+    dataset gives every group one consistent ``source`` schema.
+
+    The group name the caller chose *here* wins, overwriting any ``source`` the
+    dataset already carried -- exactly as a file group's name overrides whatever
+    ``create_audio_dataset`` was told, since the user named the group at this
+    call. Encoding matches :meth:`AudioTree.create`'s own ``source=`` handling:
+    one row per batch item.
+    """
+    if tree is None:
+        # A skipped excerpt; grain drops it at to_iter_dataset() anyway.
+        return None
+    batch_size = _leading_axis_size(tree.waveform, tree.codes, tree.latents)
+    encoded = AudioTree._encode_filepaths([group_name] * batch_size)
+    return tree.replace(metadata={**tree.metadata, "source": encoded})
+
+
 def create_balanced_audio_dataset(
     sources: Mapping[str, str | Path | List[str | Path]] | None = None,
     weights: Optional[Mapping[str, float]] = None,
@@ -704,7 +730,10 @@ def create_balanced_audio_dataset(
             key raises rather than silently leaving its intended group at 1.0.
         datasets: Optional dictionary mapping group names to pre-constructed grain MapDatasets.
             These datasets will be mixed with file-based sources. Useful for combining
-            different data sources or including pre-processed datasets.
+            different data sources or including pre-processed datasets. Each item of a
+            pre-built dataset is stamped with ``source=`` its group name (overwriting any
+            ``source`` it already carried), so it exposes the same metadata schema as the
+            file-based groups and the two collate together under :meth:`AudioTree.batch`.
             IMPORTANT: Pre-constructed datasets MUST already be repeated (call `.repeat()`
             before passing them) to ensure infinite sampling. If a finite dataset is passed,
             grain.MapDataset.mix will truncate the mixed output to the shortest dataset length.
@@ -921,10 +950,14 @@ def create_balanced_audio_dataset(
             weight = weights.get(group_name, 1.0)
         all_proportions.append(weight)
 
-    # Add pre-constructed datasets
+    # Add pre-constructed datasets. Stamp each with its group name's `source`
+    # so it batches with the file-based groups above (which already carry it);
+    # see `_stamp_source`.
     if datasets is not None:
         for group_name, ds in datasets.items():
-            all_datasets.append(ds)
+            all_datasets.append(
+                ds.map(functools.partial(_stamp_source, group_name=group_name))
+            )
 
             # Get weight for this group (default to 1.0)
             weight = 1.0

@@ -205,22 +205,54 @@ class AudioDataSource(grain.RandomAccessDataSource):
         """Return the number of records in the dataset."""
         return self._length
 
-    def _substitute_silence(
-        self, entry: Dict, audio_path, exc: BaseException, metadata: Dict
-    ) -> AudioTree:
-        """Build the stand-in returned for an entry whose audio cannot be read.
+    def _synthetic_geometry(self, entry: Dict):
+        """Shape a synthetic zero waveform to match a real load of ``entry``.
 
-        Shaped from the manifest's own ``channels``/``samples`` columns (or the
-        requested ``duration``), so a substitute collates with the real items
-        around it, and tagged with the offending path plus
-        ``metadata[READ_ERROR_KEY] == True``.
+        A synthetic item (a silence substitute for an unreadable file, or a
+        token-only manifest with no audio on disk) must collate with the real
+        items around it, so it has to carry the *target* geometry a real
+        :meth:`AudioTree.from_file` would produce -- not the manifest's stored
+        original geometry. The manifest records ``channels``/``samples`` at the
+        written (original) rate; this mirrors ``from_file``'s output:
+
+        - ``sample_rate``: the requested target rate (or the entry's own).
+        - ``channels``: one when ``mono`` is set, else the entry's channels.
+        - ``samples``: ``round(duration * target_sr)`` when a duration is
+          requested (``from_file`` pads/trims to exactly that); otherwise the
+          stored count rescaled by the rate ratio the same way ``librosa``
+          resamples -- ``ceil(samples * target_sr / original_sr)`` -- so a
+          substitute matches a resampled real item to the sample. With no
+          duration and no resampling this is just the stored count.
+
+        Returns:
+            ``(channels, samples, sample_rate)`` for the synthetic waveform.
         """
-        sample_rate = self.sample_rate or entry.get("sample_rate")
+        original_sr = entry.get("sample_rate")
+        sample_rate = self.sample_rate or original_sr
         channels = 1 if self.mono else int(entry.get("channels", 1))
         if self.duration is not None and sample_rate:
             samples = max(0, round(self.duration * sample_rate))
         else:
             samples = int(entry.get("samples", 0))
+            if (
+                self.sample_rate is not None
+                and original_sr
+                and self.sample_rate != original_sr
+            ):
+                samples = int(np.ceil(samples * (self.sample_rate / original_sr)))
+        return channels, samples, sample_rate
+
+    def _substitute_silence(
+        self, entry: Dict, audio_path, exc: BaseException, metadata: Dict
+    ) -> AudioTree:
+        """Build the stand-in returned for an entry whose audio cannot be read.
+
+        Shaped by :meth:`_synthetic_geometry` to the *target* rate, channel
+        count, and length a real load would produce, so a substitute collates
+        with the real items around it, and tagged with the offending path plus
+        ``metadata[READ_ERROR_KEY] == True``.
+        """
+        channels, samples, sample_rate = self._synthetic_geometry(entry)
 
         tree_kwargs = {
             "sample_rate": sample_rate,
@@ -339,12 +371,11 @@ class AudioDataSource(grain.RandomAccessDataSource):
                     ) from exc
                 return self._substitute_silence(entry, audio_path, exc, metadata)
         else:
-            # No audio files - create AudioTree from manifest metadata only
-            sample_rate = self.sample_rate or entry.get("sample_rate")
-            channels = entry.get("channels", 1)
-            samples = entry.get("samples", 0)
-
-            # Create zero audio data with correct shape
+            # No audio files - create AudioTree from manifest metadata only.
+            # Size the synthetic waveform to the *target* geometry (honoring
+            # sample_rate, mono, and duration) so it collates with real items,
+            # exactly as a silence substitute does.
+            channels, samples, sample_rate = self._synthetic_geometry(entry)
             waveform = np.zeros((1, channels, samples), dtype=np.float32)
 
             # Build kwargs for AudioTree.create

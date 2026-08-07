@@ -269,6 +269,29 @@ def _is_integer_scalar(key) -> bool:
     return False
 
 
+def _is_string_list(x) -> bool:
+    """Whether *x* is a non-empty list of strings.
+
+    Such lists are supported ``metadata`` leaves (see ``tree_writer``), so the
+    batch-axis operations treat them as a single leaf and index them
+    element-wise rather than letting ``jax.tree_util`` descend into the list and
+    slice each string's characters.
+    """
+    return isinstance(x, list) and bool(x) and all(isinstance(s, str) for s in x)
+
+
+def _index_batch_axis(x, key):
+    """Index a leaf along the batch axis, matching :meth:`AudioTree.__getitem__`.
+
+    Arrays and list-of-strings leaves are indexed with *key*; every other leaf
+    (bare strings, scalars, ...) is passed through unchanged so it is never
+    character- or element-sliced.
+    """
+    if isinstance(x, (np.ndarray, jax.Array)) or _is_string_list(x):
+        return x[key]
+    return x
+
+
 _XLA_PLATFORMS = ("cpu", "gpu", "tpu")
 
 
@@ -1128,17 +1151,9 @@ class AudioTree:
             # axis survives on every field.
             key = slice(key, key + 1 or None)
 
-        def _is_string_list(x) -> bool:
-            return (
-                isinstance(x, list) and bool(x) and all(isinstance(s, str) for s in x)
-            )
-
-        def _index(x):
-            if isinstance(x, (np.ndarray, jax.Array)) or _is_string_list(x):
-                return x[key]
-            return x
-
-        return tree_util.tree_map(_index, self, is_leaf=_is_string_list)
+        return tree_util.tree_map(
+            lambda x: _index_batch_axis(x, key), self, is_leaf=_is_string_list
+        )
 
     def __iter__(self) -> Iterator[Self]:
         """Iterate over the batch axis, yielding a batch-of-1 AudioTree each.
@@ -1208,13 +1223,18 @@ class AudioTree:
         """
         audio_path = Path(audio_path)
 
-        target_length = None
-        if duration is not None and sample_rate is not None:
-            target_length = round(duration * sample_rate)
-
         data, sample_rate = librosa.load(
             str(audio_path), sr=sample_rate, offset=offset, duration=duration, mono=mono
         )
+
+        # Compute the target length from the *effective* rate librosa loaded at.
+        # When ``sample_rate`` is None the returned ``sample_rate`` is the file's
+        # native rate, so ``duration`` is still honored (a short file is padded)
+        # even without an explicit target rate -- the docstring promises the
+        # audio is trimmed or extended unconditionally.
+        target_length = None
+        if duration is not None:
+            target_length = round(duration * sample_rate)
 
         if data.ndim == 1:
             data = data[None, None, :]  # Add batch and channel dimension
@@ -1861,9 +1881,17 @@ class AudioTree:
 
         split_batch_size = total_batch_size // n_splits
 
+        # Slice the batch axis with the same leaf definition ``__getitem__``
+        # uses, so a list-of-strings metadata leaf is sliced element-wise
+        # (``names[i*s:(i+1)*s]``) instead of ``jax.tree_util`` descending into
+        # it and slicing each string's characters.
         return [
             tree_util.tree_map(
-                lambda x: x[i * split_batch_size : (i + 1) * split_batch_size], self
+                lambda x, i=i: _index_batch_axis(
+                    x, slice(i * split_batch_size, (i + 1) * split_batch_size)
+                ),
+                self,
+                is_leaf=_is_string_list,
             )
             for i in range(n_splits)
         ]
@@ -2094,7 +2122,13 @@ def _concatenate(arrays: Sequence[ArrayLike], axis: int = 0) -> ArrayLike:
     tree must not do. A single JAX array anywhere in *arrays* makes the whole
     concatenation JAX -- ``jnp.concatenate`` accepts NumPy operands, so a mixed
     sequence still works and lands on device.
+
+    List-of-strings metadata leaves (a supported ``metadata`` type) are joined
+    as Python lists, since ``np``/``jnp.concatenate`` cannot concatenate bare
+    strings.
     """
+    if _is_string_list(arrays[0]):
+        return [s for leaf in arrays for s in leaf]
     xp = jnp if any(isinstance(array, jax.Array) for array in arrays) else np
     return xp.concatenate(arrays, axis=axis)
 
@@ -2116,7 +2150,9 @@ def _batch_audiotrees(audio_trees: Sequence[AudioTree]) -> AudioTree:
     Returns:
         Single AudioTree with all items batched along axis 0.
     """
-    return tree_util.tree_map(lambda *xs: _concatenate(xs), *audio_trees)
+    return tree_util.tree_map(
+        lambda *xs: _concatenate(xs), *audio_trees, is_leaf=_is_string_list
+    )
 
 
 def _numpy_integrated_lufs(waveform: np.ndarray, sample_rate: int) -> np.ndarray:

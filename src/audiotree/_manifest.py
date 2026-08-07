@@ -149,11 +149,15 @@ def _encode_column(
 
     if isinstance(sample, (np.generic, int, float)):
         if isinstance(sample, np.generic):
+            # A numpy scalar carries its own width; keep it (an int16 velocity
+            # stays int16). A bare Python int/float has no width, so widen to
+            # 64-bit rather than silently narrowing: int32 overflows on a large
+            # byte offset or hash, and float32 rounds a float64 value away.
             dtype = sample.dtype
         elif isinstance(sample, int):
-            dtype = np.dtype(np.int32)
+            dtype = np.dtype(np.int64)
         else:
-            dtype = np.dtype(np.float32)
+            dtype = np.dtype(np.float64)
         filled = [value if value is not None else dtype.type(0) for value in values]
         return np.array(filled, dtype=dtype), mask
 
@@ -345,12 +349,20 @@ def read_columns(path: Union[str, Path]) -> ManifestColumns:
 
 
 def _decode_cell(array: np.ndarray, row: int) -> Any:
-    """Take one row out of a column, undoing the fixed-width string encoding."""
+    """Take one row out of a column, undoing the fixed-width string encoding.
+
+    A scalar string/bytes cell comes back as a Python ``str``/``bytes``. An
+    array-valued cell -- ``array[row]`` is a sub-array, as it is for any
+    multi-dimensional column -- is handed back as that sub-array unchanged;
+    ``str()``/``bytes()`` on it would yield a numpy repr or the raw fixed-width
+    buffer, destroying the stored value.
+    """
     value = array[row]
-    if array.dtype.kind == "U":
-        return str(value)
-    if array.dtype.kind == "S":
-        return bytes(value)
+    if np.ndim(value) == 0:
+        if array.dtype.kind == "U":
+            return str(value)
+        if array.dtype.kind == "S":
+            return bytes(value)
     return value
 
 

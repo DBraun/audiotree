@@ -895,6 +895,106 @@ def test_manifest_sample_count_is_refreshed_while_writing():
         writer.close()
 
 
+def test_dtype_mismatch_on_a_later_write_raises_and_does_not_corrupt():
+    """A later leaf whose dtype differs from the schema must raise, not cast.
+
+    dtype was recorded on the first write but never re-checked, so numpy's
+    default unsafe cast silently corrupted values: a float64 ``1e9`` written
+    into an int16 leaf read back as ``-13824`` with no warning at all.
+    """
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        writer = TreeWriter(tmpdir, expected_samples=4)
+        writer.open()
+        writer.write({"x": np.zeros((2, 3), dtype=np.int16)})
+
+        with pytest.raises(ValueError) as excinfo:
+            writer.write({"x": np.full((2, 3), 1e9, dtype=np.float64)})
+        message = str(excinfo.value)
+        assert "Dtype mismatch for leaf 'x'" in message
+        assert "expected int16" in message
+        assert "got float64" in message
+
+        # The rejected batch corrupted nothing; only the first batch survives.
+        writer.close()
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 2
+        np.testing.assert_array_equal(source[0]["x"].ravel(), [0, 0, 0])
+        np.testing.assert_array_equal(source[1]["x"].ravel(), [0, 0, 0])
+        source.close()
+
+
+def test_failed_validation_writes_nothing_and_leaves_the_writer_usable():
+    """A batch that fails validation must commit no leaf and not poison the writer.
+
+    Leaves were validated and written in a single interleaved pass, so a check
+    that tripped on a later leaf left earlier ones already written. Validation
+    now runs fully up front, so a rejected batch changes nothing and the next
+    write lands exactly where it should.
+    """
+    from audiotree.sources import TreeDataSource
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        writer = TreeWriter(tmpdir, expected_samples=6)
+        writer.open()
+        writer.write({"a": _f32(1.0), "b": _f32(2.0)})
+
+        # The second leaf has a mismatched batch size, so the batch is rejected.
+        with pytest.raises(ValueError, match="Inconsistent batch sizes"):
+            writer.write({"a": _f32(3.0, (2, 3)), "b": _f32(4.0, (5, 3))})
+
+        assert writer._current_index == 2  # nothing was committed
+        assert writer._broken is None  # a clean rejection, not a poisoning
+
+        # The writer is still usable; the next valid batch lands at index 2.
+        assert writer.write({"a": _f32(9.0), "b": _f32(8.0)}) == 2
+        writer.close()
+
+        source = TreeDataSource(tmpdir)
+        assert len(source) == 4
+        np.testing.assert_array_equal(source[2]["a"].ravel(), [9.0, 9.0, 9.0])
+        np.testing.assert_array_equal(source[3]["b"].ravel(), [8.0, 8.0, 8.0])
+        source.close()
+
+
+def test_write_failure_mid_commit_poisons_the_writer():
+    """An IO error while committing a validated batch must poison the writer.
+
+    Validation is exhaustive and up front, so a batch only reaches the commit
+    phase once every leaf has passed. A disk error there can still leave some
+    leaves written and others (bagz records) not, which would positionally
+    misbind every later string label; rather than silently produce such a
+    shifted dataset, the writer refuses all further writes.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        writer = TreeWriter(tmpdir, expected_samples=4)
+        writer.open()
+        writer.write({"a": _f32(1.0), "b": _f32(2.0)})
+        assert writer._current_index == 2
+
+        class _Exploding:
+            def __setitem__(self, key, value):
+                raise OSError("No space left on device")
+
+            def flush(self):
+                pass
+
+        # Make the second leaf's commit fail after the first leaf has written.
+        real = writer._memmaps[1]
+        writer._memmaps[1] = _Exploding()
+        with pytest.raises(OSError, match="No space left"):
+            writer.write({"a": _f32(3.0), "b": _f32(4.0)})
+
+        assert writer._broken is not None  # the writer is poisoned
+        assert writer._current_index == 2  # the failed batch did not advance it
+        with pytest.raises(RuntimeError, match="cannot accept further writes"):
+            writer.write({"a": _f32(5.0), "b": _f32(6.0)})
+
+        writer._memmaps[1] = real  # let close() finalize the readable prefix
+        writer.close()
+
+
 def test_close_is_terminal():
     """Reopening a closed writer must raise, not accept writes it will drop.
 

@@ -624,35 +624,76 @@ class TreeWriter:
                 batch_size = writable
         end_idx = self._current_index + batch_size
 
-        # Write array leaves to memmaps
-        for i, (mm, leaf) in enumerate(zip(self._memmaps, array_leaves)):
+        # Validate every leaf -- batch size, per-sample shape, exact dtype, and
+        # (for string leaves) utf-8 encodability -- BEFORE mutating any memmap or
+        # bagz file. A write() must be atomic: either the whole batch commits or
+        # none of it does. Validating and writing in one interleaved pass let a
+        # check that tripped on a later leaf leave earlier ones already written
+        # -- and, for string leaves, orphaned bagz records that positionally
+        # misbind every later label. Exact-dtype matching also closes the gap
+        # where dtype was recorded on the first write but never re-checked, so
+        # numpy's default unsafe cast silently corrupted a later batch's values.
+        for i, leaf in enumerate(array_leaves):
+            name = self._leaf_names[i]
             if leaf.shape[0] != batch_size:
                 raise ValueError(
                     f"Inconsistent batch sizes: expected {batch_size}, "
-                    f"leaf '{self._leaf_names[i]}' has {leaf.shape[0]}"
+                    f"leaf '{name}' has {leaf.shape[0]}"
                 )
-
-            expected_shape = tuple(
-                self._leaf_info[self._leaf_names[i]]["shape_per_sample"]
-            )
+            expected_shape = tuple(self._leaf_info[name]["shape_per_sample"])
             if leaf.shape[1:] != expected_shape:
                 raise ValueError(
-                    f"Shape mismatch for leaf '{self._leaf_names[i]}': "
+                    f"Shape mismatch for leaf '{name}': "
                     f"expected {expected_shape}, got {leaf.shape[1:]}"
                 )
+            expected_dtype = self._leaf_info[name]["dtype"]
+            got_dtype = str(_native_dtype(leaf.dtype))
+            if got_dtype != expected_dtype:
+                raise ValueError(
+                    f"Dtype mismatch for leaf '{name}': expected {expected_dtype}, "
+                    f"got {got_dtype}. numpy would cast it into the schema dtype "
+                    f"without warning, silently corrupting values; cast the leaf "
+                    f"to {expected_dtype} before writing."
+                )
 
-            mm[self._current_index : end_idx] = leaf
-
-        # Write string leaves to bagz files
+        encoded_string_data: Dict[str, List[bytes]] = {}
         for name, strings in string_data.items():
             if len(strings) != batch_size:
                 raise ValueError(
                     f"Inconsistent batch sizes: expected {batch_size}, "
                     f"string leaf '{name}' has {len(strings)}"
                 )
-            writer = self._bagz_writers[name]
-            for s in strings:
-                writer.write(s.encode("utf-8"))
+            try:
+                encoded_string_data[name] = [s.encode("utf-8") for s in strings]
+            except UnicodeEncodeError as e:
+                raise ValueError(
+                    f"String leaf '{name}' has a value that is not utf-8 "
+                    f"encodable: {e}. The batch is rejected with nothing written."
+                ) from e
+
+        # Validation passed: commit every leaf. Array writes are positional at
+        # _current_index (a failed one is overwritten by the next batch or
+        # truncated by close), but a bagz append cannot be un-appended, so a
+        # failure part-way through the commit -- a disk error, say -- can leave
+        # the leaf files inconsistent. Poison the writer so subsequent writes
+        # and any finalization fail loudly rather than silently producing a
+        # dataset whose later string labels are shifted.
+        try:
+            for mm, leaf in zip(self._memmaps, array_leaves):
+                mm[self._current_index : end_idx] = leaf
+            for name, records in encoded_string_data.items():
+                writer = self._bagz_writers[name]
+                for record in records:
+                    writer.write(record)
+        except BaseException:
+            self._broken = (
+                f"TreeWriter failed part-way through committing a batch, so its "
+                f"leaf files may be inconsistent (some leaves written, some not). "
+                f"The {self._current_index} samples already written remain "
+                f"readable and close() will finalize them, but this writer cannot "
+                f"accept further writes."
+            )
+            raise
 
         self._current_index += batch_size
         if self._pbar is not None:

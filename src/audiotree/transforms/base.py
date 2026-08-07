@@ -346,9 +346,9 @@ class BaseTransformMixIn:
             if not isinstance(x, dict):
                 return False
             values = list(x.values())
-            while isinstance(values, list):
+            while isinstance(values, list) and values:
                 values = values[0]
-            return isinstance(values, AudioTree)
+            return not values or isinstance(values, AudioTree)
 
         # Use output_key to rename the nodes in the tree
         def rename_node(path: KeyPath, leaf):
@@ -363,8 +363,10 @@ class BaseTransformMixIn:
         # Rename the deepest keys in the new tree using the `output_key` function.
         new_tree = map_with_path(rename_node, new_tree, is_leaf=is_leaf)
 
-        # Merge the trees. Unfortunately, the order matters.
-        new_tree = merge_pytree(new_tree, old_tree)
+        # Merge the trees. Order matters: on a key collision the second argument
+        # wins, and the only key that can collide is the one the user explicitly
+        # asked `output_key` to write, so the freshly transformed value must win.
+        new_tree = merge_pytree(old_tree, new_tree)
         return new_tree
 
 

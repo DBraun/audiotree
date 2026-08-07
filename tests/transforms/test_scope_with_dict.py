@@ -438,3 +438,82 @@ def test_scope_rejects_bad_types():
         volume_change(scope="wet")
     with pytest.raises(TypeError, match="scope path must be a string"):
         volume_change(scope=[123])
+
+
+# === output_key + scope regressions (both backends) ===
+
+
+def _backend(name):
+    """Return (invert_phase transform factory, make_rng) for a backend."""
+    if name == "numpy":
+        from audiotree.transforms import invert_phase as ip
+
+        return ip, lambda: np.random.default_rng(0)
+    import jax
+
+    from audiotree.transforms.jax import invert_phase as ip
+
+    return ip, lambda: jax.random.PRNGKey(0)
+
+
+def _const(value):
+    return AudioTree.create(np.full((1, 1, 64), value, np.float32), 16000)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+@pytest.mark.parametrize("order", [("dry", "wet"), ("wet", "dry")])
+def test_output_key_with_out_of_scope_first_key(backend, order):
+    """B1: an out-of-scope alphabetically-first key must not crash `_post_process`.
+
+    jax rebuilds dicts in sorted-key order, so with ``scope=['wet']`` the
+    sorted-first key 'dry' is out of scope; the empty-dict guard in the
+    `is_leaf` helper must keep it from being mis-descended (IndexError).
+    Insertion order must not matter.
+    """
+    invert_phase, make_rng = _backend(backend)
+
+    element = {k: _const(1.0) for k in order}
+    result = invert_phase(scope=["wet"], output_key="wet_aug").random_map(
+        element, make_rng()
+    )
+
+    assert set(result) == {"dry", "wet", "wet_aug"}
+    # Only the in-scope 'wet' subtree is transformed, written to 'wet_aug'.
+    assert np.allclose(np.asarray(result["wet_aug"].waveform), -1.0)
+    # Originals are untouched.
+    assert np.allclose(np.asarray(result["dry"].waveform), 1.0)
+    assert np.allclose(np.asarray(result["wet"].waveform), 1.0)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_output_key_control_in_scope_first_key(backend):
+    """B1 control: transforming the sorted-first key still works."""
+    invert_phase, make_rng = _backend(backend)
+
+    result = invert_phase(scope=["dry"], output_key="dry_aug").random_map(
+        {"dry": _const(1.0), "wet": _const(1.0)}, make_rng()
+    )
+
+    assert set(result) == {"dry", "wet", "dry_aug"}
+    assert np.allclose(np.asarray(result["dry_aug"].waveform), -1.0)
+    assert np.allclose(np.asarray(result["dry"].waveform), 1.0)
+    assert np.allclose(np.asarray(result["wet"].waveform), 1.0)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_output_key_overwriting_existing_key_writes_transformed(backend):
+    """M1: `output_key` colliding with an existing key must write the transform.
+
+    Previously the merge let the OLD untransformed value win on collision, so
+    the user's explicitly requested output was silently discarded.
+    """
+    invert_phase, make_rng = _backend(backend)
+
+    result = invert_phase(scope=["dry"], output_key="wet").random_map(
+        {"dry": _const(1.0), "wet": _const(0.5)}, make_rng()
+    )
+
+    # The transformed 'dry' (-1.0) wins for 'wet', not the original 0.5.
+    assert np.allclose(np.asarray(result["wet"].waveform), -1.0)
+    # The transformed key's source is left untouched.
+    assert np.allclose(np.asarray(result["dry"].waveform), 1.0)

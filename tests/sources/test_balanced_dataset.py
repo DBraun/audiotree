@@ -308,6 +308,92 @@ class TestCreateBalancedAudioDataset:
             item = ds[0]
             assert isinstance(item, AudioTree)
 
+    def test_mixed_file_and_preconstructed_groups_batch_together(self):
+        """A file group and a pre-built dataset group must share a metadata schema.
+
+        The docstring's own example mixes ``sources=`` with ``datasets=``. File
+        groups are stamped with ``source=group_name``; a pre-built dataset built
+        with ``create_audio_dataset``'s default ``source=None`` used to carry no
+        such key, so any batch spanning both groups failed
+        ``AudioTree.batch``'s pytree check on the missing ``source`` key --
+        intermittently, since single-group batches collate fine.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from audiotree.sources import create_audio_dataset
+
+            speech_dir = _create_test_audio_files(tmpdir, "speech", 5)
+            music_dir = _create_test_audio_files(tmpdir, "music", 5)
+
+            # Pre-built exactly as the docstring shows: default source=None.
+            preprocessed_ds = create_audio_dataset(
+                sources=music_dir,
+                num_epochs=None,
+                sample_rate=44100,
+                duration=0.5,
+            )
+
+            ds = create_balanced_audio_dataset(
+                sources={"speech": [speech_dir]},
+                datasets={"preprocessed": preprocessed_ds},
+                weights={"speech": 0.7, "preprocessed": 0.3},
+                sample_rate=44100,
+                duration=0.5,
+                shuffle=False,
+            ).slice(slice(0, 40))
+
+            items = [ds[i] for i in range(len(ds))]
+
+            # Both groups expose an identical metadata schema, each carrying a
+            # `source` set to its group name.
+            keys_by_source: Dict[str, set] = {}
+            for item in items:
+                assert len(item.source) == 1
+                keys_by_source.setdefault(item.source[0], set()).update(
+                    item.metadata.keys()
+                )
+            assert set(keys_by_source) == {"speech", "preprocessed"}
+            assert keys_by_source["speech"] == keys_by_source["preprocessed"]
+            assert "source" in keys_by_source["preprocessed"]
+
+            # A cross-group slice actually collates -- what used to crash.
+            sources_seen = {item.source[0] for item in items[:12]}
+            assert sources_seen == {"speech", "preprocessed"}, (
+                "test needs a slice spanning both groups"
+            )
+            batch = AudioTree.batch(items[:12])
+            assert batch.waveform.shape == (12, 1, 22050)
+            for src in batch.source:
+                assert src in ("speech", "preprocessed")
+
+    def test_preconstructed_source_is_overwritten_by_group_name(self):
+        """The group name the caller chose wins over a dataset's own `source`.
+
+        A pre-built dataset may already carry a `source` (it was built with
+        `create_audio_dataset(source=...)`); the balanced-group name the caller
+        assigns here is the authoritative one, matching how file groups override
+        whatever `create_audio_dataset` was told.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from audiotree.sources import create_audio_dataset
+
+            music_dir = _create_test_audio_files(tmpdir, "music", 5)
+            preprocessed_ds = create_audio_dataset(
+                sources=music_dir,
+                num_epochs=None,
+                sample_rate=44100,
+                duration=0.5,
+                source="its_own_name",
+            )
+
+            ds = create_balanced_audio_dataset(
+                datasets={"preprocessed": preprocessed_ds},
+                sample_rate=44100,
+                duration=0.5,
+            ).slice(slice(0, 10))
+
+            for i in range(len(ds)):
+                assert ds[i].source == ["preprocessed"]
+
     def test_datasets_only(self):
         """Test using only pre-constructed datasets without file sources."""
         with tempfile.TemporaryDirectory() as tmpdir:

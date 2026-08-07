@@ -867,3 +867,94 @@ def test_unknown_on_read_error_is_rejected_at_construction(tmp_path):
 
     with pytest.raises(ValueError, match="on_read_error must be one of"):
         AudioDataSource.from_writer_output(tmp_path, on_read_error="ignore")
+
+
+# ---------------------------------------------------------------------------
+# Synthetic zero waveforms must carry the *target* geometry, not the stored
+# original one, so they collate with real resampled/mono items.
+# ---------------------------------------------------------------------------
+
+
+def test_silence_substitute_collates_under_resampling(tmp_path):
+    """A resampled substitute matches its resampled peers, so the batch collates.
+
+    The manifest records ``samples`` at the written rate; under on-the-fly
+    resampling the substitute has to be sized to the *target* rate the same way
+    the real items are, or ``AudioTree.batch`` cannot concatenate them.
+    """
+    output_dir = _writer_output_with_one_bad_file(
+        tmp_path, _empty
+    )  # 3x (2, 8000) @ 8 kHz
+    source = AudioDataSource.from_writer_output(
+        output_dir, sample_rate=16000, on_read_error="skip"
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        items = [source[i] for i in range(len(source))]
+
+    real, substitute = items[0], items[1]
+    assert bool(real.metadata[READ_ERROR_KEY][0]) is False
+    assert bool(substitute.metadata[READ_ERROR_KEY][0]) is True
+    # The substitute carries the target geometry, matching its resampled peers.
+    assert substitute.waveform.shape == real.waveform.shape == (1, 2, 16000)
+    assert substitute.sample_rate == 16000
+
+    batch = AudioTree.batch(items)
+    assert batch.waveform.shape == (3, 2, 16000)
+
+
+def test_silence_substitute_matches_real_length_for_noninteger_ratio(tmp_path):
+    """The substitute mirrors librosa's resample length exactly, not a rounded one.
+
+    For a ratio like 44100->48000 the resampled length overshoots
+    ``round(duration * sr)`` by a sample (librosa sizes it ``ceil`` of a float
+    ratio). Sizing the substitute with ``round`` would leave it one sample short
+    of its real peers and break batching; it must reuse the real-item length.
+    """
+    tree = AudioTree.create(
+        np.random.randn(3, 1, 44100).astype(np.float32), sample_rate=44100
+    )
+    with AudioWriter(tmp_path) as writer:
+        writer.write(tree)
+    (Path(tmp_path) / "audio_0001.wav").write_bytes(b"")
+
+    source = AudioDataSource.from_writer_output(
+        tmp_path, sample_rate=48000, on_read_error="skip"
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        items = [source[i] for i in range(len(source))]
+
+    # A real 44100->48000 load lands at 48001 (ceil of the ratio), not 48000.
+    assert items[0].waveform.shape[-1] == 48001
+    assert items[1].waveform.shape == items[0].waveform.shape
+    assert AudioTree.batch(items).waveform.shape == (3, 1, 48001)
+
+
+def test_token_only_manifest_honors_mono_and_resampling(tmp_path):
+    """A manifest with no audio on disk still yields the target geometry.
+
+    ``files_written=False`` builds a synthetic zero waveform from the manifest;
+    it must honor ``mono`` and ``sample_rate`` (and ``duration``) instead of
+    replaying the stored stereo original-rate shape, or it cannot batch with
+    real resampled/mono items.
+    """
+    tree = AudioTree.create(
+        np.zeros((2, 2, 44100), dtype=np.float32), sample_rate=44100
+    )
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        writer.write(tree)
+
+    source = AudioDataSource.from_writer_output(tmp_path, sample_rate=16000, mono=True)
+    item = source[0]
+    assert item.waveform.shape == (1, 1, 16000)  # mono, resampled from stereo 44.1 kHz
+    assert item.sample_rate == 16000
+    batch = AudioTree.batch([source[i] for i in range(len(source))])
+    assert batch.waveform.shape == (2, 1, 16000)
+
+    # Duration composes on top of mono + resampling.
+    dur_source = AudioDataSource.from_writer_output(
+        tmp_path, sample_rate=16000, mono=True, duration=0.5
+    )
+    assert dur_source[0].waveform.shape == (1, 1, 8000)

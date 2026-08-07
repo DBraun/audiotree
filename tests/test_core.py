@@ -131,6 +131,34 @@ def test_write_round_trip(tmp_path):
     np.testing.assert_allclose(reloaded.waveform[0], waveform[0], atol=1e-3)
 
 
+def test_from_file_pads_duration_without_sample_rate(tmp_path):
+    """from_file honors ``duration`` even when ``sample_rate`` is None.
+
+    Regression: target_length was computed only when both duration and
+    sample_rate were given, so a short file loaded at its native rate (sr=None)
+    was returned unpadded despite the docstring's unconditional promise and
+    pad_mode defaulting to "constant". librosa.load with sr=None reports the
+    native rate, so the target length is computable from it.
+    """
+    import soundfile
+
+    sr = 16000
+    path = tmp_path / "half_second.wav"
+    soundfile.write(str(path), np.zeros(sr // 2, np.float32), sr, subtype="FLOAT")
+
+    # With an explicit rate the short file is padded to 2 s.
+    assert AudioTree.from_file(path, sample_rate=sr, duration=2.0).waveform.shape == (
+        1,
+        1,
+        2 * sr,
+    )
+
+    # With sr=None (native rate) it is padded to the same length.
+    reloaded = AudioTree.from_file(path, duration=2.0)
+    assert reloaded.sample_rate == sr
+    assert reloaded.waveform.shape == (1, 1, 2 * sr)
+
+
 def test_write_options_and_batch_size_check(tmp_path):
     """write() forwards subtype/format and requires batch_size == 1."""
     import soundfile
@@ -373,6 +401,36 @@ def test_split_by_batch():
     split_trees = big_tree.split(2)
     assert len(split_trees) == 2
     assert split_trees[0].waveform.shape == (6, 1, 44100)
+
+
+def test_split_preserves_string_list_metadata():
+    """split() slices list-of-strings metadata element-wise, not character-wise.
+
+    Regression: split() used a bare tree_map with no is_leaf, so jax descended
+    into the list and sliced each string's characters
+    (``['a.wav', ...]`` -> ``['a.', ...]``). It must treat the list as one leaf,
+    exactly like __getitem__ does.
+    """
+    names = ["a.wav", "b.wav", "c.wav", "d.wav"]
+    tree = AudioTree.create(
+        np.zeros((4, 1, 8), np.float32), 16000, metadata={"names": names}
+    )
+
+    first, second = tree.split(2)
+    assert first.metadata["names"] == ["a.wav", "b.wav"]
+    assert second.metadata["names"] == ["c.wav", "d.wav"]
+
+    # A bare-string leaf is passed through unchanged (never character-sliced),
+    # matching __getitem__ semantics.
+    tagged = AudioTree.create(
+        np.zeros((4, 1, 8), np.float32), 16000, metadata={"tag": "hello"}
+    )
+    assert tagged.split(2)[0].metadata["tag"] == "hello"
+
+    # filter() (split + _batch_audiotrees) and AudioTree.batch round-trip a
+    # string-list leaf instead of crashing on it.
+    assert tree.filter(lambda t: True).metadata["names"] == names
+    assert AudioTree.batch([first, second]).metadata["names"] == names
 
 
 def test_split_by_mini_batch():
