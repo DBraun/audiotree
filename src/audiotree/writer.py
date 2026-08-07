@@ -113,7 +113,10 @@ class AudioWriter:
     Args:
         directory: Directory where audio files will be written
         pattern: Filename pattern with {index} placeholder for sequential numbering
-        include_timestamp: Whether to include timestamps in manifest entries
+        include_timestamp: Whether to record a ``timestamp`` manifest column.
+            One timestamp is minted per ``write()`` call and shared by every
+            entry in that batch, so it records when the batch was written and
+            distinct timestamps count ``write()`` calls.
         compress_manifest: Whether to compress NPZ manifest files (only applies to npz format)
         write_audio: Whether to write audio files to disk (default True). When False,
             only manifest is generated with metadata
@@ -231,6 +234,10 @@ class AudioWriter:
         # filepath column) is fixed by the first write; later writes must match.
         self._expected_metadata_keys = None
         self._expected_has_filepath = None
+        # Each column's logical value kind, pinned by its first value. Kind
+        # drift (int rows, then a str row) is rejected at the offending write;
+        # see _check_entry_kinds.
+        self._column_kinds: Dict[str, str] = {}
         self.manifest_every = manifest_every
         self._manifest_index = 0  # self.index as of the last manifest write
 
@@ -399,6 +406,12 @@ class AudioWriter:
         # (filename, peak, subtype) for every item this write clips.
         clipped: List[Tuple[str, float, Optional[str]]] = []
 
+        # One timestamp for the whole call: the batch lands together, so its
+        # entries share their provenance, and get_stats() can count batches as
+        # distinct timestamps. Minting one per item made total_batches count
+        # items instead.
+        timestamp = datetime.now().isoformat() if self.include_timestamp else None
+
         for i in range(batch_size):
             # Generate filename
             # todo: need a way to pass more kwargs to this formatter
@@ -411,7 +424,10 @@ class AudioWriter:
             # Collect the manifest entry first: a column this writer cannot
             # store raises, and doing that before the WAV exists keeps the
             # directory free of audio no manifest row points at.
-            entry = self._create_manifest_entry(tree, i, filename, tags, subtype)
+            entry = self._create_manifest_entry(
+                tree, i, filename, tags, subtype, timestamp
+            )
+            self._check_entry_kinds(entry)
 
             # Write audio file if requested
             if self.write_audio:
@@ -479,6 +495,7 @@ class AudioWriter:
         filename: str,
         tags: Optional[Dict] = None,
         subtype: Optional[str] = None,
+        timestamp: Optional[str] = None,
     ) -> Dict:
         """Create a manifest entry for a single audio file.
 
@@ -489,6 +506,8 @@ class AudioWriter:
             tags: Optional custom metadata
             subtype: soundfile subtype the audio was encoded with, or ``None``
                 when no audio file was written
+            timestamp: ISO timestamp shared by every entry of this ``write()``
+                call, or ``None`` when timestamps are disabled
 
         Returns:
             Dictionary containing manifest entry data
@@ -506,9 +525,9 @@ class AudioWriter:
             "subtype": subtype,
         }
 
-        # Add timestamp only if requested
-        if self.include_timestamp:
-            entry["timestamp"] = datetime.now().isoformat()
+        # Add timestamp only if requested (None when include_timestamp=False)
+        if timestamp is not None:
+            entry["timestamp"] = timestamp
 
         # Add AudioTree fields dynamically, preserving dtypes
         for field_name in LABEL_FIELDS:
@@ -539,6 +558,49 @@ class AudioWriter:
                 entry[column] = _column_value(column, value, batch_index)
 
         return entry
+
+    def _check_entry_kinds(self, entry: Dict) -> None:
+        """Pin each column's value kind at its first value, rejecting drift here.
+
+        A column whose values change logical kind across writes (int rows, then
+        a str row) passes the schema checks in :meth:`write` -- the *keys* still
+        match -- and would otherwise only be caught by the encoder at
+        save/close, aborting with the manifest unwritten and every WAV already
+        on disk, orphaned. Checked as each entry is collected, before its audio
+        is written, so the offending ``write()`` fails at its own call. The
+        encoder's per-column homogeneity checks remain the backstop.
+
+        Args:
+            entry: A manifest entry from :meth:`_create_manifest_entry`.
+
+        Raises:
+            ValueError: If a value's kind differs from the kind established by
+                the column's first value.
+        """
+
+        def cells():
+            for column, value in entry.items():
+                if column == "tags":
+                    # Pivoted into tags_* columns by _manifest_to_columns.
+                    for tag_key, tag_value in value.items():
+                        yield f"{_manifest.TAG_PREFIX}{tag_key}", tag_value
+                else:
+                    yield column, value
+
+        for column, value in cells():
+            if value is None:
+                # A missing value (masked subtype, absent tag) fixes no kind.
+                continue
+            kind = _manifest._value_kind(value)
+            established = self._column_kinds.setdefault(column, kind)
+            if kind != established:
+                raise ValueError(
+                    f"Manifest column {column!r} holds {established} values "
+                    f"from previous writes, but this write supplies a {kind} "
+                    f"value ({value!r}). A column must hold one type; rejected "
+                    f"at this write so the run's earlier audio is not orphaned "
+                    f"by a failed manifest save at close()."
+                )
 
     def save_manifest(self) -> Optional[Path]:
         """Write ``manifest.npz`` atomically (temp file + rename).
@@ -620,7 +682,10 @@ class AudioWriter:
         """Get statistics about written files.
 
         Returns:
-            Dictionary containing write statistics
+            Dictionary containing write statistics. When ``include_timestamp``
+            is set, ``total_batches`` counts :meth:`write` calls: each call
+            mints one timestamp shared by its batch's entries, so distinct
+            timestamps are distinct batches.
         """
         stats = {
             "total_files": len(self.written_paths),

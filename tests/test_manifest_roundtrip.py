@@ -21,6 +21,13 @@ Covers two bugs in :mod:`audiotree._manifest`:
   the name ``"tags"``, which ``read_entries`` synthesizes from ``tags_*``
   columns and would silently clobber. A column named exactly ``"tags"`` must be
   rejected.
+* **m14** -- the ndarray branch of ``_encode_column`` checked only shape
+  homogeneity, so ``np.stack`` silently promoted mixed dtype kinds (an int32
+  row next to a float32 row became float64; an int row next to a string row
+  became its ``str()`` text), violating ``read_entries``' dtype-fidelity
+  contract. Rows must share a dtype kind; widths within a kind may differ and
+  stack to the widest, every value intact. The trailing-NUL rule also applies
+  to str/bytes leaves in list rows, which the encoder itself converts.
 """
 
 import tempfile
@@ -267,3 +274,88 @@ def test_tags_prefix_pivot_still_works(tmp_path):
 
     entries = _manifest.read_entries(path)
     assert entries[0]["tags"] == {"genre": "rock", "year": 1994}
+
+
+# --- m14: array-valued columns enforce dtype-kind homogeneity across rows ---
+
+
+def test_array_column_mixing_int_and_float_rows_raises(tmp_path):
+    """An int row next to a float row would stack to float64; rejected instead."""
+    path = tmp_path / "manifest.npz"
+    rows = [np.array([1, 2], dtype=np.int32), np.array([1.5, 2.5], dtype=np.float32)]
+    with pytest.raises(ValueError, match=r"column 'emb' mixes int arrays.*float"):
+        _manifest.write(path, {"emb": rows}, 2)
+
+
+def test_array_column_mixing_int_and_string_rows_raises(tmp_path):
+    """An int row next to a string row would be stringified; rejected instead."""
+    path = tmp_path / "manifest.npz"
+    rows = [np.array([1, 2]), np.array(["a", "b"])]
+    with pytest.raises(ValueError, match=r"column 'ids' mixes int arrays.*str"):
+        _manifest.write(path, {"ids": rows}, 2)
+
+
+def test_array_column_mixing_signed_and_unsigned_rows_raises(tmp_path):
+    """int64 + uint64 rows would stack to float64 -- a kind change -- so signed
+    and unsigned integer rows are held apart."""
+    path = tmp_path / "manifest.npz"
+    rows = [np.array([1, 2], dtype=np.int64), np.array([1, 2], dtype=np.uint64)]
+    with pytest.raises(ValueError, match=r"column 'n' mixes int arrays.*uint"):
+        _manifest.write(path, {"n": rows}, 2)
+
+
+def test_float32_embedding_rows_round_trip_with_dtype(tmp_path):
+    """A legitimate array column -- per-row float32 embeddings -- is not caught
+    by the kind check, and its dtype survives the round trip."""
+    path = tmp_path / "manifest.npz"
+    rows = [
+        np.array([0.1, 0.2, 0.3], dtype=np.float32),
+        np.array([0.4, 0.5, 0.6], dtype=np.float32),
+    ]
+    _manifest.write(path, {"metadata_embedding": rows}, len(rows))
+
+    columns = _manifest.read_columns(path)
+    assert columns.columns["metadata_embedding"].dtype == np.float32
+
+    entries = _manifest.read_entries(path)
+    for entry, row in zip(entries, rows):
+        cell = entry["metadata_embedding"]
+        assert isinstance(cell, np.ndarray)
+        assert cell.dtype == np.float32
+        np.testing.assert_array_equal(cell, row)
+
+
+def test_array_rows_of_same_kind_promote_to_the_widest_width(tmp_path):
+    """Widths within a kind stack to the widest with every value intact:
+    int32+int64 -> int64, <U3+<U8 -> <U8."""
+    path = tmp_path / "manifest.npz"
+    int_rows = [np.array([1, 2], dtype=np.int32), np.array([3, 2**40])]
+    str_rows = [np.array(["ab", "c"]), np.array(["longer", "strings!"])]
+    _manifest.write(path, {"n": int_rows, "s": str_rows}, 2)
+
+    columns = _manifest.read_columns(path)
+    assert columns.columns["n"].dtype == np.int64
+    assert columns.columns["s"].dtype.kind == "U"
+
+    entries = _manifest.read_entries(path)
+    np.testing.assert_array_equal(entries[1]["n"], [3, 2**40])
+    np.testing.assert_array_equal(entries[1]["s"], ["longer", "strings!"])
+
+
+def test_string_list_row_with_trailing_nul_raises(tmp_path):
+    """A str leaf inside a list row still holds its NUL, and the encoder's own
+    np.asarray would be what truncates it -- so it is rejected. (An ndarray row
+    cannot offend: numpy strips trailing NULs at element access, so the
+    observable value round-trips exactly.)"""
+    path = tmp_path / "manifest.npz"
+    rows = [np.array(["ok", "fine"]), ["bad\x00", "fine"]]
+    with pytest.raises(ValueError, match=r"column 's'.*NUL"):
+        _manifest.write(path, {"s": rows}, 2)
+
+
+def test_bytes_list_row_with_trailing_nul_raises(tmp_path):
+    """Same trailing-NUL rule for bytes leaves in list rows."""
+    path = tmp_path / "manifest.npz"
+    rows = [np.array([b"ok", b"fine"]), [b"bad\x00", b"fine"]]
+    with pytest.raises(ValueError, match=r"column 'b'.*NUL"):
+        _manifest.write(path, {"b": rows}, 2)

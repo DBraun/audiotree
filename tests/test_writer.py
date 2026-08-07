@@ -1836,3 +1836,96 @@ def test_consistent_metadata_sequence_still_writes_manifest(tmp_path):
     data = load_manifest(tmp_path / "manifest.npz")
     assert len(data["index"]) == 5
     np.testing.assert_allclose(data["metadata_snr"], [1.0, 2.0, 3.0, 4.0, 5.0])
+
+
+def test_column_kind_drift_raises_at_the_write_not_at_close(tmp_path):
+    """A write whose values change a column's logical kind (int rows, then a
+    str row) is rejected at its own call -- the schema checks pass, since the
+    *keys* still match -- rather than at close(), where the encoder would abort
+    with the manifest unwritten and every WAV on disk orphaned."""
+    tree1 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+    tree1 = tree1.replace(metadata={"take": np.array([1, 2])})
+    tree2 = AudioTree.create(np.zeros((1, 1, 800), dtype=np.float32), 16000)
+    tree2 = tree2.replace(metadata={"take": "final"})
+
+    writer = AudioWriter(tmp_path, manifest_every=0)
+    writer.write(tree1)
+
+    with pytest.raises(
+        ValueError, match=r"'metadata_take' holds int values.*str value"
+    ):
+        writer.write(tree2)
+
+    # The drifting write left no audio behind: only the first two items exist.
+    assert sorted(p.name for p in tmp_path.glob("*.wav")) == [
+        "audio_0000.wav",
+        "audio_0001.wav",
+    ]
+
+    # And close() still writes a manifest consistent with the first write.
+    writer.close()
+    data = load_manifest(tmp_path / "manifest.npz")
+    assert len(data["index"]) == 2
+    np.testing.assert_array_equal(data["metadata_take"], [1, 2])
+
+
+def test_tag_kind_drift_raises_at_the_write(tmp_path):
+    """Tag columns are pinned the same way: a tag that changes kind across
+    writes fails at the offending write, naming the ``tags_*`` column."""
+    tree = AudioTree.create(np.zeros((1, 1, 800), dtype=np.float32), 16000)
+
+    writer = AudioWriter(tmp_path, write_audio=False, manifest_every=0)
+    writer.write(tree, tags={"quality": 1})
+    with pytest.raises(ValueError, match=r"'tags_quality' holds int values.*str value"):
+        writer.write(tree, tags={"quality": "high"})
+
+
+def test_array_column_kind_drift_raises_at_the_write(tmp_path):
+    """Array-valued columns are covered too: float32 embedding rows followed by
+    int rows fail at the second write, not at close via the encoder."""
+    float_tree = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+    float_tree = float_tree.replace(
+        metadata={"emb": np.zeros((2, 3), dtype=np.float32)}
+    )
+    int_tree = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+    int_tree = int_tree.replace(metadata={"emb": np.zeros((2, 3), dtype=np.int32)})
+
+    writer = AudioWriter(tmp_path, write_audio=False, manifest_every=0)
+    writer.write(float_tree)
+    with pytest.raises(
+        ValueError, match=r"'metadata_emb' holds float array values.*int array"
+    ):
+        writer.write(int_tree)
+
+
+def test_same_kind_values_across_writes_still_pass_the_kind_check(tmp_path):
+    """The kind check must not reject a consistent column: a plain str on one
+    write and per-item numpy strings on the next are both 'str'."""
+    tree1 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+    tree1 = tree1.replace(metadata={"label": "warmup"})
+    tree2 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
+    tree2 = tree2.replace(metadata={"label": np.array(["a", "b"])})
+
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        writer.write(tree1)
+        writer.write(tree2)
+
+    data = load_manifest(tmp_path / "manifest.npz")
+    assert list(data["metadata_label"]) == ["warmup", "warmup", "a", "b"]
+
+
+def test_timestamp_is_minted_once_per_write_call(tmp_path):
+    """Every entry of one write() shares one timestamp, so timestamps record
+    when the batch landed and get_stats() counts batches, not items."""
+    with AudioWriter(tmp_path, write_audio=False, include_timestamp=True) as writer:
+        writer.write(AudioTree.create(np.zeros((3, 1, 800), dtype=np.float32), 16000))
+        writer.write(AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000))
+        stats = writer.get_stats()
+
+    assert stats["total_batches"] == 2
+
+    timestamps = list(load_manifest(tmp_path / "manifest.npz")["timestamp"])
+    assert len(timestamps) == 5
+    assert len(set(timestamps[:3])) == 1  # first batch shares its timestamp
+    assert len(set(timestamps[3:])) == 1  # so does the second
+    assert timestamps[0] != timestamps[3]  # distinct write() calls differ

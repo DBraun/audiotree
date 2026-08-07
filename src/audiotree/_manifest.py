@@ -89,12 +89,13 @@ def _scalar_kind(value: Any) -> str:
     distinct from ``float`` (an int column cannot hold a float without truncating
     it). A numpy scalar reports the kind of its dtype, so an ``int16`` and an
     ``int32`` both count as ``"int"`` -- differing widths are legitimate within a
-    column, differing kinds are not.
+    column, differing kinds are not. Likewise ``np.str_`` counts as ``"str"``
+    and ``np.bytes_`` as ``"bytes"``, matching their Python counterparts.
     """
     if isinstance(value, (bool, np.bool_)):
         return "bool"
     if isinstance(value, np.generic):
-        return {"i": "int", "u": "int", "f": "float"}.get(
+        return {"i": "int", "u": "int", "f": "float", "U": "str", "S": "bytes"}.get(
             value.dtype.kind, value.dtype.kind
         )
     if isinstance(value, int):
@@ -102,6 +103,41 @@ def _scalar_kind(value: Any) -> str:
     if isinstance(value, float):
         return "float"
     return type(value).__name__
+
+
+#: Human-readable names for numpy dtype kind codes, for the array-row
+#: homogeneity check. Unlike :func:`_scalar_kind`, signed and unsigned integers
+#: are kept distinct here: stacking an ``int64`` row with a ``uint64`` row
+#: promotes to ``float64``, which changes the kind, so array rows are held to
+#: raw dtype-kind equality.
+_DTYPE_KIND_NAMES = {
+    "b": "bool",
+    "i": "int",
+    "u": "uint",
+    "f": "float",
+    "c": "complex",
+    "U": "str",
+    "S": "bytes",
+    "M": "datetime",
+    "m": "timedelta",
+    "O": "object",
+}
+
+
+def _value_kind(value: Any) -> str:
+    """The logical kind of one manifest cell value, scalar or array row.
+
+    An array row reports its dtype's kind with an ``" array"`` suffix, so an
+    int scalar and an int-array row are distinct kinds -- they are stored
+    differently and cannot share a column. ``AudioWriter`` uses this to pin a
+    column's kind at its first value and reject drift at the offending
+    ``write()`` rather than at close, with :func:`_encode_column`'s own
+    homogeneity checks as the backstop.
+    """
+    if isinstance(value, np.ndarray):
+        kind = _DTYPE_KIND_NAMES.get(value.dtype.kind, value.dtype.kind)
+        return f"{kind} array"
+    return _scalar_kind(value)
 
 
 def _encode_column(
@@ -118,8 +154,12 @@ def _encode_column(
         ``(array, mask)``. ``mask`` is ``None`` when no row is missing.
 
     Raises:
-        ValueError: If the column holds values with no NPZ representation, or
-            mixes strings with non-strings.
+        ValueError: If the column holds values with no NPZ representation,
+            mixes logical types (strings with non-strings, array rows of
+            differing dtype kinds or shapes), or holds a string/bytes value
+            ending in a NUL, which fixed-width storage cannot round-trip.
+            Array rows of the *same* dtype kind but differing widths are fine:
+            they stack to the widest width with every value intact.
     """
     count = len(values)
     present = np.fromiter(
@@ -183,6 +223,58 @@ def _encode_column(
 
     if isinstance(sample, np.ndarray):
         reference = np.asarray(sample)
+        kind = reference.dtype.kind
+        # np.stack promotes mixed dtypes to a common one instead of raising: an
+        # int32 row next to a float32 row becomes float64, and an int row next
+        # to a string row becomes the int's str() text. Either way the values
+        # come back with a dtype nobody wrote, so rows must share a dtype kind.
+        # Widths *within* a kind are fine -- int32+int64 stacks to int64 and
+        # <U3+<U8 to <U8, a widening with every written value intact, just as a
+        # scalar string column already stores every row at the widest width.
+        offender = next(
+            (
+                array
+                for array in (np.asarray(value) for value in provided)
+                if array.dtype.kind != kind
+            ),
+            None,
+        )
+        if offender is not None:
+            raise ValueError(
+                f"Manifest column {name!r} mixes "
+                f"{_DTYPE_KIND_NAMES.get(kind, kind)} arrays with "
+                f"{_DTYPE_KIND_NAMES.get(offender.dtype.kind, offender.dtype.kind)} "
+                f"arrays. Stacking them would silently promote every row to a "
+                f"common dtype, so a column's rows must share one dtype kind."
+            )
+        if kind in ("U", "S"):
+            # Same trailing-NUL rule as the scalar branches, applied to the
+            # rows this branch converts itself. A row that is already a numpy
+            # array is exempt -- not skipped, but genuinely unable to offend:
+            # fixed-width element access strips trailing NULs, so the value the
+            # caller can observe is exactly what read_entries returns. A
+            # str/bytes leaf inside a list/tuple row, though, still holds its
+            # NUL, and np.asarray below would be what truncates it.
+            nul: Any = "\x00" if kind == "U" else b"\x00"
+            offender = next(
+                (
+                    element
+                    for value in provided
+                    if not isinstance(value, np.ndarray)
+                    for element in np.asarray(value, dtype=object).ravel()
+                    if isinstance(element, (str, bytes)) and element.endswith(nul)
+                ),
+                None,
+            )
+            if offender is not None:
+                raise ValueError(
+                    f"Manifest column {name!r} holds an array row with a value "
+                    f"ending in a NUL ({offender!r}). NumPy fixed-width "
+                    f"'{'<U' if kind == 'U' else '|S'}' storage cannot tell a "
+                    f"trailing NUL from padding, so it is dropped on read and "
+                    f"the value would not round-trip; store it without a "
+                    f"trailing NUL."
+                )
         filled = [
             np.asarray(value)
             if value is not None
