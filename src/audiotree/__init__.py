@@ -1,4 +1,4 @@
-__version__ = "1.0.0rc1"  # Effort-based versioning. Single source of truth, read by pyproject.toml and the docs.
+__version__ = "1.0.0rc2"  # Effort-based versioning. Single source of truth, read by pyproject.toml and the docs.
 __author__ = "David Braun"
 from typing import TYPE_CHECKING
 
