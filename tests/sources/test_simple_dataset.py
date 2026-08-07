@@ -1,5 +1,6 @@
 """Tests for create_audio_dataset function."""
 
+import gc
 import os
 import stat
 import sys
@@ -538,12 +539,26 @@ def test_on_read_error_raise_always_names_the_path(kind, strategy, restore_permi
                 excerpt=ExcerptConfig(strategy=strategy),
             )
 
-        assert str(path) in str(excinfo.value)
-        assert excinfo.value.file_path == str(path)
-        # The original exception is preserved, not swallowed.
-        assert excinfo.value.__cause__ is not None
-        # ...and its type is named even when its message is empty.
-        assert type(excinfo.value.__cause__).__name__ in str(excinfo.value)
+        error = excinfo.value
+        message = str(error)
+        file_path = error.file_path
+        # The original exception is preserved, not swallowed, and its type is
+        # named even when its message is empty.
+        cause_name = type(error.__cause__).__name__ if error.__cause__ else None
+
+        # Then let the exception go before the tmpdir is removed. Its traceback
+        # holds the frames of librosa's audioread fallback, which holds an open
+        # handle on the file, and Windows refuses to delete a file that is still
+        # open. Measured on a zero-byte file: 1 handle while the exception is
+        # alive, 0 after. Exception and traceback reference each other, so the
+        # collect is doing real work rather than being superstitious.
+        del error, excinfo
+        gc.collect()
+
+        assert str(path) in message
+        assert file_path == str(path)
+        assert cause_name is not None
+        assert cause_name in message
 
 
 def test_on_read_error_raise_is_the_default():

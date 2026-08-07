@@ -49,6 +49,15 @@ class AudioReadError(OSError):
     :class:`audioread.exceptions.NoBackendError` whose ``str()`` is empty --
     a blank traceback line at the end of a multi-hour run.
 
+    .. note::
+       On Windows, *holding* one of these keeps the offending file open. The
+       traceback references librosa's ``audioread`` fallback frames, which hold
+       a file handle, and Windows will not delete or replace an open file. It
+       matters only if you accumulate errors rather than handling them --
+       collect ``err.file_path`` and ``str(err)`` and let the exception go, or
+       call :func:`gc.collect` after dropping it (exception and traceback
+       reference each other, so refcounting alone does not free it).
+
     Attributes:
         file_path: The file that could not be read.
     """
