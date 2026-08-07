@@ -273,14 +273,16 @@ def _load_excerpt(
     except _READ_ERRORS as exc:
         if on_read_error == "raise":
             raise AudioReadError(
-                f"Failed to read audio file {str(file_path)!r}: "
-                f"{type(exc).__name__}: {exc}",
+                # Quoted, not {!r}: repr() escapes a Windows path's separators,
+                # so the message doubles every backslash -- unreadable, not
+                # copy-pasteable, and not findable by a plain substring search.
+                f"Failed to read audio file '{file_path}': {type(exc).__name__}: {exc}",
                 str(file_path),
             ) from exc
         if on_read_error == "warn":
             warnings.warn(
                 f"Substituting silence for unreadable audio file "
-                f"{str(file_path)!r}: {type(exc).__name__}: {exc}. Every "
+                f"'{file_path}': {type(exc).__name__}: {exc}. Every "
                 f"substitute carries metadata[{READ_ERROR_KEY!r}] == True; pass "
                 "on_read_error='raise' to fail on it instead.",
                 UserWarning,

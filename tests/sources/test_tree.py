@@ -706,6 +706,7 @@ def test_exclude_pickle_roundtrip():
             sample.metadata["mel"][0], mel[0], decimal=5
         )
         source.close()
+        restored.close()
 
 
 def test_exclude_empty_default():
@@ -726,6 +727,7 @@ def test_exclude_empty_default():
             s2 = source_empty[i]
             np.testing.assert_array_equal(s1.waveform, s2.waveform)
         source_default.close()
+        source_empty.close()
 
 
 # === load_into_memory ===
@@ -753,6 +755,7 @@ def test_load_into_memory_matches_lazy():
                 s_lazy.metadata["mel"], s_eager.metadata["mel"]
             )
         lazy.close()
+        eager.close()
 
 
 def test_load_into_memory_with_exclude():
@@ -818,6 +821,7 @@ def test_load_into_memory_pickle_roundtrip():
         sample = restored[0]
         np.testing.assert_array_almost_equal(sample.waveform[0], audio[0], decimal=5)
         source.close()
+        restored.close()
 
 
 def test_excluding_string_leaves_works_without_bagz(tmp_path, monkeypatch):
@@ -983,6 +987,7 @@ def test_source_survives_a_pickle_round_trip(tmp_path):
     np.testing.assert_array_equal(revived[5]["waveform"], expected)
     assert revived._leaf_memmaps  # rebuilt on demand
     source.close()
+    revived.close()
 
 
 # === Manifest size validation ===
@@ -1172,6 +1177,7 @@ def test_in_memory_string_leaves_survive_the_trip_to_a_worker(tmp_path, stub_bag
     revived = pickle.loads(pickle.dumps(source))  # what spawn does to the source
     assert revived[0] == {"label": "cat"}
     assert revived[1] == {"label": "dog"}
+    revived.close()
 
 
 def test_lazy_string_leaves_survive_the_trip_to_a_worker(tmp_path, stub_bagz):
@@ -1181,6 +1187,7 @@ def test_lazy_string_leaves_survive_the_trip_to_a_worker(tmp_path, stub_bagz):
 
     revived = pickle.loads(pickle.dumps(source))
     assert revived[1] == {"label": "dog"}
+    revived.close()
 
 
 def _read_sample_in_child(source, index, queue):
@@ -1245,3 +1252,53 @@ def test_context_manager_scopes_the_handles(tmp_path):
         source[0]
         assert source._leaf_memmaps
     assert source._leaf_memmaps == {}
+
+
+def test_no_test_leaves_a_tree_source_open():
+    """Every TreeDataSource a test opens must be released before its tmpdir is.
+
+    A held memmap cannot be deleted on Windows, so a source left open fails the
+    whole test at ``TemporaryDirectory`` cleanup with ``PermissionError:
+    [WinError 32]`` -- and never on POSIX, where the unlink succeeds. That gap
+    cost two CI rounds: 41 failures, then 3 more from sources created by a
+    pickle round-trip rather than a constructor call. This scans for the shape
+    rather than waiting for Windows to find it again.
+
+    A source is considered released if the function closes it or scopes it with
+    ``with``. Rebind rather than exempt if this ever gets in the way -- the
+    point is that no *new* test can silently leak one.
+    """
+    import ast
+
+    OPENERS = ("TreeDataSource", "pickle.loads")
+    offenders = []
+
+    for path in sorted(Path(__file__).parent.parent.rglob("test_*.py")):
+        text = path.read_text(encoding="utf-8")
+        if "TreeDataSource" not in text:
+            continue
+        module = ast.parse(text)
+        for fn in [n for n in ast.walk(module) if isinstance(n, ast.FunctionDef)]:
+            body = ast.get_source_segment(text, fn) or ""
+            if "TreeDataSource" not in body:
+                continue
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                    continue
+                target = node.targets[0]
+                if not isinstance(target, ast.Name) or not isinstance(
+                    node.value, ast.Call
+                ):
+                    continue
+                if not any(o in ast.unparse(node.value.func) for o in OPENERS):
+                    continue
+                name = target.id
+                if f"{name}.close()" in body or f"with {name}" in body:
+                    continue
+                offenders.append(f"{path.name}::{fn.name} leaves {name!r} open")
+
+    assert not offenders, (
+        "TreeDataSource holds its memmaps open, and a mapped file cannot be "
+        "removed on Windows. Close these, or scope them with `with`:\n  "
+        + "\n  ".join(offenders)
+    )

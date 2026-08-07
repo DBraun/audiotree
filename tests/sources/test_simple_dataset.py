@@ -519,8 +519,11 @@ def test_on_read_error_raise_always_names_the_path(kind, strategy, restore_permi
     ``soundfile`` errors that ``"random"``/``"loudest"`` hit do name the path;
     they are checked here so every strategy is known to behave the same.)
     """
-    if kind == "unreadable" and os.geteuid() == 0:
-        pytest.skip("root can read a mode-000 file")
+    if kind == "unreadable":
+        if sys.platform == "win32":
+            pytest.skip("chmod(0) does not deny the owner a read on Windows")
+        if os.geteuid() == 0:
+            pytest.skip("root can read a mode-000 file")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = _make_corrupt_file(tmpdir, kind)
@@ -561,8 +564,11 @@ def test_on_read_error_raise_is_the_default():
 @pytest.mark.parametrize("policy", ["skip", "warn"])
 def test_on_read_error_substitutes_marked_silence(kind, policy, restore_permissions):
     """A non-raising policy yields a usable, correctly shaped, *marked* item."""
-    if kind == "unreadable" and os.geteuid() == 0:
-        pytest.skip("root can read a mode-000 file")
+    if kind == "unreadable":
+        if sys.platform == "win32":
+            pytest.skip("chmod(0) does not deny the owner a read on Windows")
+        if os.geteuid() == 0:
+            pytest.skip("root can read a mode-000 file")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         path = _make_corrupt_file(tmpdir, kind)
