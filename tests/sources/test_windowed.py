@@ -465,6 +465,61 @@ def test_save_window_lufs_handles_empty_arrays():
         assert cache.lufs["y.wav"].shape == (0,)
 
 
+def _write_cache_manifest(cache_dir: Path, **overrides):
+    """Write a well-formed cache manifest, then apply ``overrides`` to it.
+
+    An override of ``None`` deletes the key, simulating a truncated or
+    hand-edited manifest.
+    """
+    import json
+
+    from audiotree import _format
+
+    manifest = {
+        **_format.header(_format.LUFS_WINDOWS_CACHE),
+        "lufs_window_sec": 1.0,
+        "sample_rate": 8000,
+        "mono": True,
+        "filepaths": ["a.wav"],
+        "durations": [2.0],
+        "bagz_file": "lufs.bagz",
+    }
+    for key, value in overrides.items():
+        if value is None:
+            del manifest[key]
+        else:
+            manifest[key] = value
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return cache_dir
+
+
+# Deliberately NOT @requires_bagz: the manifest is validated before the bagz
+# file is opened, so a corrupt cache names itself even where bagz has no wheel.
+@pytest.mark.parametrize(
+    "missing", ["lufs_window_sec", "filepaths", "durations", "bagz_file"]
+)
+def test_load_window_lufs_names_a_manifest_missing_keys(tmp_path, missing):
+    """A truncated/hand-edited manifest used to die with a bare KeyError."""
+    cache_dir = _write_cache_manifest(tmp_path / "cache", **{missing: None})
+    with pytest.raises(
+        ValueError, match=f"missing required top-level key '{missing}'"
+    ) as excinfo:
+        load_window_lufs(cache_dir)
+    assert "manifest.json" in str(excinfo.value)
+
+
+def test_load_window_lufs_rejects_malformed_container_types(tmp_path):
+    """'filepaths' and 'bagz_file' types are checked before bagz is touched."""
+    cache_dir = _write_cache_manifest(tmp_path / "a", filepaths="not-a-list")
+    with pytest.raises(ValueError, match="'filepaths' must be a list"):
+        load_window_lufs(cache_dir)
+
+    cache_dir = _write_cache_manifest(tmp_path / "b", bagz_file=7)
+    with pytest.raises(ValueError, match="'bagz_file' must be a string"):
+        load_window_lufs(cache_dir)
+
+
 @requires_bagz
 def test_lufs_cache_path_filters_dataset():
     with tempfile.TemporaryDirectory() as tmp:

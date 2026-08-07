@@ -48,6 +48,13 @@ from .core import (
 _LUFS_BAGZ = "lufs.bagz"
 _LUFS_MANIFEST = "manifest.json"
 
+# Keys ``load_window_lufs`` reads without a fallback. Missing any of them is a
+# corrupt (truncated, hand-edited) cache manifest, and checking them up front
+# turns a later raw ``KeyError`` into a named "Invalid manifest" error --
+# before the bagz file is even opened. ``sample_rate`` and ``mono`` are
+# deliberately absent: they are read with defaults.
+_LUFS_REQUIRED_KEYS = ("lufs_window_sec", "filepaths", "durations", "bagz_file")
+
 
 @dataclass(frozen=True)
 class WindowParams:
@@ -298,15 +305,37 @@ def load_window_lufs(cache_dir: str | Path) -> WindowLufsCache:
     Returns:
         A :class:`WindowLufsCache` with the per-file LUFS arrays, optional
         durations, and the analysis window length.
+
+    Raises:
+        ValueError: If the manifest is missing required keys or malformed --
+            checked before the bagz file is opened, so a truncated or
+            hand-edited manifest names itself instead of dying on a raw
+            ``KeyError``.
     """
     cache_dir = Path(cache_dir)
-    with open(cache_dir / _LUFS_MANIFEST, encoding="utf-8") as f:
+    manifest_path = cache_dir / _LUFS_MANIFEST
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
-    _format.check(
-        manifest, _format.LUFS_WINDOWS_CACHE, source=str(cache_dir / _LUFS_MANIFEST)
-    )
+    _format.check(manifest, _format.LUFS_WINDOWS_CACHE, source=str(manifest_path))
 
+    for key in _LUFS_REQUIRED_KEYS:
+        if key not in manifest:
+            raise ValueError(
+                f"Invalid manifest {manifest_path}: missing required top-level "
+                f"key {key!r}"
+            )
     filepaths = manifest["filepaths"]
+    if not isinstance(filepaths, list):
+        raise ValueError(
+            f"Invalid manifest {manifest_path}: 'filepaths' must be a list, "
+            f"got {type(filepaths).__name__}"
+        )
+    if not isinstance(manifest["bagz_file"], str):
+        raise ValueError(
+            f"Invalid manifest {manifest_path}: 'bagz_file' must be a string, "
+            f"got {manifest['bagz_file']!r}"
+        )
+
     reader = require_bagz("reading windowed-LUFS caches").Reader(
         str(safe_join(cache_dir, manifest["bagz_file"], description="cache file"))
     )

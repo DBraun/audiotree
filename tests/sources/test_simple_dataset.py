@@ -671,6 +671,50 @@ def test_on_read_error_survives_a_whole_epoch_and_batches(policy):
         assert [Path(p).name for p in batch.filepath[3:]] == ["bad_0.wav", "bad_1.wav"]
 
 
+@pytest.mark.parametrize("policy", ["skip", "warn"])
+def test_on_read_error_substitute_batches_under_loudest_excerpt(policy):
+    """The substitute is structurally a loudest-excerpt item, so batching works.
+
+    ``loudest_excerpt`` calls ``replace_lufs()`` on every candidate, so under
+    ``strategy="loudest"`` every real item carries ``lufs``/``lufs_windows``.
+    The silence substitute used to leave both ``None``, and ``AudioTree.batch``
+    then raised a pytree structure error on the None-vs-array mismatch -- one
+    corrupt file crashing the run at batch time, the exact failure the
+    non-raising policies exist to prevent.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_dir = _create_test_audio_files(tmpdir, 1)
+        _make_corrupt_file(Path(audio_dir), "zero_byte", name="z_bad.wav")
+
+        ds = create_audio_dataset(
+            sources=audio_dir,
+            shuffle=False,
+            sample_rate=44100,
+            duration=0.5,
+            excerpt=ExcerptConfig(strategy="loudest"),
+            on_read_error=policy,
+        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            # find_audio_files sorts, so the good file comes first.
+            good, substitute = ds[0], ds[1]
+
+        assert bool(substitute.metadata[READ_ERROR_KEY][0]) is True
+        # Digital silence measures (near) -inf LUFS: very low, never NaN.
+        lufs = float(np.asarray(substitute.lufs).reshape(-1)[0])
+        assert not np.isnan(lufs)
+        assert lufs < -70.0
+        assert substitute.lufs_windows is not None
+
+        # Both positions: batch takes its reference structure from item 0, so
+        # substitute-first and substitute-last used to fail differently.
+        for ordering in ([good, substitute], [substitute, good]):
+            batch = AudioTree.batch(ordering)
+            assert batch.waveform.shape == (2, 1, 22050)
+            assert batch.lufs.shape == (2,)
+            assert batch.lufs_windows.shape[0] == 2
+
+
 def test_truncated_data_is_not_a_read_error():
     """A valid header over a short data chunk decodes; it is not a failure.
 

@@ -67,6 +67,13 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
     ``num_samples``, a ``.bin`` truncated after the fact) is refused at
     construction, by name.
 
+    Beyond sizes, the manifest's *shape* is pinned here too: the leaf tables
+    must be dicts of well-formed entries, every structure node must be a known
+    kind carrying its ``children``, and every leaf name the structure references
+    must be declared in ``leaves``/``string_leaves``. A dangling reference would
+    otherwise resolve to the excluded-leaf sentinel in ``_reconstruct`` and the
+    field would just silently vanish from every sample.
+
     The bound is ``>=``, not ``==``. ``flush()`` is public and the writer
     publishes a manifest as soon as the schema is known, so from preallocation
     until ``close()`` every ``.bin`` is legitimately *longer* than
@@ -92,7 +99,25 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
     if num_samples < 0:
         fail(f"num_samples must be non-negative, got {num_samples}")
 
-    for name, info in (manifest.get("leaves") or {}).items():
+    # Container types first. `"leaves": []` is falsy, so a `... or {}` guard
+    # would wave it through here and let the reader die on `[].items()` at the
+    # first __getitem__ -- a raw AttributeError naming nothing.
+    leaves = manifest["leaves"]
+    if not isinstance(leaves, dict):
+        fail(
+            f"'leaves' must be a dict mapping leaf names to entries, got "
+            f"{type(leaves).__name__}"
+        )
+    string_leaves = manifest.get("string_leaves", {})
+    if not isinstance(string_leaves, dict):
+        fail(
+            f"'string_leaves' must be a dict mapping leaf names to entries, got "
+            f"{type(string_leaves).__name__}"
+        )
+
+    for name, info in leaves.items():
+        if not isinstance(info, dict):
+            fail(f"leaf {name!r} entry must be a dict, got {type(info).__name__}")
         shape = info.get("shape_per_sample")
         if not isinstance(shape, list) or not all(
             isinstance(d, int) and not isinstance(d, bool) and d >= 0 for d in shape
@@ -134,7 +159,11 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
         import bagz
     except ImportError:
         bagz = None
-    for name, info in (manifest.get("string_leaves") or {}).items():
+    for name, info in string_leaves.items():
+        if not isinstance(info, dict):
+            fail(
+                f"string leaf {name!r} entry must be a dict, got {type(info).__name__}"
+            )
         if not isinstance(info.get("file"), str):
             fail(f"string leaf {name!r} has a non-string 'file' entry")
         leaf_path = safe_join(data_dir, info["file"], description="string leaf")
@@ -154,10 +183,45 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
                     f"is truncated or the manifest does not describe it."
                 )
 
+    # Structure nodes are checked for shape *and* for reference integrity. A
+    # leaf name the structure mentions but the leaf tables do not declare would
+    # otherwise resolve through ``leaf_values.get(node, _EXCLUDED)`` in
+    # ``_reconstruct`` -- indistinguishable from a deliberately excluded leaf, so
+    # a corrupt manifest yields silently missing fields (and a dangling *root*
+    # node leaks the ``_EXCLUDED`` sentinel object to the caller).
+    known_leaf_names = set(leaves) | set(string_leaves)
+
+    def check_leaf_reference(name, path: str, kind: str):
+        if not isinstance(name, str):
+            fail(f"{kind} at {path} must be a string leaf name, got {name!r}")
+        if name not in known_leaf_names:
+            fail(
+                f"{kind} at {path} references {name!r}, which is not declared "
+                f"in 'leaves' or 'string_leaves'"
+            )
+
     def check_node(node, path: str):
-        if not isinstance(node, dict):
+        where = path or "<root>"
+        if isinstance(node, str):
+            check_leaf_reference(node, where, "structure leaf reference")
             return
+        if not isinstance(node, dict):
+            fail(
+                f"structure node at {where} must be a leaf-name string or a "
+                f"dict, got {node!r}"
+            )
         node_type = node.get("type")
+        if node_type == "string_leaf":
+            check_leaf_reference(node.get("leaf"), where, "string_leaf node")
+            return
+        if node_type not in ("AudioTree", "dict"):
+            fail(f"structure node at {where} has unknown type {node_type!r}")
+        children = node.get("children")
+        if not isinstance(children, dict):
+            fail(
+                f"{node_type} node at {where} must carry a 'children' dict, "
+                f"got {children!r}"
+            )
         if node_type == "AudioTree":
             sample_rate = node.get("sample_rate")
             if (
@@ -165,25 +229,23 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
                 or isinstance(sample_rate, bool)
                 or sample_rate <= 0
             ):
-                fail(f"AudioTree at {path or '<root>'} has sample_rate {sample_rate!r}")
-            for key, child in (node.get("children") or {}).items():
+                fail(f"AudioTree at {where} has sample_rate {sample_rate!r}")
+            for key in children:
                 if key not in AudioTree.__dataclass_fields__:
                     fail(
-                        f"AudioTree at {path or '<root>'} declares child {key!r}, "
+                        f"AudioTree at {where} declares child {key!r}, "
                         f"which is not an AudioTree field"
                     )
                 if key in _RECONSTRUCTED_FIELDS:
                     fail(
-                        f"AudioTree at {path or '<root>'} declares child {key!r}, "
+                        f"AudioTree at {where} declares child {key!r}, "
                         f"which the reader sets itself -- it would reach the "
                         f"AudioTree constructor as a duplicate argument"
                     )
-                check_node(child, f"{path}.{key}" if path else key)
-        elif node_type == "dict":
-            for key, child in (node.get("children") or {}).items():
-                check_node(child, f"{path}.{key}" if path else str(key))
+        for key, child in children.items():
+            check_node(child, f"{path}.{key}" if path else str(key))
 
-    check_node(manifest.get("structure"), "")
+    check_node(manifest["structure"], "")
 
 
 def _reconstruct(node, leaf_values: Dict[str, Any]):

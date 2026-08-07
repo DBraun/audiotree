@@ -586,6 +586,25 @@ class TestBalancedDatasetValidation:
                     duration=0.5,
                 )
 
+    @pytest.mark.parametrize("bad_weight", [0.0, -1.0, float("nan"), float("inf")])
+    def test_non_positive_weight_raises_naming_the_group(self, bad_weight):
+        """A weight <= 0 fell through to grain.MapDataset.mix, whose errors
+        name neither the group nor the argument (0.0 -> "Must specify all
+        non-zero proportions for mixing."). A user plausibly passes 0 to
+        disable a group; the fix is a named error telling them to omit it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            group1_dir = _create_test_audio_files(tmpdir, "group1", 2)
+            group2_dir = _create_test_audio_files(tmpdir, "group2", 2)
+
+            with pytest.raises(ValueError, match=r"group2.*omit"):
+                create_balanced_audio_dataset(
+                    sources={"group1": [group1_dir], "group2": [group2_dir]},
+                    weights={"group1": 1.0, "group2": bad_weight},
+                    sample_rate=44100,
+                    duration=0.5,
+                )
+
     def test_group_name_in_both_sources_and_datasets_raises(self):
         """A name in both `sources` and `datasets` silently doubled its share.
 

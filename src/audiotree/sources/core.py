@@ -1,5 +1,6 @@
 import functools
 import glob
+import math
 import os
 import warnings
 import zlib
@@ -107,16 +108,26 @@ def _substitute_silence(
     duration: float,
     channels: int,
     source: str | None,
+    excerpt: ExcerptConfig,
 ) -> AudioTree:
     """Build the stand-in returned for an unreadable file.
 
     Digital silence of exactly the requested shape, tagged with the offending
     path and with ``metadata[READ_ERROR_KEY] == True`` so nothing downstream can
     mistake it for audio that was really on disk.
+
+    The substitute must be *structurally* identical to a real load under the
+    dataset's ``excerpt`` strategy, or :meth:`AudioTree.batch` refuses the
+    mixture with a pytree structure error -- at batch time, far from the file
+    that caused it. Under ``strategy="loudest"`` every real item carries
+    ``lufs``/``lufs_windows`` (:meth:`AudioTree.loudest_excerpt` measures every
+    candidate), so the silence is measured the same way: cheap, and honest --
+    digital silence reports ``-inf`` LUFS, so it also sorts below any real
+    audio for a caller filtering on loudness.
     """
     num_samples = max(0, round(duration * sample_rate))
     waveform = np.zeros((1, channels, num_samples), dtype=np.float32)
-    return AudioTree.create(
+    tree = AudioTree.create(
         waveform,
         sample_rate,
         # ``from_file`` records the excerpt offset; match it so a substitute and
@@ -128,6 +139,10 @@ def _substitute_silence(
         filepath=file_path,
         source=source,
     )
+    if excerpt.strategy == "loudest":
+        # Same call, same defaults, as loudest_excerpt applies to a real item.
+        tree = tree.replace_lufs()
+    return tree
 
 
 def _mark_read_ok(tree: AudioTree) -> AudioTree:
@@ -305,6 +320,7 @@ def _load_excerpt(
             # be collated with the items around it.
             channels=1 if mono else (channels if channels is not None else 1),
             source=source,
+            excerpt=excerpt,
         )
         substituted = True
 
@@ -726,6 +742,9 @@ def create_balanced_audio_dataset(
             default to weight 1.0. If None, all groups are weighted equally.
             Every key must name a group in `sources` or `datasets`; an unknown
             key raises rather than silently leaving its intended group at 1.0.
+            Every weight must be a finite number greater than zero -- to
+            disable a group, omit it from `sources`/`datasets` instead of
+            weighting it 0.
         datasets: Optional dictionary mapping group names to pre-constructed grain MapDatasets.
             These datasets will be mixed with file-based sources. Useful for combining
             different data sources or including pre-processed datasets. Each item of a
@@ -897,6 +916,24 @@ def create_balanced_audio_dataset(
             raise ValueError(
                 f"Unknown group name(s) in `weights`: {unknown}. Valid group "
                 f"names are: {group_names}."
+            )
+        # A weight <= 0 would otherwise fall through to grain.MapDataset.mix,
+        # which fails with messages naming neither the group nor this argument
+        # (0.0 -> "Must specify all non-zero proportions for mixing.").
+        invalid = {
+            name: weight
+            for name, weight in weights.items()
+            if not (
+                isinstance(weight, (int, float))
+                and math.isfinite(weight)
+                and weight > 0
+            )
+        }
+        if invalid:
+            raise ValueError(
+                f"Invalid weight(s) in `weights`: {invalid}. Every weight must "
+                "be a finite number > 0. To leave a group out of the mix, omit "
+                "it from `sources`/`datasets` rather than giving it weight 0."
             )
 
     if excerpt_seed is None:

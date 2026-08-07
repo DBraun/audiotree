@@ -91,6 +91,87 @@ def test_manifest_schema_is_validated(dataset, mutate, match):
         TreeDataSource(data_dir)
 
 
+@pytest.mark.parametrize(
+    "mutate,match",
+    [
+        # Container types: '"leaves": []' is falsy, so it used to slip past a
+        # `... or {}` guard and crash at the first __getitem__ with a raw
+        # AttributeError from _open_data_files.
+        (lambda m: m.update(leaves=[]), "'leaves' must be a dict"),
+        (
+            lambda m: m["leaves"].update({next(iter(m["leaves"])): "junk"}),
+            "entry must be a dict",
+        ),
+        (lambda m: m.update(string_leaves=[]), "'string_leaves' must be a dict"),
+        # Structure nodes must be well-formed: a dict node without 'children'
+        # used to die with a raw KeyError inside _reconstruct.
+        (lambda m: m["structure"].pop("children"), "must carry a 'children' dict"),
+        (
+            lambda m: m["structure"]["children"].update(metadata={"type": "dict"}),
+            "must carry a 'children' dict",
+        ),
+        (
+            lambda m: m["structure"]["children"].update(
+                metadata={"type": "banana", "children": {}}
+            ),
+            "unknown type",
+        ),
+        (
+            lambda m: m["structure"]["children"].update(metadata=42),
+            "must be a leaf-name string or a dict",
+        ),
+    ],
+)
+def test_manifest_container_types_are_validated(dataset, mutate, match):
+    """Malformed containers fail at construction with a named error."""
+    data_dir, _ = dataset
+    _retamper(data_dir, lambda _, m: mutate(m))
+    with pytest.raises(ValueError, match=match):
+        TreeDataSource(data_dir)
+
+
+@pytest.mark.parametrize(
+    "mutate,match",
+    [
+        # A leaf name the structure mentions but the leaf tables don't declare
+        # used to resolve to the excluded-leaf sentinel in _reconstruct --
+        # silently missing fields, indistinguishable from deliberate exclusion.
+        (
+            lambda m: m["structure"]["children"].update(waveform="ghost"),
+            "not declared",
+        ),
+        (
+            lambda m: m["structure"]["children"].update(
+                metadata={"type": "string_leaf", "leaf": "ghost"}
+            ),
+            "not declared",
+        ),
+        (
+            lambda m: m["structure"]["children"].update(
+                metadata={"type": "string_leaf", "leaf": 3}
+            ),
+            "must be a string leaf name",
+        ),
+        # A dangling ROOT node used to leak the _EXCLUDED sentinel object
+        # itself to the caller.
+        (lambda m: m.update(structure="ghost"), "not declared"),
+        # Renaming a declared leaf dangles the structure's reference to it.
+        (
+            lambda m: m.update(
+                leaves={"renamed": m["leaves"][next(iter(m["leaves"]))]}
+            ),
+            "not declared",
+        ),
+    ],
+)
+def test_structure_leaf_references_must_resolve(dataset, mutate, match):
+    """Every structure leaf reference must name a declared (string) leaf."""
+    data_dir, _ = dataset
+    _retamper(data_dir, lambda _, m: mutate(m))
+    with pytest.raises(ValueError, match=match):
+        TreeDataSource(data_dir)
+
+
 def test_untampered_dataset_still_reads(dataset):
     """The guards must not reject a manifest the writer actually produced."""
     data_dir, _ = dataset
