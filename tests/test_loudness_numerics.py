@@ -362,6 +362,12 @@ def test_pad_to_gating_block_rejects_empty():
         pad_to_gating_block(np.zeros((1, 1, 0), dtype=np.float32), 44_100, xp=np)
 
 
+def test_windowed_num_windows_rejects_a_zero_sample_hop():
+    """A hop of 0 samples raises ValueError, not a bare ZeroDivisionError."""
+    with pytest.raises(ValueError, match="hop_span"):
+        _windowed_num_windows(1_000, 100, 0)
+
+
 @pytest.mark.parametrize(("sample_rate", "window_sec", "hop_sec"), _WINDOW_HOP_CASES)
 def test_streaming_window_reduction_matches_the_gather(
     sample_rate: int, window_sec: float, hop_sec: float

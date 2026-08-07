@@ -280,15 +280,69 @@ def _is_string_list(x) -> bool:
     return isinstance(x, list) and bool(x) and all(isinstance(s, str) for s in x)
 
 
+def _is_string_leaf(x) -> bool:
+    """Whether *x* is a string ``metadata`` leaf, in any of its batch forms.
+
+    The forms track the tree's leading axes (see ``tree_writer``): a bare
+    ``str`` is a batch of 1, a list of strings holds one per batch item, a
+    list of such lists is the mini-batched (rank-4) nesting, and an empty
+    list is the ``batch_size == 0`` tree (e.g. after a :meth:`AudioTree.filter`
+    that kept nothing). Every batch-axis operation uses this as its
+    ``is_leaf`` so ``jax.tree_util`` never descends into the list and slices
+    the strings themselves.
+    """
+    if isinstance(x, str):
+        return True
+    if not isinstance(x, list):
+        return False
+    if not x:
+        return True
+    return all(isinstance(s, str) for s in x) or all(_is_string_list(s) for s in x)
+
+
+def _as_string_list(x) -> list:
+    """Normalize a string leaf to list form (a bare ``str`` is a batch of 1)."""
+    return [x] if isinstance(x, str) else x
+
+
+def _index_string_list(strings: list, key) -> list:
+    """Index a string list along the batch axis with any ``__getitem__`` key.
+
+    Mirrors NumPy's batch-axis semantics for the sub-batch key forms: slices,
+    integer sequences/arrays (negative indices included), and boolean masks.
+    On a mini-batched tree the elements are themselves lists, which select
+    whole mini-batches exactly like rows of an array.
+    """
+    if isinstance(key, slice):
+        return strings[key]
+    key = np.asarray(key)
+    if key.dtype == np.bool_:
+        if key.shape != (len(strings),):
+            raise IndexError(
+                f"boolean mask of shape {tuple(key.shape)} does not match "
+                f"string leaf of length {len(strings)}."
+            )
+        return [s for s, keep in zip(strings, key) if keep]
+    if not np.issubdtype(key.dtype, np.integer):
+        raise IndexError(
+            f"string leaves can only be indexed with slices, integers, or "
+            f"boolean masks, got key dtype {key.dtype}."
+        )
+    return [strings[int(i)] for i in key]
+
+
 def _index_batch_axis(x, key):
     """Index a leaf along the batch axis, matching :meth:`AudioTree.__getitem__`.
 
-    Arrays and list-of-strings leaves are indexed with *key*; every other leaf
-    (bare strings, scalars, ...) is passed through unchanged so it is never
-    character- or element-sliced.
+    Arrays and string leaves are indexed with *key*; every other leaf
+    (scalars, ...) is passed through unchanged. String leaves always come back
+    in list form, so indexing normalizes a bare ``str`` to the equivalent
+    one-item list.
     """
-    if isinstance(x, (np.ndarray, jax.Array)) or _is_string_list(x):
+    if isinstance(x, (np.ndarray, jax.Array)):
         return x[key]
+    if _is_string_leaf(x):
+        return _index_string_list(_as_string_list(x), key)
     return x
 
 
@@ -722,8 +776,10 @@ class AudioTree:
                 Must be at least 0.4s (the EBU momentary integration time).
             lufs_hop_sec: Step in seconds between window starts. Defaults to
                 ``lufs_window_sec`` (non-overlapping windows); a smaller value
-                overlaps them. The trailing partial window is dropped, so an
-                excerpt shorter than one window yields an empty ``lufs_windows``.
+                overlaps them, but it must still span at least one sample at
+                the tree's sample rate. The trailing partial window is dropped,
+                so an excerpt shorter than one window yields an empty
+                ``lufs_windows``.
             device: *Where* to compute — an XLA platform name (``"cpu"`` /
                 ``"gpu"`` / ``"tpu"``, mirroring ``jax.jit``'s ``backend``) or a
                 :class:`jax.Device`. ``None`` (default) leaves the waveform where
@@ -766,6 +822,14 @@ class AudioTree:
             lufs_hop_sec = lufs_window_sec
         if lufs_hop_sec <= 0:
             raise ValueError(f"lufs_hop_sec must be positive, got {lufs_hop_sec}.")
+        # Both engines share the 5-channel BS.1770 layouts; the NumPy meter
+        # would otherwise silently compute a value for 6+ channels while the
+        # JAX one raised.
+        if self.num_channels > 5:
+            raise ValueError(
+                f"Audio must have five channels or less (the BS.1770 "
+                f"mono/stereo/5.x layouts), got {self.num_channels}."
+            )
         # ``engine`` chooses the kernel and ``device`` chooses where it runs; the
         # output stays in the waveform's own array library so the tree does not go
         # heterogeneous. Resolved up front so a bad pairing fails before any work.
@@ -779,6 +843,13 @@ class AudioTree:
         waveform = self.waveform.reshape(-1, *self.waveform.shape[-2:])
         ws = _window_samples(lufs_window_sec, self.sample_rate)
         hs = _window_samples(lufs_hop_sec, self.sample_rate)
+        if hs < 1:
+            # A positive hop can still round to 0 samples, which would step
+            # the window nowhere (and divide by zero counting windows).
+            raise ValueError(
+                f"lufs_hop_sec={lufs_hop_sec} spans {hs} samples at "
+                f"{self.sample_rate} Hz; the hop must span at least 1 sample."
+            )
         num_windows = _windowed_num_windows(waveform.shape[-1], ws, hs)
 
         if engine == "jax":
@@ -1139,7 +1210,9 @@ class AudioTree:
         (a batch of 1); a slice, a list of indices, or a boolean mask selects a
         sub-batch. Every array field — including ``codes``, ``latents``, and the
         ``metadata`` arrays — is indexed along the same axis so the fields stay
-        rank-aligned.
+        rank-aligned. String ``metadata`` leaves are selected element-wise with
+        the same key and always come back as a list (a bare ``str``, the
+        batch-of-1 form, becomes a one-item list).
 
         Any integer scalar counts as an integer key, not just the builtin
         ``int``: ``tree[np.argmax(tree.lufs)]`` keeps the batch axis exactly
@@ -1162,7 +1235,7 @@ class AudioTree:
             key = slice(key, key + 1 or None)
 
         return tree_util.tree_map(
-            lambda x: _index_batch_axis(x, key), self, is_leaf=_is_string_list
+            lambda x: _index_batch_axis(x, key), self, is_leaf=_is_string_leaf
         )
 
     def __iter__(self) -> Iterator[Self]:
@@ -1504,8 +1577,8 @@ class AudioTree:
         cls,
         audio_path: Union[str, Path],
         rng: np.random.Generator,
+        duration: float,
         offset: float = 0.0,
-        duration: Optional[float] = None,
         excerpt: Optional["ExcerptConfig"] = None,
         **kwargs,
     ) -> Optional[Self]:
@@ -1518,9 +1591,9 @@ class AudioTree:
         Args:
             audio_path (str or Path): Path to audio file.
             rng (np.random.Generator): Random number generator such as ``np.random.default_rng(42)``.
+            duration (float): Duration in seconds of audio data; must be positive. The audio data
+                will be trimmed or lengthened as necessary.
             offset (float, optional): Earliest offset in seconds the excerpt may start at.
-            duration (float, optional): Duration in seconds of audio data. The audio data will be trimmed or lengthened
-                as necessary.
             excerpt (ExcerptConfig, optional): How to choose the offset; defaults to a uniformly
                 random one. See :class:`ExcerptConfig`.
             **kwargs: Keyword arguments passed to ``AudioTree.from_file``.
@@ -1529,7 +1602,7 @@ class AudioTree:
             AudioTree, or ``None`` when ``excerpt`` searched for the loudest
             section, found nothing above the cutoff, and says ``on_failure="skip"``.
         """
-        if duration is None or duration <= 0:
+        if duration <= 0:
             raise ValueError(f"excerpt needs a positive duration, got {duration!r}.")
         if excerpt is None:
             excerpt = ExcerptConfig()
@@ -1870,7 +1943,8 @@ class AudioTree:
             List of AudioTree objects, each with batch_size = original_batch_size / n_splits.
 
         Raises:
-            ValueError: If the batch size is not divisible by ``n_splits``.
+            ValueError: If ``n_splits`` is not positive, or if the batch size is
+                not divisible by ``n_splits``.
 
         Example:
             >>> big_tree = AudioTree(np.zeros((12, 1, 44100)), 44100)
@@ -1882,6 +1956,8 @@ class AudioTree:
             >>> split_trees[0].waveform.shape  # each tree has half the original batch size
             (6, 1, 44100)
         """
+        if n_splits <= 0:
+            raise ValueError(f"n_splits must be positive, got {n_splits}.")
         total_batch_size = self.batch_size
         if total_batch_size % n_splits != 0:
             raise ValueError(
@@ -1892,7 +1968,7 @@ class AudioTree:
         split_batch_size = total_batch_size // n_splits
 
         # Slice the batch axis with the same leaf definition ``__getitem__``
-        # uses, so a list-of-strings metadata leaf is sliced element-wise
+        # uses, so a string metadata leaf is sliced element-wise
         # (``names[i*s:(i+1)*s]``) instead of ``jax.tree_util`` descending into
         # it and slicing each string's characters.
         return [
@@ -1901,7 +1977,7 @@ class AudioTree:
                     x, slice(i * split_batch_size, (i + 1) * split_batch_size)
                 ),
                 self,
-                is_leaf=_is_string_list,
+                is_leaf=_is_string_leaf,
             )
             for i in range(n_splits)
         ]
@@ -1910,7 +1986,10 @@ class AudioTree:
         """Reshape batch dimension into mini-batches by adding a new leading axis.
 
         Transforms audio data from shape (B, C, T) to (num_mini_batches, mini_batch_size, C, T),
-        where B must be evenly divisible by mini_batch_size.
+        where B must be evenly divisible by mini_batch_size. String metadata
+        leaves nest the same way: a list of B strings becomes num_mini_batches
+        lists of mini_batch_size strings, so indexing a mini-batch keeps them
+        aligned with the arrays.
 
         Args:
             mini_batch_size: Number of samples per mini-batch. The total batch size must be
@@ -1943,22 +2022,36 @@ class AudioTree:
         # Reshape AudioTree to have leading mini-batch dimension
         # From (B, C, T) to (num_mini_batches, mini_batch_size, C, T)
         # Only reshape array-like objects since metadata can contain non-arrays
-        reshaped_audio_tree = tree_util.tree_map(
-            lambda x: (
+        def reshape_leaf(x):
+            if _is_string_leaf(x):
+                # Nest to match the new leading axes, like the encoded
+                # provenance arrays (see ``_decode_strings``): one list of
+                # ``mini_batch_size`` strings per mini-batch.
+                strings = _as_string_list(x)
+                if len(strings) != B:
+                    raise ValueError(
+                        f"String metadata leaf has {len(strings)} items but "
+                        f"the batch size is {B}."
+                    )
+                return [
+                    strings[i * mini_batch_size : (i + 1) * mini_batch_size]
+                    for i in range(num_mini_batches)
+                ]
+            return (
                 x.reshape(num_mini_batches, mini_batch_size, *x.shape[1:])
                 if hasattr(x, "shape")
                 else x
-            ),
-            self,
-        )
-        return reshaped_audio_tree
+            )
+
+        return tree_util.tree_map(reshape_leaf, self, is_leaf=_is_string_leaf)
 
     def flatten_mini_batches(self) -> Self:
         """Flatten mini-batches back into a single batch dimension.
 
         Undoes the operation performed by reshape_mini_batches(), transforming
         audio data from shape (num_mini_batches, mini_batch_size, C, T) back to
-        (B, C, T).
+        (B, C, T). String metadata leaves lose their per-mini-batch nesting the
+        same way, back to one string per item.
 
         Returns:
             AudioTree with the mini-batch dimension flattened into the batch dimension.
@@ -1994,11 +2087,17 @@ class AudioTree:
         # Flatten the first two dimensions
         # From (num_mini_batches, mini_batch_size, C, T) to (B, C, T)
         # Only reshape array-like objects since metadata can contain non-arrays
-        flattened_audio_tree = tree_util.tree_map(
-            lambda x: x.reshape(-1, *x.shape[2:]) if hasattr(x, "shape") else x,
-            self,
-        )
-        return flattened_audio_tree
+        def flatten_leaf(x):
+            if _is_string_leaf(x):
+                # Undo ``reshape_mini_batches``'s nesting: one list per
+                # mini-batch flattens back to one string per item. A flat
+                # list has no mini-batch axis to remove.
+                if isinstance(x, list) and x and isinstance(x[0], list):
+                    return [s for sub in x for s in sub]
+                return x
+            return x.reshape(-1, *x.shape[2:]) if hasattr(x, "shape") else x
+
+        return tree_util.tree_map(flatten_leaf, self, is_leaf=_is_string_leaf)
 
     def filter(self, predicate: Callable[[Self], bool]) -> Self:
         """Keep only the batch items for which ``predicate`` is true.
@@ -2013,7 +2112,9 @@ class AudioTree:
         Returns:
             AudioTree: A tree holding the kept items. When nothing is kept, the
             result has ``batch_size == 0`` (every array field is empty along the
-            batch axis) rather than being ``None``.
+            batch axis, every string metadata leaf is ``[]``) rather than being
+            ``None``. Filtering an already-empty tree returns such an empty
+            tree without calling ``predicate``, so chained filters compose.
 
         Raises:
             ValueError: If the tree is mini-batched (rank 4). Dropping items
@@ -2030,11 +2131,18 @@ class AudioTree:
         """
         _require_batched_rank(self.waveform, "AudioTree.filter")
         B = self.batch_size
-        audio_trees = [tree for tree in self.split(B) if predicate(tree)]
+        # An already-empty tree (the documented result of a filter that kept
+        # nothing) has no items for the predicate to see; skip straight to the
+        # empty result instead of asking split(0) for one tree per item.
+        audio_trees = [] if B == 0 else [t for t in self.split(B) if predicate(t)]
 
         if len(audio_trees) == 0:
             return tree_util.tree_map(
-                lambda x: x[:0] if hasattr(x, "shape") else x, self
+                lambda x: (
+                    [] if _is_string_leaf(x) else x[:0] if hasattr(x, "shape") else x
+                ),
+                self,
+                is_leaf=_is_string_leaf,
             )
 
         return _batch_audiotrees(audio_trees)
@@ -2088,7 +2196,9 @@ class AudioTree:
             first_arg = args[0]
             if isinstance(first_arg, AudioTree):
                 return _batch_audiotrees(args)
-            elif isinstance(first_arg, (np.ndarray, jax.Array)):
+            elif isinstance(first_arg, (np.ndarray, jax.Array)) or _is_string_leaf(
+                first_arg
+            ):
                 return _concatenate(args)
             else:
                 return list(args)
@@ -2097,7 +2207,7 @@ class AudioTree:
             batching_function,
             items[0],
             *items[1:],
-            is_leaf=lambda x: isinstance(x, AudioTree),
+            is_leaf=lambda x: isinstance(x, AudioTree) or _is_string_leaf(x),
         )
 
 
@@ -2135,12 +2245,13 @@ def _concatenate(arrays: Sequence[ArrayLike], axis: int = 0) -> ArrayLike:
     concatenation JAX -- ``jnp.concatenate`` accepts NumPy operands, so a mixed
     sequence still works and lands on device.
 
-    List-of-strings metadata leaves (a supported ``metadata`` type) are joined
-    as Python lists, since ``np``/``jnp.concatenate`` cannot concatenate bare
-    strings.
+    String metadata leaves (a supported ``metadata`` type) are joined as Python
+    lists, since ``np``/``jnp.concatenate`` cannot concatenate bare strings.
+    A bare ``str`` counts as a batch of 1 (the form ``TreeDataSource`` yields
+    per item), so the result is always a flat list with one string per item.
     """
-    if _is_string_list(arrays[0]):
-        return [s for leaf in arrays for s in leaf]
+    if _is_string_leaf(arrays[0]):
+        return [s for leaf in arrays for s in _as_string_list(leaf)]
     xp = jnp if any(isinstance(array, jax.Array) for array in arrays) else np
     return xp.concatenate(arrays, axis=axis)
 
@@ -2163,7 +2274,7 @@ def _batch_audiotrees(audio_trees: Sequence[AudioTree]) -> AudioTree:
         Single AudioTree with all items batched along axis 0.
     """
     return tree_util.tree_map(
-        lambda *xs: _concatenate(xs), *audio_trees, is_leaf=_is_string_list
+        lambda *xs: _concatenate(xs), *audio_trees, is_leaf=_is_string_leaf
     )
 
 

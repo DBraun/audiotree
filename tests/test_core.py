@@ -468,12 +468,13 @@ def test_split_preserves_string_list_metadata():
     assert first.metadata["names"] == ["a.wav", "b.wav"]
     assert second.metadata["names"] == ["c.wav", "d.wav"]
 
-    # A bare-string leaf is passed through unchanged (never character-sliced),
-    # matching __getitem__ semantics.
+    # A bare-string leaf is a batch of 1 (the TreeDataSource per-item form);
+    # batch ops slice it element-wise and return the list form, never
+    # character-slicing it.
     tagged = AudioTree.create(
-        np.zeros((4, 1, 8), np.float32), 16000, metadata={"tag": "hello"}
+        np.zeros((1, 1, 8), np.float32), 16000, metadata={"tag": "hello"}
     )
-    assert tagged.split(2)[0].metadata["tag"] == "hello"
+    assert tagged.split(1)[0].metadata["tag"] == ["hello"]
 
     # filter() (split + _batch_audiotrees) and AudioTree.batch round-trip a
     # string-list leaf instead of crashing on it.
@@ -575,16 +576,18 @@ def test_unsplit_mini_batch():
     assert unbatched_tree_full.waveform.shape == original_audio_data.shape
     np.testing.assert_array_equal(unbatched_tree_full.waveform, original_audio_data)
 
-    # Test that unsplitting preserves metadata if present
+    # Test that unsplitting preserves metadata if present (one string per item,
+    # the tree_writer contract).
+    names = [f"item{i}.wav" for i in range(batch_size)]
     audio_tree_with_metadata = AudioTree(
-        original_audio_data, sample_rate, metadata={"test_key": "test_value"}
+        original_audio_data, sample_rate, metadata={"test_key": names}
     )
     batched_with_metadata = audio_tree_with_metadata.reshape_mini_batches(
         mini_batch_size
     )
     unbatched_with_metadata = batched_with_metadata.flatten_mini_batches()
 
-    assert unbatched_with_metadata.metadata == {"test_key": "test_value"}
+    assert unbatched_with_metadata.metadata == {"test_key": names}
 
     # Test direct unsplit on already mini-batched data
     # Create data that's already in mini-batch format
@@ -724,6 +727,32 @@ def test_replace_lufs_windows_hop_and_silence():
     # Ungated windows report -inf for digital silence (comparable across windows).
     silent = AudioTree.create(np.zeros(2 * sr, dtype=np.float32), sr).replace_lufs()
     assert np.all(np.isneginf(np.asarray(silent.lufs_windows[0])))
+
+
+def test_replace_lufs_rejects_a_sub_sample_hop():
+    """A positive hop that rounds to 0 samples raises up front.
+
+    ``lufs_hop_sec=1e-5`` passed the positivity check but spans 0 samples at
+    44.1 kHz, which used to surface as a bare ZeroDivisionError deep in the
+    window count.
+    """
+    sr = 44100
+    tree = AudioTree.create(_tone(sr, 2.0), sr)
+    with pytest.raises(ValueError, match="lufs_hop_sec.*at least 1 sample"):
+        tree.replace_lufs(lufs_hop_sec=1e-5)
+
+
+def test_replace_lufs_rejects_more_than_five_channels_on_both_engines():
+    """The documented 5-channel limit holds for the NumPy engine too.
+
+    Only the JAX engine used to enforce it; the NumPy engine silently computed
+    a value for 6+ channels.
+    """
+    sr = 44100
+    tree = AudioTree(np.zeros((1, 6, sr), dtype=np.float32), sr)
+    for engine in ("numpy", "jax"):
+        with pytest.raises(ValueError, match="five channels"):
+            tree.replace_lufs(engine=engine)
 
 
 def test_replace_lufs_engine_forces_jax_kernel_but_keeps_array_type():
@@ -1083,8 +1112,14 @@ def test_excerpt_rejects_bad_arguments(tmp_path):
     from audiotree.core import ExcerptConfig
 
     path = _tone_wav(tmp_path / "tone3.wav")
-    with pytest.raises(ValueError, match="positive duration"):
+    # ``duration`` is a required parameter (it used to be an Optional that
+    # unconditionally raised when omitted).
+    with pytest.raises(TypeError, match="duration"):
         AudioTree.excerpt(str(path), np.random.default_rng(0), sample_rate=16000)
+    with pytest.raises(ValueError, match="positive duration"):
+        AudioTree.excerpt(
+            str(path), np.random.default_rng(0), duration=0.0, sample_rate=16000
+        )
     with pytest.raises(ValueError, match="offset"):
         AudioTree.excerpt(
             str(path),

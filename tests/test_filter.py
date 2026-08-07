@@ -1,6 +1,7 @@
 """Tests for AudioTree filter functionality."""
 
 import numpy as np
+import pytest
 
 from audiotree.core import AudioTree
 
@@ -65,6 +66,31 @@ def test_filter_keep_all():
     # Should keep all batches
     assert filtered_tree.waveform.shape == (3, 1, 3)
     np.testing.assert_array_equal(filtered_tree.waveform, waveform)
+
+
+def test_filter_keep_none_then_filter_again():
+    """Filtering an already-empty tree returns an empty tree, not split(0)."""
+    waveform = np.array([[[1.0, 2.0]], [[3.0, 4.0]]])
+    tree = AudioTree(waveform, 44100, metadata={"name": ["a", "b"]})
+
+    empty = tree.filter(lambda item: False)
+    assert empty.batch_size == 0
+    assert empty.metadata["name"] == []  # not the full-length string list
+
+    # Chained filters must compose: this used to hit split(0) and raise
+    # ZeroDivisionError.
+    still_empty = empty.filter(lambda item: True)
+    assert still_empty.batch_size == 0
+    assert still_empty.metadata["name"] == []
+    assert still_empty.sample_rate == tree.sample_rate
+
+
+def test_split_rejects_a_nonpositive_split_count():
+    """split(0) names n_splits instead of raising a bare ZeroDivisionError."""
+    tree = AudioTree(np.zeros((2, 1, 4)), 44100)
+    for n_splits in (0, -1):
+        with pytest.raises(ValueError, match="n_splits"):
+            tree.split(n_splits)
 
 
 def test_filter_preserves_sample_rate():

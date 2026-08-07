@@ -118,6 +118,10 @@ def _windowed_num_windows(samples: int, window_span: int, hop_span: int) -> int:
     The trailing partial window is dropped; ``0`` when the signal is shorter than
     one window.
     """
+    if hop_span < 1:
+        # A tiny-but-positive hop duration rounds to 0 samples; dividing by it
+        # here would be a bare ZeroDivisionError far from the bad argument.
+        raise ValueError(f"hop_span must be at least 1 sample, got {hop_span}.")
     if samples < window_span:
         return 0
     return (samples - window_span) // hop_span + 1
