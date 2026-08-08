@@ -248,7 +248,7 @@ file: a hole breaks fixed-size batching, and a silent retry both over-samples
 the healthy files and produces an item indistinguishable from real audio.
 
 So that the substitution stays detectable, every item of such a dataset carries
-``metadata["read_error"]`` — ``True`` on a substitute, ``False`` on a real load
+``extras["read_error"]`` — ``True`` on a substitute, ``False`` on a real load
 — alongside the usual ``filepath``:
 
 .. testcode:: readerrors
@@ -261,7 +261,7 @@ So that the substitution stays detectable, every item of such a dataset carries
     substitutes = [
         os.path.basename(item.filepath[0])
         for item in items
-        if bool(item.metadata["read_error"][0])
+        if bool(item.extras["read_error"][0])
     ]
     print(len(items), sorted(substitutes))
     print(items[0].waveform.shape)     # the substitute is the requested shape
@@ -272,13 +272,13 @@ So that the substitution stays detectable, every item of such a dataset carries
     (1, 1, 44100)
 
 Count the losses in a training loop with
-``int(np.asarray(batch.metadata["read_error"]).sum())``, or filter them out
+``int(np.asarray(batch.extras["read_error"]).sum())``, or filter them out
 before batching.
 
 .. important::
    The marker is written on **every** item, good ones included, because
    :meth:`~audiotree.AudioTree.batch` requires all items in a batch to
-   carry the same metadata keys. The policy is therefore a property of the whole
+   carry the same extras keys. The policy is therefore a property of the whole
    dataset: items from a ``"skip"``/``"warn"`` dataset cannot be batched
    together with items from a ``"raise"`` one.
 
@@ -302,7 +302,7 @@ Time-Aligned Annotations
 When you take a random excerpt of a long recording, you often need the matching
 slice of a time-aligned annotation — a pianoroll, MIDI, F0 curve, or label
 track. Each loaded ``AudioTree`` records where its excerpt came from:
-``metadata["offset"]`` (start time in seconds) and ``filepath``; the excerpt
+``extras["offset"]`` (start time in seconds) and ``filepath``; the excerpt
 length is ``samples / sample_rate``. A `Grain`_ ``.map`` step can use those to
 load and slice the aligned annotation.
 
@@ -343,7 +343,7 @@ In this example each ``<name>.wav`` has a sibling ``<name>.npy`` holding a
     PIANOROLL_FPS = 100  # frame rate of the .npy pianorolls
 
     # Random 1-second excerpts. Each loaded AudioTree records where its excerpt
-    # came from in ``metadata["offset"]`` (seconds) and ``filepath``.
+    # came from in ``extras["offset"]`` (seconds) and ``filepath``.
     ds = create_audio_dataset(
         sources=_piano_dir,
         sample_rate=16000,
@@ -352,31 +352,31 @@ In this example each ``<name>.wav`` has a sibling ``<name>.npy`` holding a
     )
 
     def attach_pianoroll(audio_tree: AudioTree) -> AudioTree:
-        offset = float(audio_tree.metadata["offset"][0])        # excerpt start (s)
+        offset = float(audio_tree.extras["offset"][0])          # excerpt start (s)
         duration = audio_tree.samples / audio_tree.sample_rate
         roll = np.load(audio_tree.filepath[0].replace(".wav", ".npy"))  # (128, frames)
         start = round(offset * PIANOROLL_FPS)
         n = round(duration * PIANOROLL_FPS)
         excerpt = roll[:, start : start + n]
-        # Store it in metadata with a leading batch axis so it batches and
+        # Store it in extras with a leading batch axis so it batches and
         # indexes alongside the waveform.
         return audio_tree.replace(
-            metadata={**audio_tree.metadata, "pianoroll": excerpt[None]}
+            extras={**audio_tree.extras, "pianoroll": excerpt[None]}
         )
 
     ds = ds.map(attach_pianoroll)
 
     item = ds[0]
-    offset = float(item.metadata["offset"][0])
-    print("pianoroll shape:", item.metadata["pianoroll"].shape)
-    print("aligned:", int(item.metadata["pianoroll"][0, 0, 0]) == round(offset * PIANOROLL_FPS))
+    offset = float(item.extras["offset"][0])
+    print("pianoroll shape:", item.extras["pianoroll"].shape)
+    print("aligned:", int(item.extras["pianoroll"][0, 0, 0]) == round(offset * PIANOROLL_FPS))
 
 .. testoutput:: pianoroll
 
     pianoroll shape: (1, 128, 100)
     aligned: True
 
-Because ``pianoroll`` lives in ``metadata`` — an active pytree node, not just
+Because ``pianoroll`` lives in ``extras`` — an active pytree node, not just
 static description — :meth:`~audiotree.AudioTree.batch` stacks the
 per-excerpt pianorolls into ``(batch, 128, frames)`` right alongside the
 waveform, and indexing or slicing the batch keeps them aligned.
@@ -433,7 +433,7 @@ model batches that already live on the GPU/TPU — and to overlap that transfer 
 the training step — wrap the ``IterDataset`` with
 :func:`grain.experimental.device_put`. It double-buffers: while the current batch
 trains, the next is staged on the device. Because an AudioTree is a Pytree, every
-array leaf (``waveform`` and each ``metadata`` array) arrives on-device as a
+array leaf (``waveform`` and each ``extras`` array) arrives on-device as a
 ``jax.Array``:
 
 .. testcode::

@@ -217,7 +217,7 @@ def _select_field(mask, new_value, old_value, xp, field: str):
     if new_value is None or old_value is None:
         return None
     if not hasattr(new_value, "shape") or not hasattr(old_value, "shape"):
-        # Non-array metadata (e.g. a list of strings) is not per-item indexable
+        # Non-array extras (e.g. a list of strings) is not per-item indexable
         # here; the transforms do not change it, so keep the original.
         return old_value
     if new_value.shape != old_value.shape:
@@ -235,7 +235,7 @@ def _select_transformed(new_leaf, old_leaf, mask, xp):
     """Combine a transformed AudioTree with its original, one batch item at a time.
 
     Fields that one side leaves unpopulated are canonicalized to ``None`` (and
-    metadata keys to absent), so the result has one structure regardless of how
+    extras keys to absent), so the result has one structure regardless of how
     the mask fell — a tree whose treedef depends on the RNG cannot be batched,
     scanned, or jitted.
     """
@@ -248,12 +248,10 @@ def _select_transformed(new_leaf, old_leaf, mask, xp):
         )
         for name in ARRAY_FIELDS
     }
-    updates["metadata"] = {
-        key: _select_field(
-            mask, new_leaf.metadata[key], value, xp, f"metadata[{key!r}]"
-        )
-        for key, value in old_leaf.metadata.items()
-        if key in new_leaf.metadata
+    updates["extras"] = {
+        key: _select_field(mask, new_leaf.extras[key], value, xp, f"extras[{key!r}]")
+        for key, value in old_leaf.extras.items()
+        if key in new_leaf.extras
     }
     return old_leaf.replace(**updates)
 

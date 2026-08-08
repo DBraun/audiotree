@@ -429,10 +429,10 @@ def test_encode_with_codec_stores_codes_and_scale():
     out = encode_with_codec(_FakeCodec()).map(audio_tree)
     assert out.codes is not None
     assert out.codes.shape == (B, 4, 100)
-    assert "codec_scale" not in out.metadata  # codec returned scale=None
+    assert "codec_scale" not in out.extras  # codec returned scale=None
 
     out = encode_with_codec(_FakeCodec(scale=True)).map(audio_tree)
-    assert out.metadata["codec_scale"].shape == (B, 1)
+    assert out.extras["codec_scale"].shape == (B, 1)
 
     # Idempotent: an AudioTree that already has codes passes through unchanged.
     again = encode_with_codec(_FakeCodec(num_codebooks=9)).map(out)
@@ -664,7 +664,7 @@ def test_roll_invalidates_offset():
     """Rolling shifts the start, so the recorded source-file offset is stale."""
     waveform = np.arange(10000, dtype=np.float32).reshape(1, 1, 10000)
     audio_tree = AudioTree(
-        waveform=waveform, sample_rate=10000, metadata={"offset": np.array([5.0])}
+        waveform=waveform, sample_rate=10000, extras={"offset": np.array([5.0])}
     )
     rng = np.random.default_rng(0)
 
@@ -672,12 +672,12 @@ def test_roll_invalidates_offset():
         rolled = roll(min_seconds=0.1, max_seconds=0.1, mode=mode).random_map(
             audio_tree, rng
         )
-        assert rolled.metadata["offset"] is None
+        assert rolled.extras["offset"] is None
 
     # A tree without an offset key is left untouched (no spurious None added).
     no_offset = AudioTree(waveform=waveform, sample_rate=10000)
     rolled = roll(min_seconds=0.1, max_seconds=0.1).random_map(no_offset, rng)
-    assert "offset" not in rolled.metadata
+    assert "offset" not in rolled.extras
 
 
 def test_to_stereo_invalidates_loudness():
@@ -741,7 +741,7 @@ _MAP_TRANSFORM_NAMES = _transform_names(audiotree.transforms, BaseMapTransform)
 
 
 def _prob_test_tree(backend, batch_size):
-    """A tree shaped like one off the data loader: stereo, with lufs and metadata."""
+    """A tree shaped like one off the data loader: stereo, with lufs and extras."""
     sr = 16000
     ramp = np.linspace(-0.4, 0.4, sr, dtype=np.float32)
     waveform = np.tile(ramp[None, None, :], (batch_size, 2, 1))
@@ -759,8 +759,8 @@ def test_prob_lt_one_runs(name, backend, batch_size):
 
     Regression test: masking used to require the transformed and original trees
     to have identical treedefs, so any transform that nulls ``lufs`` (or adds a
-    metadata key) crashed on the JAX backend, and the string-encoded
-    ``metadata["filepath"]`` that ``from_file`` always sets crashed the rest.
+    extras key) crashed on the JAX backend, and the string-encoded
+    ``extras["filepath"]`` that ``from_file`` always sets crashed the rest.
     """
     lib = jax_transforms if backend == "jax" else audiotree.transforms
     tree = _prob_test_tree(backend, batch_size)

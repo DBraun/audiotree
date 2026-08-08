@@ -13,7 +13,7 @@ def _tree(batch: int = 3, channels: int = 2, samples: int = 16) -> AudioTree:
         waveform=rng.standard_normal((batch, channels, samples)).astype(np.float32),
         sample_rate=44_100,
         codes=rng.integers(0, 8, size=(batch, 4, 3), dtype=np.int32),
-        metadata={"style": rng.integers(0, 5, size=(batch, 4), dtype=np.int32)},
+        extras={"style": rng.integers(0, 5, size=(batch, 4), dtype=np.int32)},
     )
 
 
@@ -36,7 +36,7 @@ def test_getitem_int_keeps_batch_axis():
     item = tree[1]
     assert item.waveform.shape == (1,) + tree.waveform.shape[1:]
     assert item.codes.shape == (1,) + tree.codes.shape[1:]
-    assert item.metadata["style"].shape == (1, 4)
+    assert item.extras["style"].shape == (1, 4)
     np.testing.assert_array_equal(item.waveform[0], tree.waveform[1])
     np.testing.assert_array_equal(item.codes[0], tree.codes[1])
     assert item.sample_rate == tree.sample_rate
@@ -114,7 +114,7 @@ def test_getitem_fancy_and_mask_keys_still_work():
         sub = tree[key]
         assert sub.batch_size == 2
         np.testing.assert_array_equal(sub.waveform[1], tree.waveform[2])
-        assert sub.metadata["style"].shape == (2, 4)
+        assert sub.extras["style"].shape == (2, 4)
 
 
 def test_batch_round_trips_items():
@@ -122,7 +122,7 @@ def test_batch_round_trips_items():
     batched = AudioTree.batch([tree[i] for i in range(len(tree))])
     np.testing.assert_array_equal(batched.waveform, tree.waveform)
     np.testing.assert_array_equal(batched.codes, tree.codes)
-    np.testing.assert_array_equal(batched.metadata["style"], tree.metadata["style"])
+    np.testing.assert_array_equal(batched.extras["style"], tree.extras["style"])
 
 
 def test_batch_keeps_jax_arrays_on_device():
@@ -140,7 +140,7 @@ def test_batch_keeps_jax_arrays_on_device():
             waveform=jnp.full((1, 2, 16), float(i), dtype=jnp.float32),
             sample_rate=44_100,
             codes=jnp.full((1, 4, 3), i, dtype=jnp.int32),
-            metadata={"style": jnp.full((1, 4), i, dtype=jnp.int32)},
+            extras={"style": jnp.full((1, 4), i, dtype=jnp.int32)},
         )
         for i in range(3)
     ]
@@ -148,7 +148,7 @@ def test_batch_keeps_jax_arrays_on_device():
 
     assert isinstance(batched.waveform, jax.Array)
     assert isinstance(batched.codes, jax.Array)
-    assert isinstance(batched.metadata["style"], jax.Array)
+    assert isinstance(batched.extras["style"], jax.Array)
     assert batched.waveform.shape == (3, 2, 16)
     np.testing.assert_array_equal(np.asarray(batched.waveform[2]), 2.0)
 

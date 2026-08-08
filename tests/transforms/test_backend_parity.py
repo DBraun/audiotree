@@ -107,7 +107,7 @@ def _assert_same_structure(np_out: AudioTree, jax_out: AudioTree) -> None:
         assert (getattr(np_out, field) is None) == (getattr(jax_out, field) is None), (
             f"backends disagree on whether {field} survives the transform"
         )
-    assert sorted(np_out.metadata) == sorted(jax_out.metadata)
+    assert sorted(np_out.extras) == sorted(jax_out.extras)
 
 
 # =============================================================================

@@ -319,11 +319,11 @@ Item = Tuple[Tuple[str, ...], str, float]
 
 
 def _item_identity(item: AudioTree) -> Item:
-    """Reduce one dataset item to the metadata that identifies it."""
+    """Reduce one dataset item to the extras that identifies it."""
     return (
         tuple(item.source),
         os.path.basename(item.filepath[0]),
-        round(float(item.metadata["offset"][0]), 6),
+        round(float(item.extras["offset"][0]), 6),
     )
 
 

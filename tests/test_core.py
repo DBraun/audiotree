@@ -24,7 +24,7 @@ def test_audiotree_create_with_filepaths():
         5,
     )  # Should be expanded to (batch, channels, samples)
     assert tree1.filepath == ["test1.wav"]
-    assert "filepath" in tree1.metadata
+    assert "filepath" in tree1.extras
 
     # Test with 2D audio data and single filepath Path
     audio_2d = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])  # 2 channels, 3 samples
@@ -50,7 +50,7 @@ def test_audiotree_create_with_filepaths():
 
     assert tree4.waveform.shape == (1, 1, 5)
     assert tree4.filepath == []  # Empty list when no filepaths provided
-    assert "filepath" not in tree4.metadata
+    assert "filepath" not in tree4.extras
 
 
 def test_audiotree_create_with_source():
@@ -59,21 +59,21 @@ def test_audiotree_create_with_source():
     audio_1d = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
     tree1 = AudioTree.create(audio_1d, 44100, source="music")
     assert tree1.source == ["music"]
-    assert "source" in tree1.metadata
+    assert "source" in tree1.extras
 
     # A list gives one source name per batch item (unlike from_file).
     audio_batch = np.zeros((3, 1, 4))  # (batch=3, channels, samples)
     tree2 = AudioTree.create(audio_batch, 44100, source=["drums", "vocal", "impulse"])
     assert tree2.source == ["drums", "vocal", "impulse"]
 
-    # No source -> no metadata key, empty list (unchanged behavior).
+    # No source -> no extras key, empty list (unchanged behavior).
     tree3 = AudioTree.create(audio_1d, 44100)
     assert tree3.source == []
-    assert "source" not in tree3.metadata
+    assert "source" not in tree3.extras
 
 
 def test_filepath_too_long_raises():
-    """Filepaths longer than the metadata limit raise instead of truncating."""
+    """Filepaths longer than the extras limit raise instead of truncating."""
     from audiotree.core import _str_max_length
 
     audio = np.zeros((1, 1, 5))
@@ -85,7 +85,7 @@ def test_filepath_too_long_raises():
 
     # One character over the limit raises rather than silently truncating.
     too_long = "a" * (_str_max_length + 1)
-    with pytest.raises(ValueError, match="exceeds the metadata encoding limit"):
+    with pytest.raises(ValueError, match="exceeds the extras encoding limit"):
         AudioTree.create(audio, 44100, filepath=too_long)
 
 
@@ -259,7 +259,7 @@ def test_provenance_decodes_at_rank_4():
     assert tree.filepath == ["f0.wav", "f1.wav", "f2.wav", "f3.wav"]
 
     mini = tree.reshape_mini_batches(2)
-    assert mini.metadata["filepath"].shape == (2, 2, 1024)
+    assert mini.extras["filepath"].shape == (2, 2, 1024)
     # Previously a ValueError from NumPy ("truth value of an array ... is
     # ambiguous"): the decoder assumed the leading axis was the batch.
     assert mini.filepath == [["f0.wav", "f1.wav"], ["f2.wav", "f3.wav"]]
@@ -279,7 +279,7 @@ def test_provenance_without_leading_axis_raises():
 
     encoded = AudioTree._encode_filepaths(["only.wav"])[0]  # (1024,), no batch axis
     assert encoded.shape == (_str_max_length,)
-    tree = AudioTree(np.zeros((1, 1, 16)), 16000, metadata={"filepath": encoded})
+    tree = AudioTree(np.zeros((1, 1, 16)), 16000, extras={"filepath": encoded})
     with pytest.raises(ValueError, match="must have a leading batch axis"):
         tree.filepath
 
@@ -362,7 +362,7 @@ def test_create_rejects_provenance_list_of_wrong_length():
 
     # A single value still broadcasts across the whole batch.
     bc = AudioTree.create(waveform, 16000, filepath="one.wav")
-    assert bc.metadata["filepath"].shape[0] == 4
+    assert bc.extras["filepath"].shape[0] == 4
     assert bc.filepath == ["one.wav"] * 4
 
 
@@ -386,59 +386,57 @@ def test_audiotree_create_audio_dimensionality():
     assert tree3.waveform.shape == (2, 1, 3)
 
 
-def test_audiotree_create_metadata_handling():
-    """Test that AudioTree.create handles metadata correctly with filepaths."""
+def test_audiotree_create_extras_handling():
+    """Test that AudioTree.create handles extras correctly with filepaths."""
     waveform = np.array([1.0, 2.0, 3.0])
     sample_rate = 44100
 
-    # Test with existing metadata and filepaths
-    existing_metadata = {"custom_key": "custom_value"}
+    # Test with existing extras and filepaths
+    existing_extras = {"custom_key": "custom_value"}
     tree1 = AudioTree.create(
-        waveform, sample_rate, metadata=existing_metadata, filepath="test.wav"
+        waveform, sample_rate, extras=existing_extras, filepath="test.wav"
     )
 
-    # Should preserve existing metadata and add filepath
-    assert tree1.metadata["custom_key"] == "custom_value"
-    assert "filepath" in tree1.metadata
+    # Should preserve existing extras and add filepath
+    assert tree1.extras["custom_key"] == "custom_value"
+    assert "filepath" in tree1.extras
     assert tree1.filepath == ["test.wav"]
 
-    # Test that original metadata dict is not modified
-    assert "filepath" not in existing_metadata
+    # Test that original extras dict is not modified
+    assert "filepath" not in existing_extras
 
-    # Test with filepaths but no existing metadata
+    # Test with filepaths but no existing extras
     tree2 = AudioTree.create(waveform, sample_rate, filepath="test2.wav")
-    assert "filepath" in tree2.metadata
+    assert "filepath" in tree2.extras
     assert tree2.filepath == ["test2.wav"]
 
 
-def test_replace_metadata():
-    """replace_metadata merges kwargs into metadata without mutating the original."""
+def test_replace_extras():
+    """replace_extras merges kwargs into extras without mutating the original."""
     tree = AudioTree.create(
         np.zeros((2, 1, 100)),
         44100,
-        metadata={"energy": np.array([0.8, 0.9]), "tag": np.array([1, 2])},
+        extras={"energy": np.array([0.8, 0.9]), "tag": np.array([1, 2])},
     )
 
-    tagged = tree.replace_metadata(
-        onsets=np.array([[0.1], [0.2]]), tag=np.array([3, 4])
-    )
+    tagged = tree.replace_extras(onsets=np.array([[0.1], [0.2]]), tag=np.array([3, 4]))
 
     # New key added, colliding key overwritten, other keys preserved
-    np.testing.assert_array_equal(tagged.metadata["onsets"], [[0.1], [0.2]])
-    np.testing.assert_array_equal(tagged.metadata["tag"], [3, 4])
-    np.testing.assert_array_equal(tagged.metadata["energy"], [0.8, 0.9])
+    np.testing.assert_array_equal(tagged.extras["onsets"], [[0.1], [0.2]])
+    np.testing.assert_array_equal(tagged.extras["tag"], [3, 4])
+    np.testing.assert_array_equal(tagged.extras["energy"], [0.8, 0.9])
 
     # Everything else carries over untouched
     assert tagged.sample_rate == tree.sample_rate
     np.testing.assert_array_equal(tagged.waveform, tree.waveform)
 
-    # The original tree and its metadata dict are not mutated
-    assert set(tree.metadata) == {"energy", "tag"}
-    np.testing.assert_array_equal(tree.metadata["tag"], [1, 2])
+    # The original tree and its extras dict are not mutated
+    assert set(tree.extras) == {"energy", "tag"}
+    np.testing.assert_array_equal(tree.extras["tag"], [1, 2])
 
     # No kwargs is a no-op copy
-    same = tree.replace_metadata()
-    assert set(same.metadata) == {"energy", "tag"}
+    same = tree.replace_extras()
+    assert set(same.extras) == {"energy", "tag"}
 
 
 def test_split_by_batch():
@@ -451,8 +449,8 @@ def test_split_by_batch():
     assert split_trees[0].waveform.shape == (6, 1, 44100)
 
 
-def test_split_preserves_string_list_metadata():
-    """split() slices list-of-strings metadata element-wise, not character-wise.
+def test_split_preserves_string_list_extras():
+    """split() slices list-of-strings extras element-wise, not character-wise.
 
     Regression: split() used a bare tree_map with no is_leaf, so jax descended
     into the list and sliced each string's characters
@@ -461,25 +459,25 @@ def test_split_preserves_string_list_metadata():
     """
     names = ["a.wav", "b.wav", "c.wav", "d.wav"]
     tree = AudioTree.create(
-        np.zeros((4, 1, 8), np.float32), 16000, metadata={"names": names}
+        np.zeros((4, 1, 8), np.float32), 16000, extras={"names": names}
     )
 
     first, second = tree.split(2)
-    assert first.metadata["names"] == ["a.wav", "b.wav"]
-    assert second.metadata["names"] == ["c.wav", "d.wav"]
+    assert first.extras["names"] == ["a.wav", "b.wav"]
+    assert second.extras["names"] == ["c.wav", "d.wav"]
 
     # A bare-string leaf is a batch of 1 (the TreeDataSource per-item form);
     # batch ops slice it element-wise and return the list form, never
     # character-slicing it.
     tagged = AudioTree.create(
-        np.zeros((1, 1, 8), np.float32), 16000, metadata={"tag": "hello"}
+        np.zeros((1, 1, 8), np.float32), 16000, extras={"tag": "hello"}
     )
-    assert tagged.split(1)[0].metadata["tag"] == ["hello"]
+    assert tagged.split(1)[0].extras["tag"] == ["hello"]
 
     # filter() (split + _batch_audiotrees) and AudioTree.batch round-trip a
     # string-list leaf instead of crashing on it.
-    assert tree.filter(lambda t: True).metadata["names"] == names
-    assert AudioTree.batch([first, second]).metadata["names"] == names
+    assert tree.filter(lambda t: True).extras["names"] == names
+    assert AudioTree.batch([first, second]).extras["names"] == names
 
 
 def test_split_by_mini_batch():
@@ -576,18 +574,16 @@ def test_unsplit_mini_batch():
     assert unbatched_tree_full.waveform.shape == original_audio_data.shape
     np.testing.assert_array_equal(unbatched_tree_full.waveform, original_audio_data)
 
-    # Test that unsplitting preserves metadata if present (one string per item,
+    # Test that unsplitting preserves extras if present (one string per item,
     # the tree_writer contract).
     names = [f"item{i}.wav" for i in range(batch_size)]
-    audio_tree_with_metadata = AudioTree(
-        original_audio_data, sample_rate, metadata={"test_key": names}
+    audio_tree_with_extras = AudioTree(
+        original_audio_data, sample_rate, extras={"test_key": names}
     )
-    batched_with_metadata = audio_tree_with_metadata.reshape_mini_batches(
-        mini_batch_size
-    )
-    unbatched_with_metadata = batched_with_metadata.flatten_mini_batches()
+    batched_with_extras = audio_tree_with_extras.reshape_mini_batches(mini_batch_size)
+    unbatched_with_extras = batched_with_extras.flatten_mini_batches()
 
-    assert unbatched_with_metadata.metadata == {"test_key": names}
+    assert unbatched_with_extras.extras == {"test_key": names}
 
     # Test direct unsplit on already mini-batched data
     # Create data that's already in mini-batch format
@@ -1069,7 +1065,7 @@ def test_excerpt_strategies(tmp_path):
     common = dict(duration=0.5, sample_rate=16000)
 
     def offset_of(tree):
-        return float(tree.metadata["offset"][0])
+        return float(tree.extras["offset"][0])
 
     starts = [
         offset_of(
@@ -1169,7 +1165,7 @@ def test_create_broadcasts_a_single_name_over_the_batch(key):
     tree = AudioTree.create(waveform, 44100, **{key: "music.wav"})
 
     assert getattr(tree, key) == ["music.wav"] * 4
-    assert tree.metadata[key].shape[0] == 4
+    assert tree.extras[key].shape[0] == 4
     assert getattr(tree[2], key) == ["music.wav"]
     assert getattr(tree[1:], key) == ["music.wav"] * 3
 
@@ -1177,7 +1173,7 @@ def test_create_broadcasts_a_single_name_over_the_batch(key):
     per_item = AudioTree.create(waveform, 44100, **{key: list("abcd")})
     assert getattr(per_item, key) == list("abcd")
     single = AudioTree.create(np.zeros((1, 1, 8)), 44100, **{key: "one.wav"})
-    assert single.metadata[key].shape[0] == 1
+    assert single.extras[key].shape[0] == 1
 
 
 def test_create_broadcasts_over_token_only_batches():
@@ -1229,7 +1225,7 @@ def _encoded_tree(sample_rate: int = 16000, channels: int = 2) -> AudioTree:
         sample_rate,
         codes=np.ones((2, 4, 50), dtype=np.int32),
         latents=np.ones((2, 8, 50), dtype=np.float32),
-        metadata={"codec_scale": np.ones((2, 1), dtype=np.float32)},
+        extras={"codec_scale": np.ones((2, 1), dtype=np.float32)},
     ).replace_lufs()
 
 
@@ -1246,7 +1242,7 @@ def test_length_rate_channel_changes_invalidate_every_derived_field(operation):
     """Codec tokens describe one waveform; a changed waveform must drop them.
 
     ``resample``/``to_mono``/``to_stereo`` used to clear only ``lufs`` and
-    ``lufs_windows``, so ``codes``/``latents``/``metadata["codec_scale"]``
+    ``lufs_windows``, so ``codes``/``latents``/``extras["codec_scale"]``
     survived describing the *old* audio -- and ``encode_with_codec`` is
     idempotent, so a resample-after-encode happily reused them.
     """
@@ -1258,7 +1254,7 @@ def test_length_rate_channel_changes_invalidate_every_derived_field(operation):
     assert out.lufs_windows is None
     assert out.codes is None
     assert out.latents is None
-    assert "codec_scale" not in out.metadata
+    assert "codec_scale" not in out.extras
 
 
 def test_normalize_lufs_keeps_loudness_but_drops_codec_fields():
@@ -1272,7 +1268,7 @@ def test_normalize_lufs_keeps_loudness_but_drops_codec_fields():
     # ...but the tokens described the audio at its old level.
     assert out.codes is None
     assert out.latents is None
-    assert "codec_scale" not in out.metadata
+    assert "codec_scale" not in out.extras
 
 
 def test_no_op_conversions_keep_derived_fields():
@@ -1287,7 +1283,7 @@ def test_no_op_conversions_keep_derived_fields():
     ):
         assert unchanged.codes is not None
         assert unchanged.lufs is not None
-        assert "codec_scale" in unchanged.metadata
+        assert "codec_scale" in unchanged.extras
 
     # Re-batching the same items is not an audio change either.
     for unchanged in (
@@ -1298,7 +1294,7 @@ def test_no_op_conversions_keep_derived_fields():
     ):
         assert unchanged.codes is not None
         assert unchanged.lufs is not None
-        assert "codec_scale" in unchanged.metadata
+        assert "codec_scale" in unchanged.extras
 
 
 def test_invalidate_derived_rejects_unknown_keep():
@@ -1308,10 +1304,10 @@ def test_invalidate_derived_rejects_unknown_keep():
         tree._invalidate_derived(keep=("waveform",))
 
     # And it is the single source of truth for what "derived" means.
-    from audiotree.core import DERIVED_FIELDS, DERIVED_METADATA_KEYS
+    from audiotree.core import DERIVED_FIELDS, DERIVED_EXTRAS_KEYS
 
     assert DERIVED_FIELDS == ("lufs", "lufs_windows", "codes", "latents")
-    assert DERIVED_METADATA_KEYS == ("codec_scale",)
+    assert DERIVED_EXTRAS_KEYS == ("codec_scale",)
 
 
 # =============================================================================
@@ -1329,7 +1325,7 @@ def _write_manifest(directory, **writer_kwargs):
         sample_rate=8000,
         lufs=np.array([-30.0, -18.0, -15.0], dtype=np.float32),
         filepath=["a.wav", "b.wav", "c.wav"],
-        metadata={"frame_id": np.array([10, 20, 30], dtype=np.int32)},
+        extras={"frame_id": np.array([10, 20, 30], dtype=np.int32)},
     )
     with AudioWriter(directory, **writer_kwargs) as writer:
         writer.write(tree, tags={"split": "train"})
@@ -1382,10 +1378,10 @@ def test_from_manifest_and_audio_data_source_agree(tmp_path):
     assert combined.filepath == per_item.filepath == ["a.wav", "b.wav", "c.wav"]
     # AudioDataSource routes each row through ``from_file``, which additionally
     # records the read ``offset``; every manifest-derived field must match.
-    assert per_item.metadata.keys() - combined.metadata.keys() == {"offset"}
-    assert combined.metadata.keys() <= per_item.metadata.keys()
+    assert per_item.extras.keys() - combined.extras.keys() == {"offset"}
+    assert combined.extras.keys() <= per_item.extras.keys()
     np.testing.assert_array_equal(
-        combined.metadata["frame_id"], per_item.metadata["frame_id"]
+        combined.extras["frame_id"], per_item.extras["frame_id"]
     )
 
 

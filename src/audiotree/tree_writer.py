@@ -70,7 +70,7 @@ def _path_to_string(path: Tuple) -> str:
 
     Examples:
         (GetAttrKey('waveform'),) -> "waveform"
-        (GetAttrKey('metadata'), DictKey('mel')) -> "metadata.mel"
+        (GetAttrKey('extras'), DictKey('mel')) -> "extras.mel"
         (DictKey('dry'), GetAttrKey('waveform')) -> "dry.waveform"
     """
     parts = []
@@ -123,11 +123,11 @@ def _serialize_structure(pytree) -> Tuple[Any, List[str], List[str]]:
                 if value is None:
                     continue
                 child_prefix = f"{prefix}.{fname}" if prefix else fname
-                if fname == "metadata":
+                if fname == "extras":
                     if not value:  # empty dict
-                        children["metadata"] = {"type": "dict", "children": {}}
+                        children["extras"] = {"type": "dict", "children": {}}
                     else:
-                        children["metadata"] = _walk(value, child_prefix)
+                        children["extras"] = _walk(value, child_prefix)
                 else:
                     children[fname] = _walk(value, child_prefix)
             return {
@@ -185,7 +185,7 @@ def _extract_leaves(
                 if value is None:
                     continue
                 child_prefix = f"{prefix}.{fname}" if prefix else fname
-                if fname == "metadata":
+                if fname == "extras":
                     if value:
                         _walk(value, child_prefix)
                 else:

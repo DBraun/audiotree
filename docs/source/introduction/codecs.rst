@@ -91,7 +91,7 @@ too.
 value: an optional per-item loudness-normalization factor, for codecs that
 normalize before quantizing and need the factor back to decode faithfully.
 Return ``None`` if your codec does not rescale. When it is not ``None``,
-``encode_with_codec`` stores it under ``metadata["codec_scale"]``.
+``encode_with_codec`` stores it under ``extras["codec_scale"]``.
 
 Writing a conforming codec
 --------------------------
@@ -180,7 +180,7 @@ seed.
     encoded = encode_with_codec(codec).map(tree)
     print(encoded.codes.shape)                       # the codec's own convention
     print(encoded.codes.dtype)
-    print(encoded.metadata["codec_scale"].shape)     # the returned `scale`, per item
+    print(encoded.extras["codec_scale"].shape)       # the returned `scale`, per item
 
     latent = encode_latents(codec).map(tree)
     print(latent.latents.shape)
@@ -220,7 +220,7 @@ Encode last
 -----------
 
 That ordering is not stylistic. ``codes``, ``latents`` and
-``metadata["codec_scale"]`` are *derived* fields: they describe one particular
+``extras["codec_scale"]`` are *derived* fields: they describe one particular
 waveform, at one particular length, rate, channel count and level. Every
 audiotree operation that changes the audio in one of those ways clears them,
 rather than leaving tokens behind that silently describe the previous audio:
@@ -232,7 +232,7 @@ rather than leaving tokens behind that silently describe the previous audio:
 
     resampled = encoded.resample(22_050)
     print(resampled.codes is None)
-    print("codec_scale" in resampled.metadata)
+    print("codec_scale" in resampled.extras)
 
 .. testoutput::
 

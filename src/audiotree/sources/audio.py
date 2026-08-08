@@ -35,7 +35,7 @@ class AudioDataSource(grain.RandomAccessDataSource):
     """A DataSource that reads audio files based on a manifest file created by AudioWriter.
 
     This DataSource is designed to work seamlessly with the output of AudioWriter, reading
-    audio files and restoring their associated metadata from NPZ manifests.
+    audio files and restoring their associated extras from NPZ manifests.
 
     NPZ format provides:
     - Efficient binary storage with 20x+ compression vs JSON for large datasets
@@ -58,7 +58,7 @@ class AudioDataSource(grain.RandomAccessDataSource):
             ``"warn"`` substitutes digital silence of the entry's shape and
             emits a :class:`UserWarning`; ``"skip"`` substitutes the same
             silence quietly. Under either non-raising policy *every* item
-            carries ``metadata["read_error"]`` (``True`` on a substitute), so
+            carries ``extras["read_error"]`` (``True`` on a substitute), so
             the failure stays visible and the items still batch together. See
             :func:`~audiotree.sources.create_audio_dataset` for the reasoning.
 
@@ -86,7 +86,7 @@ class AudioDataSource(grain.RandomAccessDataSource):
         >>> source[0].waveform.shape
         (1, 1, 44100)
 
-        Filter entries by metadata while loading:
+        Filter entries by extras while loading:
 
         >>> source = AudioDataSource(
         ...     manifest_path,
@@ -181,9 +181,13 @@ class AudioDataSource(grain.RandomAccessDataSource):
                 # AudioTree fields are user data: keep the stored array and its
                 # dtype exactly. Demoting them to Python scalars loses both the
                 # dtype and, for a size-1 array, the shape (a one-window
-                # ``lufs_windows`` would come back 0-d). Metadata columns are
+                # ``lufs_windows`` would come back 0-d). Extras columns are
                 # kept whole for the same reason, and tags are already decoded.
-                if key in LABEL_FIELDS or key.startswith("metadata_") or key == "tags":
+                if (
+                    key in LABEL_FIELDS
+                    or key.startswith(_manifest.EXTRAS_PREFIX)
+                    or key == "tags"
+                ):
                     continue
 
                 # Bookkeeping columns (filename, sample_rate, channels, ...) are
@@ -243,23 +247,23 @@ class AudioDataSource(grain.RandomAccessDataSource):
         return channels, samples, sample_rate
 
     def _substitute_silence(
-        self, entry: Dict, audio_path, exc: BaseException, metadata: Dict
+        self, entry: Dict, audio_path, exc: BaseException, extras: Dict
     ) -> AudioTree:
         """Build the stand-in returned for an entry whose audio cannot be read.
 
         Shaped by :meth:`_synthetic_geometry` to the *target* rate, channel
         count, and length a real load would produce, so a substitute collates
         with the real items around it, and tagged with the offending path plus
-        ``metadata[READ_ERROR_KEY] == True``.
+        ``extras[READ_ERROR_KEY] == True``.
         """
         channels, samples, sample_rate = self._synthetic_geometry(entry)
 
         tree_kwargs = {
             "sample_rate": sample_rate,
             # ``from_file`` records the excerpt offset; match it so a substitute
-            # and a real load carry the same metadata keys.
-            "metadata": {
-                **metadata,
+            # and a real load carry the same extras keys.
+            "extras": {
+                **extras,
                 "offset": np.array([0.0]),
                 READ_ERROR_KEY: np.array([True]),
             },
@@ -273,7 +277,7 @@ class AudioDataSource(grain.RandomAccessDataSource):
             warnings.warn(
                 f"Substituting silence for unreadable audio file "
                 f"{str(audio_path)!r}: {type(exc).__name__}: {exc}. Every "
-                f"substitute carries metadata[{READ_ERROR_KEY!r}] == True; pass "
+                f"substitute carries extras[{READ_ERROR_KEY!r}] == True; pass "
                 "on_read_error='raise' to fail on it instead.",
                 UserWarning,
                 stacklevel=3,
@@ -290,7 +294,7 @@ class AudioDataSource(grain.RandomAccessDataSource):
             record_key: Index of the record to load
 
         Returns:
-            AudioTree with audio data and restored metadata
+            AudioTree with audio data and restored extras
 
         Raises:
             AudioReadError: If the entry's audio file is missing or undecodable
@@ -298,24 +302,25 @@ class AudioDataSource(grain.RandomAccessDataSource):
         """
         entry = self.entries[int(record_key)]
 
-        # Prepare metadata from manifest
-        metadata = {}
+        # Prepare extras from manifest
+        extras = {}
 
-        # Add metadata arrays from manifest (these can be batched properly)
+        # Add extras arrays from manifest (these can be batched properly)
+        prefix = _manifest.EXTRAS_PREFIX
         for key, value in entry.items():
-            if key.startswith("metadata_"):
-                # Remove 'metadata_' prefix and add to metadata
-                metadata_key = key[9:]  # len('metadata_') = 9
+            if key.startswith(prefix):
+                # Strip the column prefix and add to extras
+                extras_key = key[len(prefix) :]
                 # Wrap in array with batch dimension for batching
                 if isinstance(value, np.ndarray):
                     # Add batch dimension if needed
                     if value.ndim == 0:
-                        metadata[metadata_key] = np.array([value.item()])
+                        extras[extras_key] = np.array([value.item()])
                     else:
-                        metadata[metadata_key] = value[np.newaxis, ...]  # Add batch dim
+                        extras[extras_key] = value[np.newaxis, ...]  # Add batch dim
                 else:
                     # Convert scalar to array with batch dim
-                    metadata[metadata_key] = np.array([value])
+                    extras[extras_key] = np.array([value])
 
         # Check if audio files were actually written
         files_written = entry.get("files_written", True)
@@ -338,7 +343,7 @@ class AudioDataSource(grain.RandomAccessDataSource):
                 "duration": self.duration,
                 "mono": self.mono,
                 "pad_mode": self.pad_mode if self.duration else None,
-                "metadata": metadata,
+                "extras": extras,
             }
 
             # Prefer the recorded source path over the output audio path.
@@ -369,9 +374,9 @@ class AudioDataSource(grain.RandomAccessDataSource):
                         f"{type(exc).__name__}: {exc}",
                         str(audio_path),
                     ) from exc
-                return self._substitute_silence(entry, audio_path, exc, metadata)
+                return self._substitute_silence(entry, audio_path, exc, extras)
         else:
-            # No audio files - create AudioTree from manifest metadata only.
+            # No audio files - create AudioTree from manifest extras only.
             # Size the synthetic waveform to the *target* geometry (honoring
             # sample_rate, mono, and duration) so it collates with real items,
             # exactly as a silence substitute does.
@@ -381,7 +386,7 @@ class AudioDataSource(grain.RandomAccessDataSource):
             # Build kwargs for AudioTree.create
             tree_kwargs = {
                 "sample_rate": sample_rate,
-                "metadata": metadata,
+                "extras": extras,
             }
 
             # Restore the recorded source path (there is no audio file here).
@@ -398,11 +403,11 @@ class AudioDataSource(grain.RandomAccessDataSource):
             audio_tree = AudioTree.create(waveform, **tree_kwargs)
 
         # Under a non-raising policy every item is marked, so that a substitute
-        # and a real load agree on their metadata keys and still batch together.
+        # and a real load agree on their extras keys and still batch together.
         if self.on_read_error != "raise":
             audio_tree = audio_tree.replace(
-                metadata={
-                    **audio_tree.metadata,
+                extras={
+                    **audio_tree.extras,
                     READ_ERROR_KEY: np.array([False]),
                 }
             )
@@ -584,7 +589,7 @@ class AudioDataSource(grain.RandomAccessDataSource):
 
         This method automatically locates the manifest file in the output directory
         based on the specified format and creates a AudioDataSource configured
-        to read the audio files and metadata.
+        to read the audio files and extras.
 
         Args:
             output_dir: Directory containing AudioWriter output

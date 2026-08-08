@@ -590,7 +590,7 @@ def create_windowed_audio_dataset(
         pad_mode: Padding mode for files shorter than ``duration`` (numpy.pad
             modes), or None to not pad.
         extensions: Audio extensions to search when using ``sources``.
-        source: Optional source group name stored in metadata.
+        source: Optional source group name stored in extras.
 
     Returns:
         A grain.MapDataset over audio windows.

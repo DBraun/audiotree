@@ -71,17 +71,17 @@ def test_filter_keep_all():
 def test_filter_keep_none_then_filter_again():
     """Filtering an already-empty tree returns an empty tree, not split(0)."""
     waveform = np.array([[[1.0, 2.0]], [[3.0, 4.0]]])
-    tree = AudioTree(waveform, 44100, metadata={"name": ["a", "b"]})
+    tree = AudioTree(waveform, 44100, extras={"name": ["a", "b"]})
 
     empty = tree.filter(lambda item: False)
     assert empty.batch_size == 0
-    assert empty.metadata["name"] == []  # not the full-length string list
+    assert empty.extras["name"] == []  # not the full-length string list
 
     # Chained filters must compose: this used to hit split(0) and raise
     # ZeroDivisionError.
     still_empty = empty.filter(lambda item: True)
     assert still_empty.batch_size == 0
-    assert still_empty.metadata["name"] == []
+    assert still_empty.extras["name"] == []
     assert still_empty.sample_rate == tree.sample_rate
 
 

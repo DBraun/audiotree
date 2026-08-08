@@ -53,13 +53,13 @@ def test_round_trip_audiotree():
         source.close()
 
 
-def test_round_trip_audiotree_with_metadata():
-    """AudioTree with metadata arrays round-trips correctly."""
+def test_round_trip_audiotree_with_extras():
+    """AudioTree with extras arrays round-trips correctly."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         audio = np.random.randn(3, 1, 50).astype(np.float32)
         mel = np.random.randn(3, 32).astype(np.float32)
-        tree = AudioTree(waveform=audio, sample_rate=44100, metadata={"mel": mel})
+        tree = AudioTree(waveform=audio, sample_rate=44100, extras={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
@@ -73,13 +73,13 @@ def test_round_trip_audiotree_with_metadata():
                 sample.waveform[0], audio[i], decimal=5
             )
             np.testing.assert_array_almost_equal(
-                sample.metadata["mel"][0], mel[i], decimal=5
+                sample.extras["mel"][0], mel[i], decimal=5
             )
         source.close()
 
 
-def test_round_trip_nested_metadata():
-    """Nested metadata dicts round-trip correctly."""
+def test_round_trip_nested_extras():
+    """Nested extras dicts round-trip correctly."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         mel = np.random.randn(2, 16).astype(np.float32)
@@ -87,7 +87,7 @@ def test_round_trip_nested_metadata():
         tree = AudioTree(
             waveform=np.zeros((2, 1, 10), dtype=np.float32),
             sample_rate=44100,
-            metadata={"features": {"mel": mel, "mfcc": mfcc}},
+            extras={"features": {"mel": mel, "mfcc": mfcc}},
         )
 
         with TreeWriter(output_dir, expected_samples=2) as w:
@@ -97,14 +97,14 @@ def test_round_trip_nested_metadata():
         sample = source[0]
 
         assert isinstance(sample, AudioTree)
-        assert "features" in sample.metadata
-        assert "mel" in sample.metadata["features"]
-        assert "mfcc" in sample.metadata["features"]
+        assert "features" in sample.extras
+        assert "mel" in sample.extras["features"]
+        assert "mfcc" in sample.extras["features"]
         np.testing.assert_array_almost_equal(
-            sample.metadata["features"]["mel"][0], mel[0], decimal=5
+            sample.extras["features"]["mel"][0], mel[0], decimal=5
         )
         np.testing.assert_array_almost_equal(
-            sample.metadata["features"]["mfcc"][0], mfcc[0], decimal=5
+            sample.extras["features"]["mfcc"][0], mfcc[0], decimal=5
         )
         source.close()
 
@@ -294,14 +294,14 @@ def test_get_metadata():
 # === Empty/minimal structures ===
 
 
-def test_empty_metadata_round_trip():
-    """AudioTree with empty metadata round-trips."""
+def test_empty_extras_round_trip():
+    """AudioTree with empty extras round-trips."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
             waveform=np.zeros((2, 1, 10), dtype=np.float32),
             sample_rate=44100,
-            metadata={},
+            extras={},
         )
 
         with TreeWriter(output_dir, expected_samples=2) as w:
@@ -310,7 +310,7 @@ def test_empty_metadata_round_trip():
         source = TreeDataSource(output_dir)
         sample = source[0]
         assert isinstance(sample, AudioTree)
-        assert sample.metadata == {}
+        assert sample.extras == {}
         source.close()
 
 
@@ -577,14 +577,14 @@ def test_grain_protocol():
 
 
 def test_exclude_audio_data():
-    """Excluding wet.waveform gives None audio but keeps dry and metadata."""
+    """Excluding wet.waveform gives None audio but keeps dry and extras."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         dry_audio = np.random.randn(3, 2, 100).astype(np.float32)
         wet_audio = np.random.randn(3, 2, 100).astype(np.float32)
         mel = np.random.randn(3, 16).astype(np.float32)
         dry = AudioTree(waveform=dry_audio, sample_rate=44100)
-        wet = AudioTree(waveform=wet_audio, sample_rate=44100, metadata={"mel": mel})
+        wet = AudioTree(waveform=wet_audio, sample_rate=44100, extras={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write({"dry": dry, "wet": wet})
@@ -594,9 +594,9 @@ def test_exclude_audio_data():
 
         # wet.waveform excluded -> None
         assert sample["wet"].waveform is None
-        # wet metadata still present
+        # wet extras still present
         np.testing.assert_array_almost_equal(
-            sample["wet"].metadata["mel"][0], mel[0], decimal=5
+            sample["wet"].extras["mel"][0], mel[0], decimal=5
         )
         # dry.waveform NOT excluded
         np.testing.assert_array_almost_equal(
@@ -605,8 +605,8 @@ def test_exclude_audio_data():
         source.close()
 
 
-def test_exclude_metadata_field():
-    """Excluding a metadata field removes its key from the metadata dict."""
+def test_exclude_extras_field():
+    """Excluding an extras field removes its key from the extras dict."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         mel = np.random.randn(3, 16).astype(np.float32)
@@ -614,19 +614,19 @@ def test_exclude_metadata_field():
         tree = AudioTree(
             waveform=np.zeros((3, 1, 10), dtype=np.float32),
             sample_rate=44100,
-            metadata={"mel": mel, "mfcc": mfcc},
+            extras={"mel": mel, "mfcc": mfcc},
         )
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
 
-        source = TreeDataSource(output_dir, exclude_prefixes=["metadata.mel"])
+        source = TreeDataSource(output_dir, exclude_prefixes=["extras.mel"])
         sample = source[0]
 
-        assert "mel" not in sample.metadata
-        assert "mfcc" in sample.metadata
+        assert "mel" not in sample.extras
+        assert "mfcc" in sample.extras
         np.testing.assert_array_almost_equal(
-            sample.metadata["mfcc"][0], mfcc[0], decimal=5
+            sample.extras["mfcc"][0], mfcc[0], decimal=5
         )
         source.close()
 
@@ -659,7 +659,7 @@ def test_exclude_prefix_with_subtree():
         dry = AudioTree(
             waveform=np.random.randn(2, 1, 50).astype(np.float32),
             sample_rate=44100,
-            metadata={"mel": np.random.randn(2, 8).astype(np.float32)},
+            extras={"mel": np.random.randn(2, 8).astype(np.float32)},
         )
         wet = AudioTree(
             waveform=np.random.randn(2, 1, 50).astype(np.float32),
@@ -674,7 +674,7 @@ def test_exclude_prefix_with_subtree():
 
         # dry AudioTree is reconstructed but all its leaves are excluded
         assert sample["dry"].waveform is None
-        assert sample["dry"].metadata == {}
+        assert sample["dry"].extras == {}
         # wet is untouched
         assert sample["wet"].waveform is not None
         source.close()
@@ -688,7 +688,7 @@ def test_exclude_pickle_roundtrip():
         output_dir = Path(tmpdir)
         audio = np.random.randn(3, 1, 20).astype(np.float32)
         mel = np.random.randn(3, 8).astype(np.float32)
-        tree = AudioTree(waveform=audio, sample_rate=44100, metadata={"mel": mel})
+        tree = AudioTree(waveform=audio, sample_rate=44100, extras={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
@@ -701,10 +701,8 @@ def test_exclude_pickle_roundtrip():
 
         sample = restored[0]
         assert sample.waveform is None
-        assert "mel" in sample.metadata
-        np.testing.assert_array_almost_equal(
-            sample.metadata["mel"][0], mel[0], decimal=5
-        )
+        assert "mel" in sample.extras
+        np.testing.assert_array_almost_equal(sample.extras["mel"][0], mel[0], decimal=5)
         source.close()
         restored.close()
 
@@ -739,7 +737,7 @@ def test_load_into_memory_matches_lazy():
         output_dir = Path(tmpdir)
         audio = np.random.randn(5, 2, 100).astype(np.float32)
         mel = np.random.randn(5, 16).astype(np.float32)
-        tree = AudioTree(waveform=audio, sample_rate=44100, metadata={"mel": mel})
+        tree = AudioTree(waveform=audio, sample_rate=44100, extras={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=5) as w:
             w.write(tree)
@@ -751,9 +749,7 @@ def test_load_into_memory_matches_lazy():
             s_lazy = lazy[i]
             s_eager = eager[i]
             np.testing.assert_array_equal(s_lazy.waveform, s_eager.waveform)
-            np.testing.assert_array_equal(
-                s_lazy.metadata["mel"], s_eager.metadata["mel"]
-            )
+            np.testing.assert_array_equal(s_lazy.extras["mel"], s_eager.extras["mel"])
         lazy.close()
         eager.close()
 
@@ -764,7 +760,7 @@ def test_load_into_memory_with_exclude():
         output_dir = Path(tmpdir)
         audio = np.random.randn(3, 1, 50).astype(np.float32)
         mel = np.random.randn(3, 8).astype(np.float32)
-        tree = AudioTree(waveform=audio, sample_rate=44100, metadata={"mel": mel})
+        tree = AudioTree(waveform=audio, sample_rate=44100, extras={"mel": mel})
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
@@ -777,9 +773,7 @@ def test_load_into_memory_with_exclude():
 
         sample = source[0]
         assert sample.waveform is None
-        np.testing.assert_array_almost_equal(
-            sample.metadata["mel"][0], mel[0], decimal=5
-        )
+        np.testing.assert_array_almost_equal(sample.extras["mel"][0], mel[0], decimal=5)
         source.close()
 
 
@@ -879,7 +873,7 @@ def test_manifest_json_is_utf8_regardless_of_locale(tmp_path, monkeypatch):
 
     ``write_json_atomic`` and the two manifest readers used the default encoding,
     which is UTF-8 on Linux and macOS but cp1252 on Windows. A manifest carrying
-    a non-ASCII character -- an accented leaf name, a CJK metadata key -- was
+    a non-ASCII character -- an accented leaf name, a CJK extras key -- was
     therefore written on one platform and unreadable on another, and a
     Windows-written manifest was not valid UTF-8 JSON for anyone else. The
     Windows CI leg caught this on its first run.

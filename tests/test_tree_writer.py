@@ -65,34 +65,34 @@ def test_manifest_structure_audiotree():
         assert "pitch" not in structure["children"]
 
 
-def test_write_audiotree_with_metadata():
-    """AudioTree with metadata dict containing arrays."""
+def test_write_audiotree_with_extras():
+    """AudioTree with extras dict containing arrays."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
             waveform=np.zeros((3, 2, 100), dtype=np.float32),
             sample_rate=44100,
-            metadata={"mel": np.zeros((3, 32), dtype=np.float32)},
+            extras={"mel": np.zeros((3, 32), dtype=np.float32)},
         )
 
         with TreeWriter(output_dir, expected_samples=3) as w:
             w.write(tree)
 
-        assert (output_dir / "metadata.mel.bin").exists()
+        assert (output_dir / "extras.mel.bin").exists()
 
         with open(output_dir / "manifest.json", encoding="utf-8") as f:
             manifest = json.load(f)
-        assert "metadata.mel" in manifest["leaves"]
+        assert "extras.mel" in manifest["leaves"]
 
 
-def test_write_audiotree_nested_metadata():
-    """AudioTree with nested metadata dicts."""
+def test_write_audiotree_nested_extras():
+    """AudioTree with nested extras dicts."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
             waveform=np.zeros((2, 1, 50), dtype=np.float32),
             sample_rate=44100,
-            metadata={
+            extras={
                 "features": {
                     "mel": np.zeros((2, 16), dtype=np.float32),
                     "mfcc": np.zeros((2, 8), dtype=np.float32),
@@ -103,8 +103,8 @@ def test_write_audiotree_nested_metadata():
         with TreeWriter(output_dir, expected_samples=2) as w:
             w.write(tree)
 
-        assert (output_dir / "metadata.features.mel.bin").exists()
-        assert (output_dir / "metadata.features.mfcc.bin").exists()
+        assert (output_dir / "extras.features.mel.bin").exists()
+        assert (output_dir / "extras.features.mfcc.bin").exists()
 
 
 def test_write_dict_of_audiotrees():
@@ -585,14 +585,14 @@ def test_different_dtypes():
         assert manifest["leaves"]["int32"]["dtype"] == "int32"
 
 
-def test_empty_metadata():
-    """AudioTree with empty metadata dict."""
+def test_empty_extras():
+    """AudioTree with empty extras dict."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree(
             waveform=np.zeros((2, 1, 10), dtype=np.float32),
             sample_rate=44100,
-            metadata={},
+            extras={},
         )
 
         with TreeWriter(output_dir, expected_samples=2) as w:
@@ -602,9 +602,9 @@ def test_empty_metadata():
             manifest = json.load(f)
 
         structure = manifest["structure"]
-        assert "metadata" in structure["children"]
-        assert structure["children"]["metadata"]["type"] == "dict"
-        assert structure["children"]["metadata"]["children"] == {}
+        assert "extras" in structure["children"]
+        assert structure["children"]["extras"]["type"] == "dict"
+        assert structure["children"]["extras"]["children"] == {}
 
 
 def test_user_metadata_in_manifest():

@@ -218,7 +218,7 @@ def test_npz_manifest():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        # Create AudioTree with metadata
+        # Create AudioTree with extras
         waveform = np.random.randn(3, 1, 44100)
         audio_tree = AudioTree.create(
             waveform,
@@ -248,7 +248,7 @@ def test_npz_manifest():
         assert all(data["channels"] == 1)
         assert all(data["samples"] == 44100)
 
-        # Check AudioTree metadata
+        # Check AudioTree extras
         assert np.allclose(data["lufs"], [-20.0, -15.0, -18.0])
         assert np.allclose(data["pitch"], [60.0, 62.0, 64.0])
         assert np.allclose(data["velocity"], [64, 80, 100])
@@ -441,7 +441,7 @@ def test_manifest_datasource_npz():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        # Create and write AudioTree with metadata
+        # Create and write AudioTree with extras
         waveform = np.random.randn(3, 2, 16000)
         audio_tree = AudioTree.create(
             waveform,
@@ -468,7 +468,7 @@ def test_manifest_datasource_npz():
         assert np.allclose(loaded_tree.lufs, [-20.0])
         assert np.allclose(loaded_tree.pitch, [60.0])
         assert np.allclose(loaded_tree.velocity, [64])
-        # Check metadata via get_entry since metadata was simplified for batching
+        # Check extras via get_entry since extras was simplified for batching
         entry = source.get_entry(0)
         assert entry["filepath"] == "orig1.wav"
         assert entry["tags"]["experiment"] == "test_npz"
@@ -532,24 +532,24 @@ def test_dtype_preservation():
         )
 
 
-def test_metadata_array_preservation():
-    """Test that AudioWriter preserves metadata arrays in NPZ manifest."""
+def test_extras_array_preservation():
+    """Test that AudioWriter preserves extras arrays in NPZ manifest."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        # Create test data with metadata arrays
+        # Create test data with extras arrays
         batch_size = 3
         param_dim = 185
 
-        # Create AudioTree with metadata containing arrays
+        # Create AudioTree with extras containing arrays
         audio_tree = AudioTree.create(
             np.random.randn(batch_size, 2, 1000).astype(np.float32),
             sample_rate=44100,
         )
 
-        # Add metadata with arrays
+        # Add extras with arrays
         audio_tree = audio_tree.replace(
-            metadata={
+            extras={
                 "params": np.random.randn(batch_size, param_dim).astype(np.float32),
                 "frame_indices": np.array([10, 20, 30], dtype=np.int32),
                 "confidence": np.array([0.9, 0.85, 0.95], dtype=np.float32),
@@ -563,26 +563,26 @@ def test_metadata_array_preservation():
         # Load the NPZ manifest directly
         manifest_data = load_manifest(output_dir / "manifest.npz")
 
-        # Check metadata fields were saved
-        assert "metadata_params" in manifest_data
-        assert "metadata_frame_indices" in manifest_data
-        assert "metadata_confidence" in manifest_data
+        # Check extras fields were saved
+        assert "extras_params" in manifest_data
+        assert "extras_frame_indices" in manifest_data
+        assert "extras_confidence" in manifest_data
 
         # Check shapes - params should be [batch_size, param_dim]
-        assert manifest_data["metadata_params"].shape == (batch_size, param_dim)
-        assert manifest_data["metadata_params"].dtype == np.float32
+        assert manifest_data["extras_params"].shape == (batch_size, param_dim)
+        assert manifest_data["extras_params"].dtype == np.float32
 
-        # Check other metadata arrays
-        assert manifest_data["metadata_frame_indices"].shape == (batch_size,)
-        assert manifest_data["metadata_frame_indices"].dtype == np.int32
+        # Check other extras arrays
+        assert manifest_data["extras_frame_indices"].shape == (batch_size,)
+        assert manifest_data["extras_frame_indices"].dtype == np.int32
         np.testing.assert_array_equal(
-            manifest_data["metadata_frame_indices"], [10, 20, 30]
+            manifest_data["extras_frame_indices"], [10, 20, 30]
         )
 
-        assert manifest_data["metadata_confidence"].shape == (batch_size,)
-        assert manifest_data["metadata_confidence"].dtype == np.float32
+        assert manifest_data["extras_confidence"].shape == (batch_size,)
+        assert manifest_data["extras_confidence"].dtype == np.float32
         np.testing.assert_array_almost_equal(
-            manifest_data["metadata_confidence"], [0.9, 0.85, 0.95]
+            manifest_data["extras_confidence"], [0.9, 0.85, 0.95]
         )
 
 
@@ -591,7 +591,7 @@ def test_manifest_only_generation():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        # Create AudioTree with metadata
+        # Create AudioTree with extras
         waveform = np.random.randn(3, 2, 22050)
         audio_tree = AudioTree.create(
             waveform,
@@ -619,14 +619,14 @@ def test_manifest_only_generation():
         # Load and verify manifest contents
         data = load_manifest(manifest_path)
 
-        # Check basic metadata
+        # Check basic extras
         assert len(data["index"]) == 3
         assert len(data["filename"]) == 3
         assert all(data["sample_rate"] == 22050)
         assert all(data["channels"] == 2)
         assert all(data["samples"] == 22050)
 
-        # Check AudioTree metadata
+        # Check AudioTree extras
         assert np.allclose(data["lufs"], [-20.0, -18.0, -22.0])
         assert np.allclose(data["pitch"], [60.0, 62.0, 64.0])
         assert np.allclose(data["velocity"], [64, 80, 100])
@@ -756,43 +756,43 @@ def test_field_validation():
             writer.write(tree3)
 
 
-def test_metadata_different_batch_sizes():
-    """Test that metadata arrays work correctly across writes with different batch sizes."""
+def test_extras_different_batch_sizes():
+    """Test that extras arrays work correctly across writes with different batch sizes."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        # First write: batch size 2 with metadata params [2, 10]
+        # First write: batch size 2 with extras params [2, 10]
         tree1 = AudioTree.create(
             np.random.randn(2, 1, 8000),
             sample_rate=8000,
             lufs=np.array([-20.0, -18.0]),
         )
         tree1 = tree1.replace(
-            metadata={
+            extras={
                 "params": np.random.randn(2, 10).astype(np.float32),
                 "frame_id": np.array([100, 200], dtype=np.int32),
             }
         )
 
-        # Second write: batch size 3 with metadata params [3, 10]
+        # Second write: batch size 3 with extras params [3, 10]
         tree2 = AudioTree.create(
             np.random.randn(3, 1, 8000),
             sample_rate=8000,
             lufs=np.array([-15.0, -22.0, -19.0]),
         )
         tree2 = tree2.replace(
-            metadata={
+            extras={
                 "params": np.random.randn(3, 10).astype(np.float32),
                 "frame_id": np.array([300, 400, 500], dtype=np.int32),
             }
         )
 
-        # Third write: batch size 1 with metadata params [1, 10]
+        # Third write: batch size 1 with extras params [1, 10]
         tree3 = AudioTree.create(
             np.random.randn(1, 1, 8000), sample_rate=8000, lufs=np.array([-17.0])
         )
         tree3 = tree3.replace(
-            metadata={
+            extras={
                 "params": np.random.randn(1, 10).astype(np.float32),
                 "frame_id": np.array([600], dtype=np.int32),
             }
@@ -807,52 +807,52 @@ def test_metadata_different_batch_sizes():
         # Load manifest and verify
         manifest_data = load_manifest(output_dir / "manifest.npz")
 
-        # Check that metadata was stacked correctly
-        assert "metadata_params" in manifest_data
-        assert "metadata_frame_id" in manifest_data
+        # Check that extras was stacked correctly
+        assert "extras_params" in manifest_data
+        assert "extras_frame_id" in manifest_data
 
         # Should have 2 + 3 + 1 = 6 entries total
-        assert manifest_data["metadata_params"].shape == (6, 10)
-        assert manifest_data["metadata_frame_id"].shape == (6,)
+        assert manifest_data["extras_params"].shape == (6, 10)
+        assert manifest_data["extras_frame_id"].shape == (6,)
 
         # Verify dtypes preserved
-        assert manifest_data["metadata_params"].dtype == np.float32
-        assert manifest_data["metadata_frame_id"].dtype == np.int32
+        assert manifest_data["extras_params"].dtype == np.float32
+        assert manifest_data["extras_frame_id"].dtype == np.int32
 
         # Verify frame_ids are correct
         np.testing.assert_array_equal(
-            manifest_data["metadata_frame_id"], [100, 200, 300, 400, 500, 600]
+            manifest_data["extras_frame_id"], [100, 200, 300, 400, 500, 600]
         )
 
         # Test reading back with AudioDataSource
         source = AudioDataSource.from_writer_output(output_dir)
         assert len(source) == 6
 
-        # Check all items have correct metadata shapes and values
+        # Check all items have correct extras shapes and values
         expected_frame_ids = [100, 200, 300, 400, 500, 600]
 
         for idx, expected_frame_id in enumerate(expected_frame_ids):
             loaded_tree = source[idx]
 
-            # Verify metadata exists and has correct shape
-            assert "params" in loaded_tree.metadata
-            assert loaded_tree.metadata["params"].shape == (1, 10), (
+            # Verify extras exists and has correct shape
+            assert "params" in loaded_tree.extras
+            assert loaded_tree.extras["params"].shape == (1, 10), (
                 f"Item {idx}: params shape mismatch"
             )
-            assert loaded_tree.metadata["params"].dtype == np.float32, (
+            assert loaded_tree.extras["params"].dtype == np.float32, (
                 f"Item {idx}: params dtype mismatch"
             )
 
-            assert "frame_id" in loaded_tree.metadata
-            assert loaded_tree.metadata["frame_id"].shape == (1,), (
+            assert "frame_id" in loaded_tree.extras
+            assert loaded_tree.extras["frame_id"].shape == (1,), (
                 f"Item {idx}: frame_id shape mismatch"
             )
-            assert loaded_tree.metadata["frame_id"].dtype == np.int32, (
+            assert loaded_tree.extras["frame_id"].dtype == np.int32, (
                 f"Item {idx}: frame_id dtype mismatch"
             )
 
             # Verify frame_id value matches
-            assert loaded_tree.metadata["frame_id"][0] == expected_frame_id, (
+            assert loaded_tree.extras["frame_id"][0] == expected_frame_id, (
                 f"Item {idx}: frame_id value mismatch"
             )
 
@@ -881,7 +881,7 @@ def test_audiotree_from_manifest():
             pitch=np.array([60.0, 62.0]),
         )
         tree1 = tree1.replace(
-            metadata={
+            extras={
                 "params": np.random.randn(2, 10).astype(np.float32),
                 "frame_id": np.array([100, 200], dtype=np.int32),
             }
@@ -894,7 +894,7 @@ def test_audiotree_from_manifest():
             pitch=np.array([64.0, 66.0, 68.0]),
         )
         tree2 = tree2.replace(
-            metadata={
+            extras={
                 "params": np.random.randn(3, 10).astype(np.float32),
                 "frame_id": np.array([300, 400, 500], dtype=np.int32),
             }
@@ -918,11 +918,11 @@ def test_audiotree_from_manifest():
         assert combined.pitch.shape == (5,)
         assert np.allclose(combined.pitch, [60.0, 62.0, 64.0, 66.0, 68.0])
 
-        # Metadata arrays should be concatenated
-        assert combined.metadata["params"].shape == (5, 10)
-        assert combined.metadata["frame_id"].shape == (5,)
+        # Extras arrays should be concatenated
+        assert combined.extras["params"].shape == (5, 10)
+        assert combined.extras["frame_id"].shape == (5,)
         np.testing.assert_array_equal(
-            combined.metadata["frame_id"], [100, 200, 300, 400, 500]
+            combined.extras["frame_id"], [100, 200, 300, 400, 500]
         )
 
 
@@ -950,7 +950,7 @@ def test_audiotree_from_manifest_without_audio_files():
         assert combined.waveform.shape == (3, 2, 16000)
         assert np.all(combined.waveform == 0.0)
 
-        # Metadata should be preserved
+        # Extras should be preserved
         assert combined.lufs.shape == (3,)
         assert np.allclose(combined.lufs, [-20.0, -15.0, -25.0])
         assert combined.velocity.shape == (3,)
@@ -989,8 +989,8 @@ def test_audiotree_from_manifest_restores_filepaths():
     """from_manifest restores the source filepaths so .filepath works.
 
     AudioWriter stores filepaths as a top-level ``filepath`` manifest column
-    (not under a ``metadata_`` prefix). from_manifest must round-trip that
-    column back into ``metadata['filepath']``; otherwise ``.filepath`` is
+    (not under a ``extras_`` prefix). from_manifest must round-trip that
+    column back into ``extras['filepath']``; otherwise ``.filepath`` is
     silently empty on the loaded tree.
     """
     paths = ["clip_0.wav", "clip_1.wav", "clip_2.wav", "clip_3.wav"]
@@ -1002,7 +1002,7 @@ def test_audiotree_from_manifest_restores_filepaths():
             np.zeros((4, 1, 8000), dtype=np.float32),
             sample_rate=8000,
             filepath=paths,
-            metadata={"label": np.arange(4)},
+            extras={"label": np.arange(4)},
         )
         with AudioWriter(output_dir, write_audio=False) as writer:
             writer.write(tree)
@@ -1013,7 +1013,7 @@ def test_audiotree_from_manifest_restores_filepaths():
         # A filter keeps filepaths aligned with the selected rows.
         subset = AudioTree.from_manifest(
             output_dir / "manifest.npz",
-            filter_fn=lambda entry: entry["metadata_label"] % 2 == 0,
+            filter_fn=lambda entry: entry["extras_label"] % 2 == 0,
         )
         assert subset.filepath == ["clip_0.wav", "clip_2.wav"]
 
@@ -1047,7 +1047,7 @@ def test_manifest_datasource_without_audio_files():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        # Create AudioTree with metadata
+        # Create AudioTree with extras
         waveform = np.random.randn(3, 2, 16000)
         audio_tree = AudioTree.create(
             waveform,
@@ -1057,7 +1057,7 @@ def test_manifest_datasource_without_audio_files():
             velocity=np.array([64, 80, 45], dtype=np.int16),
         )
         audio_tree = audio_tree.replace(
-            metadata={
+            extras={
                 "params": np.random.randn(3, 10).astype(np.float32),
                 "frame_id": np.array([100, 200, 300], dtype=np.int32),
             }
@@ -1086,23 +1086,23 @@ def test_manifest_datasource_without_audio_files():
             assert loaded_tree.waveform.shape == (1, 2, 16000)
             assert np.all(loaded_tree.waveform == 0.0)
 
-            # Metadata should be preserved
+            # Extras should be preserved
             assert loaded_tree.lufs is not None
             assert loaded_tree.pitch is not None
             assert loaded_tree.velocity is not None
 
-            # Check metadata arrays
-            assert "params" in loaded_tree.metadata
-            assert loaded_tree.metadata["params"].shape == (1, 10)
-            assert "frame_id" in loaded_tree.metadata
-            assert loaded_tree.metadata["frame_id"].shape == (1,)
+            # Check extras arrays
+            assert "params" in loaded_tree.extras
+            assert loaded_tree.extras["params"].shape == (1, 10)
+            assert "frame_id" in loaded_tree.extras
+            assert loaded_tree.extras["frame_id"].shape == (1,)
 
         # Verify specific values for first item
         first_tree = source[0]
         assert np.allclose(first_tree.lufs, [-20.0])
         assert np.allclose(first_tree.pitch, [60.0])
         assert np.allclose(first_tree.velocity, [64])
-        assert first_tree.metadata["frame_id"][0] == 100
+        assert first_tree.extras["frame_id"][0] == 100
 
 
 def test_write_empty_audiotree():
@@ -1201,8 +1201,8 @@ def test_write_filtered_empty_audiotree():
         assert not manifest_path.exists()
 
 
-def test_write_empty_with_metadata_arrays():
-    """Test writing empty AudioTree with metadata arrays."""
+def test_write_empty_with_extras_arrays():
+    """Test writing empty AudioTree with extras arrays."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
@@ -1210,15 +1210,15 @@ def test_write_empty_with_metadata_arrays():
             np.zeros((0, 2, 44100)), sample_rate=44100, lufs=np.array([])
         )
         empty_tree = empty_tree.replace(
-            metadata={
+            extras={
                 "params": np.zeros((0, 10), dtype=np.float32),
                 "frame_id": np.array([], dtype=np.int32),
             }
         )
 
         assert empty_tree.waveform.shape == (0, 2, 44100)
-        assert empty_tree.metadata["params"].shape == (0, 10)
-        assert empty_tree.metadata["frame_id"].shape == (0,)
+        assert empty_tree.extras["params"].shape == (0, 10)
+        assert empty_tree.extras["frame_id"].shape == (0,)
 
         with AudioWriter(output_dir) as writer:
             paths = writer.write(empty_tree)
@@ -1237,7 +1237,7 @@ def test_filter_with_partial_match():
         lufs=np.array([-30.0, -18.0, -25.0, -15.0, -22.0]),
     )
     audio_tree = audio_tree.replace(
-        metadata={"params": np.random.randn(5, 10).astype(np.float32)}
+        extras={"params": np.random.randn(5, 10).astype(np.float32)}
     )
 
     filtered = audio_tree.filter(lambda x: x.lufs[0] > -20.0)
@@ -1245,7 +1245,7 @@ def test_filter_with_partial_match():
     assert filtered.waveform.shape[0] == 2
     assert filtered.lufs.shape[0] == 2
     assert np.allclose(filtered.lufs, [-18.0, -15.0])
-    assert filtered.metadata["params"].shape == (2, 10)
+    assert filtered.extras["params"].shape == (2, 10)
 
 
 def test_filter_with_no_match():
@@ -1255,14 +1255,14 @@ def test_filter_with_no_match():
         waveform, sample_rate=8000, lufs=np.array([-20.0, -18.0, -22.0])
     )
     audio_tree = audio_tree.replace(
-        metadata={"params": np.random.randn(3, 10).astype(np.float32)}
+        extras={"params": np.random.randn(3, 10).astype(np.float32)}
     )
 
     filtered = audio_tree.filter(lambda x: x.lufs[0] > 0.0)
 
     assert filtered.waveform.shape[0] == 0
     assert filtered.lufs.shape[0] == 0
-    assert filtered.metadata["params"].shape == (0, 10)
+    assert filtered.extras["params"].shape == (0, 10)
 
 
 def test_filter_with_all_match():
@@ -1298,12 +1298,12 @@ if __name__ == "__main__":
     test_progress_bar_no_close()
     test_manifest_datasource_npz()
     test_dtype_preservation()
-    test_metadata_array_preservation()
+    test_extras_array_preservation()
     test_manifest_only_generation()
     test_manifest_only_with_write_audio_true()
     test_manifest_only_multiple_writes()
     test_field_validation()
-    test_metadata_different_batch_sizes()
+    test_extras_different_batch_sizes()
     test_audiotree_from_manifest()
     test_audiotree_from_manifest_without_audio_files()
     test_audiotree_from_manifest_with_filter()
@@ -1313,7 +1313,7 @@ if __name__ == "__main__":
     test_write_empty_audiotree_first()
     test_write_empty_audiotree_after_nonempty()
     test_write_filtered_empty_audiotree()
-    test_write_empty_with_metadata_arrays()
+    test_write_empty_with_extras_arrays()
     test_filter_with_partial_match()
     test_filter_with_no_match()
     test_filter_with_all_match()
@@ -1353,7 +1353,7 @@ def test_jax_label_columns_are_written_per_item():
                 tree = AudioTree.create(jnp.zeros((2, 1, 800)), 16000)
                 tree = tree.replace(
                     lufs=jnp.array([lufs, pitch], dtype=jnp.float32),
-                    metadata={"frame_id": jnp.arange(2, dtype=jnp.int32)},
+                    extras={"frame_id": jnp.arange(2, dtype=jnp.int32)},
                 )
                 writer.write(tree)
 
@@ -1362,8 +1362,8 @@ def test_jax_label_columns_are_written_per_item():
         data = load_manifest(output_dir / "manifest.npz")
         assert data["lufs"].shape == (4,)
         np.testing.assert_allclose(data["lufs"], [-1.0, -2.0, -3.0, -4.0])
-        assert data["metadata_frame_id"].shape == (4,)
-        np.testing.assert_array_equal(data["metadata_frame_id"], [0, 1, 0, 1])
+        assert data["extras_frame_id"].shape == (4,)
+        np.testing.assert_array_equal(data["extras_frame_id"], [0, 1, 0, 1])
 
         # And the labels round-trip onto the loaded batch in file order.
         loaded = AudioTree.from_manifest(output_dir / "manifest.npz")
@@ -1376,23 +1376,23 @@ def test_list_label_column_is_written_per_item():
         output_dir = Path(tmpdir)
 
         tree = AudioTree.create(np.zeros((3, 1, 800), dtype=np.float32), 16000)
-        tree = tree.replace(metadata={"velocity": [10, 20, 30]})
+        tree = tree.replace(extras={"velocity": [10, 20, 30]})
 
         with AudioWriter(output_dir, write_audio=False) as writer:
             writer.write(tree)
 
         data = load_manifest(output_dir / "manifest.npz")
-        np.testing.assert_array_equal(data["metadata_velocity"], [10, 20, 30])
+        np.testing.assert_array_equal(data["extras_velocity"], [10, 20, 30])
 
 
 def test_unstorable_column_raises():
     """A value that is neither scalar nor per-item array-like must raise."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tree = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
-        tree = tree.replace(metadata={"weird": [object(), object()]})
+        tree = tree.replace(extras={"weird": [object(), object()]})
 
         with AudioWriter(tmpdir, write_audio=False) as writer:
-            with pytest.raises(ValueError, match="metadata_weird"):
+            with pytest.raises(ValueError, match="extras_weird"):
                 writer.write(tree)
 
 
@@ -1400,7 +1400,7 @@ def test_column_shorter_than_batch_raises():
     """A label array with fewer rows than the batch must raise, not be dropped."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tree = AudioTree.create(np.zeros((3, 1, 800), dtype=np.float32), 16000)
-        tree = tree.replace(metadata={"short": np.array([1.0, 2.0])})
+        tree = tree.replace(extras={"short": np.array([1.0, 2.0])})
 
         with AudioWriter(tmpdir, write_audio=False) as writer:
             with pytest.raises(ValueError, match="too few for batch index"):
@@ -1408,7 +1408,7 @@ def test_column_shorter_than_batch_raises():
 
 
 def test_ragged_column_raises_at_the_offending_write():
-    """A metadata key present on some writes and absent on others is rejected.
+    """An extras key present on some writes and absent on others is rejected.
 
     The check is eager: a drifting write fails at its own ``write()`` call --
     before its WAVs land and while the manifest is still consistent -- rather
@@ -1417,20 +1417,20 @@ def test_ragged_column_raises_at_the_offending_write():
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         tree1 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
-        tree1 = tree1.replace(metadata={"frame_id": np.array([1, 2])})
+        tree1 = tree1.replace(extras={"frame_id": np.array([1, 2])})
         tree2 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
 
         writer = AudioWriter(tmpdir, write_audio=False, manifest_every=0)
         writer.write(tree1)
 
-        with pytest.raises(ValueError, match="metadata keys.*missing keys.*frame_id"):
-            writer.write(tree2)  # no metadata at all
+        with pytest.raises(ValueError, match="extras keys.*missing keys.*frame_id"):
+            writer.write(tree2)  # no extras at all
 
         # The good first write still saves cleanly; the manifest is intact.
         manifest_path = writer.save_manifest()
         data = load_manifest(manifest_path)
         assert len(data["index"]) == 2
-        np.testing.assert_array_equal(data["metadata_frame_id"], [1, 2])
+        np.testing.assert_array_equal(data["extras_frame_id"], [1, 2])
 
 
 def test_manifest_is_written_during_the_run():
@@ -1491,7 +1491,7 @@ _DETERMINISM_SCRIPT = textwrap.dedent(
             pitch=np.zeros(3, dtype=np.float32),
         )
         tree = tree.replace(
-            metadata={f"col_{i}": np.arange(3, dtype=np.int32) for i in range(12)}
+            extras={f"col_{i}": np.arange(3, dtype=np.int32) for i in range(12)}
         )
         with AudioWriter(d, write_audio=False) as w:
             w.write(tree, tags={f"tag_{i}": i for i in range(6)})
@@ -1694,7 +1694,7 @@ def test_in_range_audio_does_not_warn(tmp_path):
 
 
 def test_mini_batched_tree_is_refused(tmp_path):
-    """A rank-4 tree wrote nonsense metadata instead of failing.
+    """A rank-4 tree wrote nonsense extras instead of failing.
 
     ``reshape_mini_batches`` gives a tree two leading axes, and the writer read
     the first as the batch -- so every axis below shifted by one. A 6-item
@@ -1753,22 +1753,22 @@ def test_manifest_only_run_allows_pattern_without_index(tmp_path):
     assert list(data["filename"]) == ["out.wav", "out.wav"]
 
 
-# === Metadata / filepath drift is rejected eagerly, not at save ===
+# === Extras / filepath drift is rejected eagerly, not at save ===
 
 
-def test_metadata_key_drift_raises_at_the_write_not_at_close(tmp_path):
-    """A write whose metadata keys differ from the first is rejected immediately,
+def test_extras_key_drift_raises_at_the_write_not_at_close(tmp_path):
+    """A write whose extras keys differ from the first is rejected immediately,
     before its WAVs land, so a long render never loses its manifest at close()."""
     tree1 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
-    tree1 = tree1.replace(metadata={"snr": np.array([10.0, 20.0])})
+    tree1 = tree1.replace(extras={"snr": np.array([10.0, 20.0])})
     tree2 = AudioTree.create(
         np.zeros((2, 1, 800), dtype=np.float32), 16000
-    )  # no metadata
+    )  # no extras
 
     writer = AudioWriter(tmp_path, manifest_every=0)
     writer.write(tree1)
 
-    with pytest.raises(ValueError, match="metadata keys.*missing keys.*snr"):
+    with pytest.raises(ValueError, match="extras keys.*missing keys.*snr"):
         writer.write(tree2)
 
     # The drifting write left no audio behind: only the first two items exist.
@@ -1781,18 +1781,18 @@ def test_metadata_key_drift_raises_at_the_write_not_at_close(tmp_path):
     writer.close()
     data = load_manifest(tmp_path / "manifest.npz")
     assert len(data["index"]) == 2
-    np.testing.assert_allclose(data["metadata_snr"], [10.0, 20.0])
+    np.testing.assert_allclose(data["extras_snr"], [10.0, 20.0])
 
 
-def test_extra_metadata_key_on_later_write_is_named(tmp_path):
-    """A later write introducing a new metadata key is rejected, naming the key."""
+def test_extra_extras_key_on_later_write_is_named(tmp_path):
+    """A later write introducing a new extras key is rejected, naming the key."""
     tree1 = AudioTree.create(np.zeros((1, 1, 800), dtype=np.float32), 16000)
     tree2 = AudioTree.create(np.zeros((1, 1, 800), dtype=np.float32), 16000)
-    tree2 = tree2.replace(metadata={"snr": np.array([5.0])})
+    tree2 = tree2.replace(extras={"snr": np.array([5.0])})
 
     writer = AudioWriter(tmp_path, write_audio=False, manifest_every=0)
     writer.write(tree1)
-    with pytest.raises(ValueError, match="metadata keys.*extra keys.*snr"):
+    with pytest.raises(ValueError, match="extras keys.*extra keys.*snr"):
         writer.write(tree2)
 
 
@@ -1803,7 +1803,7 @@ def test_short_filepath_list_raises_at_the_write(tmp_path):
     # Only two encoded paths for a three-item batch. (``create`` guards against
     # this, so encode directly to reach the writer's own coverage check.)
     tree = tree.replace(
-        metadata={"filepath": AudioTree._encode_filepaths(["a.wav", "b.wav"])}
+        extras={"filepath": AudioTree._encode_filepaths(["a.wav", "b.wav"])}
     )
     writer = AudioWriter(tmp_path, write_audio=False, manifest_every=0)
     with pytest.raises(ValueError, match="filepath"):
@@ -1823,19 +1823,19 @@ def test_filepath_presence_drift_raises_at_the_write(tmp_path):
         writer.write(without_paths)
 
 
-def test_consistent_metadata_sequence_still_writes_manifest(tmp_path):
+def test_consistent_extras_sequence_still_writes_manifest(tmp_path):
     """The eager check must not reject a genuinely consistent sequence."""
     with AudioWriter(tmp_path, write_audio=False) as writer:
         for snr in ([1.0, 2.0], [3.0, 4.0, 5.0]):
             tree = AudioTree.create(
                 np.zeros((len(snr), 1, 800), dtype=np.float32), 16000
             )
-            tree = tree.replace(metadata={"snr": np.array(snr)})
+            tree = tree.replace(extras={"snr": np.array(snr)})
             writer.write(tree)
 
     data = load_manifest(tmp_path / "manifest.npz")
     assert len(data["index"]) == 5
-    np.testing.assert_allclose(data["metadata_snr"], [1.0, 2.0, 3.0, 4.0, 5.0])
+    np.testing.assert_allclose(data["extras_snr"], [1.0, 2.0, 3.0, 4.0, 5.0])
 
 
 def test_column_kind_drift_raises_at_the_write_not_at_close(tmp_path):
@@ -1844,16 +1844,14 @@ def test_column_kind_drift_raises_at_the_write_not_at_close(tmp_path):
     *keys* still match -- rather than at close(), where the encoder would abort
     with the manifest unwritten and every WAV on disk orphaned."""
     tree1 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
-    tree1 = tree1.replace(metadata={"take": np.array([1, 2])})
+    tree1 = tree1.replace(extras={"take": np.array([1, 2])})
     tree2 = AudioTree.create(np.zeros((1, 1, 800), dtype=np.float32), 16000)
-    tree2 = tree2.replace(metadata={"take": "final"})
+    tree2 = tree2.replace(extras={"take": "final"})
 
     writer = AudioWriter(tmp_path, manifest_every=0)
     writer.write(tree1)
 
-    with pytest.raises(
-        ValueError, match=r"'metadata_take' holds int values.*str value"
-    ):
+    with pytest.raises(ValueError, match=r"'extras_take' holds int values.*str value"):
         writer.write(tree2)
 
     # The drifting write left no audio behind: only the first two items exist.
@@ -1866,7 +1864,7 @@ def test_column_kind_drift_raises_at_the_write_not_at_close(tmp_path):
     writer.close()
     data = load_manifest(tmp_path / "manifest.npz")
     assert len(data["index"]) == 2
-    np.testing.assert_array_equal(data["metadata_take"], [1, 2])
+    np.testing.assert_array_equal(data["extras_take"], [1, 2])
 
 
 def test_tag_kind_drift_raises_at_the_write(tmp_path):
@@ -1884,16 +1882,14 @@ def test_array_column_kind_drift_raises_at_the_write(tmp_path):
     """Array-valued columns are covered too: float32 embedding rows followed by
     int rows fail at the second write, not at close via the encoder."""
     float_tree = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
-    float_tree = float_tree.replace(
-        metadata={"emb": np.zeros((2, 3), dtype=np.float32)}
-    )
+    float_tree = float_tree.replace(extras={"emb": np.zeros((2, 3), dtype=np.float32)})
     int_tree = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
-    int_tree = int_tree.replace(metadata={"emb": np.zeros((2, 3), dtype=np.int32)})
+    int_tree = int_tree.replace(extras={"emb": np.zeros((2, 3), dtype=np.int32)})
 
     writer = AudioWriter(tmp_path, write_audio=False, manifest_every=0)
     writer.write(float_tree)
     with pytest.raises(
-        ValueError, match=r"'metadata_emb' holds float array values.*int array"
+        ValueError, match=r"'extras_emb' holds float array values.*int array"
     ):
         writer.write(int_tree)
 
@@ -1902,16 +1898,16 @@ def test_same_kind_values_across_writes_still_pass_the_kind_check(tmp_path):
     """The kind check must not reject a consistent column: a plain str on one
     write and per-item numpy strings on the next are both 'str'."""
     tree1 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
-    tree1 = tree1.replace(metadata={"label": "warmup"})
+    tree1 = tree1.replace(extras={"label": "warmup"})
     tree2 = AudioTree.create(np.zeros((2, 1, 800), dtype=np.float32), 16000)
-    tree2 = tree2.replace(metadata={"label": np.array(["a", "b"])})
+    tree2 = tree2.replace(extras={"label": np.array(["a", "b"])})
 
     with AudioWriter(tmp_path, write_audio=False) as writer:
         writer.write(tree1)
         writer.write(tree2)
 
     data = load_manifest(tmp_path / "manifest.npz")
-    assert list(data["metadata_label"]) == ["warmup", "warmup", "a", "b"]
+    assert list(data["extras_label"]) == ["warmup", "warmup", "a", "b"]
 
 
 def test_timestamp_is_minted_once_per_write_call(tmp_path):

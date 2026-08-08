@@ -107,17 +107,17 @@ def test_manifest_schema_is_validated(dataset, mutate, match):
         # used to die with a raw KeyError inside _reconstruct.
         (lambda m: m["structure"].pop("children"), "must carry a 'children' dict"),
         (
-            lambda m: m["structure"]["children"].update(metadata={"type": "dict"}),
+            lambda m: m["structure"]["children"].update(extras={"type": "dict"}),
             "must carry a 'children' dict",
         ),
         (
             lambda m: m["structure"]["children"].update(
-                metadata={"type": "banana", "children": {}}
+                extras={"type": "banana", "children": {}}
             ),
             "unknown type",
         ),
         (
-            lambda m: m["structure"]["children"].update(metadata=42),
+            lambda m: m["structure"]["children"].update(extras=42),
             "must be a leaf-name string or a dict",
         ),
     ],
@@ -142,13 +142,13 @@ def test_manifest_container_types_are_validated(dataset, mutate, match):
         ),
         (
             lambda m: m["structure"]["children"].update(
-                metadata={"type": "string_leaf", "leaf": "ghost"}
+                extras={"type": "string_leaf", "leaf": "ghost"}
             ),
             "not declared",
         ),
         (
             lambda m: m["structure"]["children"].update(
-                metadata={"type": "string_leaf", "leaf": 3}
+                extras={"type": "string_leaf", "leaf": 3}
             ),
             "must be a string leaf name",
         ),

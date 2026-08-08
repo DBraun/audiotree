@@ -55,7 +55,7 @@ dataset builders:
   ``__cause__``.
 * ``OnReadError`` — the ``Literal["raise", "skip", "warn"]`` type of the
   dataset builders' ``on_read_error`` parameter.
-* ``READ_ERROR_KEY`` — the metadata key (``"read_error"``), ``True`` on a
+* ``READ_ERROR_KEY`` — the ``extras`` key (``"read_error"``), ``True`` on a
   silence stand-in substituted for an unreadable file and ``False`` on every
   item that really came off disk.
 

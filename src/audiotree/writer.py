@@ -13,9 +13,9 @@ from . import _manifest
 from ._fs import refuse_to_clobber
 from .core import LABEL_FIELDS, AudioTree, _require_batched_rank
 
-# Manifest columns hold one value per written item. Metadata keys that describe
+# Manifest columns hold one value per written item. Extras keys that describe
 # *where* an item came from are reconstructed by the reader instead.
-_SKIPPED_METADATA_KEYS = frozenset(
+_SKIPPED_EXTRAS_KEYS = frozenset(
     {"filepath", "offset", "duration", "manifest_index", "tags"}
 )
 
@@ -108,7 +108,7 @@ class AudioWriter:
 
     The AudioWriter provides a stateful way to write multiple AudioTree objects,
     maintaining consistent naming and optionally generating manifest files that
-    track all written audio files and their metadata.
+    track all written audio files and their extras.
 
     Args:
         directory: Directory where audio files will be written
@@ -119,7 +119,7 @@ class AudioWriter:
             distinct timestamps count ``write()`` calls.
         compress_manifest: Whether to compress NPZ manifest files (only applies to npz format)
         write_audio: Whether to write audio files to disk (default True). When False,
-            only manifest is generated with metadata
+            only manifest is generated with extras
         subtype: soundfile subtype string (e.g. ``"PCM_16"``, ``"PCM_24"``,
             ``"FLOAT"``), forwarded to ``soundfile.write`` and recorded in the
             manifest's ``subtype`` column. When ``None`` (default) the writer
@@ -230,9 +230,9 @@ class AudioWriter:
         self.written_paths = []
         self.manifest_data = []
         self._expected_fields = None  # Track which AudioTree fields should be present
-        # The metadata-column schema (which metadata_* columns, and whether a
+        # The extras-column schema (which extras_* columns, and whether a
         # filepath column) is fixed by the first write; later writes must match.
-        self._expected_metadata_keys = None
+        self._expected_extras_keys = None
         self._expected_has_filepath = None
         # Each column's logical value kind, pinned by its first value. Kind
         # drift (int rows, then a str row) is rejected at the offending write;
@@ -277,8 +277,8 @@ class AudioWriter:
                 present.add(field_name)
         return present
 
-    def _get_metadata_column_keys(self, tree: AudioTree) -> set:
-        """The metadata keys that become ``metadata_*`` manifest columns.
+    def _get_extras_column_keys(self, tree: AudioTree) -> set:
+        """The extras keys that become ``extras_*`` manifest columns.
 
         Mirrors the column-selection logic in :meth:`_create_manifest_entry`:
         internal keys are skipped, and nested dicts have no column representation.
@@ -287,11 +287,11 @@ class AudioWriter:
             tree: AudioTree to inspect
 
         Returns:
-            Set of metadata keys that will be written as columns
+            Set of extras keys that will be written as columns
         """
         keys = set()
-        for key, value in tree.metadata.items():
-            if key in _SKIPPED_METADATA_KEYS:
+        for key, value in tree.extras.items():
+            if key in _SKIPPED_EXTRAS_KEYS:
                 continue
             if isinstance(value, dict):
                 continue
@@ -316,7 +316,7 @@ class AudioWriter:
         # (3, 2, 1, 800) tree wrote *three* rows claiming channels=2, samples=1.
         # `write_audio=True` was saved only by soundfile rejecting the shape;
         # manifest-only runs -- the mode where nothing else looks at the audio --
-        # recorded nonsense metadata and said nothing.
+        # recorded nonsense extras and said nothing.
         _require_batched_rank(tree.waveform, "AudioWriter.write")
 
         # Take the sample rate from the first written tree and require every later
@@ -352,34 +352,34 @@ class AudioWriter:
                     f"All AudioTrees written to the same manifest must have consistent fields."
                 )
 
-        # Validate the metadata-column schema eagerly, exactly as LABEL_FIELDS
-        # are validated above. A metadata key present on some writes and absent
+        # Validate the extras-column schema eagerly, exactly as LABEL_FIELDS
+        # are validated above. An extras key present on some writes and absent
         # on others cannot be stored as one column; caught here, the drifting
         # write fails at its own call -- before its WAVs land -- rather than at
         # the next save/close, which would abort with the manifest unwritten.
-        metadata_keys = self._get_metadata_column_keys(tree)
+        extras_keys = self._get_extras_column_keys(tree)
         has_filepath = bool(tree.filepath)
-        if self._expected_metadata_keys is None:
-            self._expected_metadata_keys = metadata_keys
+        if self._expected_extras_keys is None:
+            self._expected_extras_keys = extras_keys
             self._expected_has_filepath = has_filepath
         else:
-            if metadata_keys != self._expected_metadata_keys:
-                missing = self._expected_metadata_keys - metadata_keys
-                extra = metadata_keys - self._expected_metadata_keys
+            if extras_keys != self._expected_extras_keys:
+                missing = self._expected_extras_keys - extras_keys
+                extra = extras_keys - self._expected_extras_keys
                 error_parts = []
                 if missing:
                     error_parts.append(
-                        f"missing keys: {sorted('metadata_' + k for k in missing)}"
+                        f"missing keys: {sorted('extras_' + k for k in missing)}"
                     )
                 if extra:
                     error_parts.append(
-                        f"extra keys: {sorted('metadata_' + k for k in extra)}"
+                        f"extra keys: {sorted('extras_' + k for k in extra)}"
                     )
                 raise ValueError(
-                    f"AudioTree metadata keys don't match previous writes. "
+                    f"AudioTree extras keys don't match previous writes. "
                     f"{', '.join(error_parts)}. "
                     f"All AudioTrees written to the same manifest must carry the "
-                    f"same metadata keys."
+                    f"same extras keys."
                 )
             if has_filepath != self._expected_has_filepath:
                 had = "had" if self._expected_has_filepath else "had no"
@@ -544,17 +544,17 @@ class AudioWriter:
         if tags:
             entry["tags"] = tags
 
-        # Add metadata arrays if present
-        if tree.metadata:
-            for key, value in tree.metadata.items():
+        # Add extras arrays if present
+        if tree.extras:
+            for key, value in tree.extras.items():
                 # Skip internal keys, and `tags`, which is handled above.
-                if key in _SKIPPED_METADATA_KEYS:
+                if key in _SKIPPED_EXTRAS_KEYS:
                     continue
                 # A nested dict has no NPZ column representation; write nested
                 # pytrees with TreeWriter instead.
                 if isinstance(value, dict):
                     continue
-                column = f"metadata_{key}"
+                column = f"extras_{key}"
                 entry[column] = _column_value(column, value, batch_index)
 
         return entry

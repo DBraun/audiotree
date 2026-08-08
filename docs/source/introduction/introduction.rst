@@ -110,18 +110,18 @@ AudioTree provides convenient methods for loading audio files:
         mono=False       # Keep stereo
     )
 
-    # Load with custom metadata
+    # Load with custom extras
     audio_tree = AudioTree.from_file(
         "audio.wav",
         sample_rate=44_100,
-        metadata={
+        extras={
             "features_4d": np.zeros((1, 4,)),  # intentionally give batch axis of 1
         }
     )
 
-    # The filepath is automatically stored in metadata
+    # The filepath is automatically stored in extras
     print(audio_tree.filepath)
-    print(audio_tree.metadata["features_4d"])
+    print(audio_tree.extras["features_4d"])
 
 .. testoutput::
 
@@ -144,8 +144,8 @@ AudioTree objects have several key properties:
     print(audio_tree.waveform.shape)
     print(audio_tree.sample_rate)
 
-    # The metadata dict holds custom per-item data (empty by default)
-    print(audio_tree.metadata)
+    # The extras dict holds custom per-item data (empty by default)
+    print(audio_tree.extras)
 
 .. testoutput::
 
@@ -343,7 +343,7 @@ Indexing and Iterating Batches
 
 An AudioTree behaves like a sequence over its leading (batch) axis. Indexing,
 slicing, ``len()``, and iteration keep every field — ``waveform``, ``codes``,
-``latents``, and the ``metadata`` arrays — rank-aligned.
+``latents``, and the ``extras`` arrays — rank-aligned.
 
 .. testcode::
 
@@ -684,7 +684,7 @@ Moving a Tree Between Devices
 
 Because an AudioTree is a pytree, :func:`jax.device_put` and :func:`jax.device_get`
 move *every* array leaf at once — you never touch ``waveform``, ``lufs``, and each
-``metadata`` array one by one. The static ``sample_rate`` and the tree structure
+``extras`` array one by one. The static ``sample_rate`` and the tree structure
 are left untouched.
 
 .. testcode::
@@ -742,10 +742,10 @@ prefetches whole batches onto the accelerator as you iterate — see
    ``engine=`` arguments (see `Choosing a device and an engine`_) that run the
    kernel where you ask and return loudness in the waveform's own array library.
 
-Metadata and Filepaths
------------------------
+Extras and Filepaths
+--------------------
 
-AudioTree supports storing metadata and filepath information.
+AudioTree supports storing per-item extras and filepath information.
 
 Storing Filepaths
 ~~~~~~~~~~~~~~~~~
@@ -775,22 +775,22 @@ When creating AudioTree objects, you can associate them with source files:
     ['audio.wav']
     ['a.wav', 'b.wav', 'c.wav']
 
-Understanding Metadata
-~~~~~~~~~~~~~~~~~~~~~~
+Understanding Extras
+~~~~~~~~~~~~~~~~~~~~
 
-The ``metadata`` field is special - it's a pytree node (``pytree_node=True``), meaning it participates
+The ``extras`` field is special - it's a pytree node (``pytree_node=True``), meaning it participates
 in JAX tree operations like batching and concatenation. This is different from ``sample_rate``, which
 is marked as ``pytree_node=False`` and remains constant across operations.
 
-Metadata should contain array-like data with a batch dimension:
+Extras should contain array-like data with a batch dimension:
 
 .. testcode::
 
-    # Create trees with array metadata that can be batched
+    # Create trees with array extras that can be batched
     tree1 = AudioTree.create(
         np.zeros((2, 1, 44_100)),
         44_100,
-        metadata={
+        extras={
             "energy": np.array([0.8, 0.9]),  # Shape (2,) matching batch size
             "onset_times": np.array([[0.1, 0.2], [0.15, 0.25]])  # Shape (2, 2)
         }
@@ -799,18 +799,18 @@ Metadata should contain array-like data with a batch dimension:
     tree2 = AudioTree.create(
         np.zeros((2, 1, 44_100)),
         44_100,
-        metadata={
+        extras={
             "energy": np.array([0.7, 0.85]),
             "onset_times": np.array([[0.12, 0.22], [0.18, 0.28]])
         }
     )
 
-    # Batch the two trees together - metadata is concatenated too
+    # Batch the two trees together - extras are concatenated too
     combined = AudioTree.batch([tree1, tree2])
 
     print(combined.waveform.shape)                  # Batched from 2+2
-    print(combined.metadata["energy"].shape)        # Metadata was concatenated
-    print(combined.metadata["onset_times"].shape)   # 2D metadata concatenated along batch dim
+    print(combined.extras["energy"].shape)          # Extras were concatenated
+    print(combined.extras["onset_times"].shape)     # 2D extras concatenated along batch dim
     print(combined.sample_rate)                     # Sample rate stays the same (not a pytree node)
 
 .. testoutput::
@@ -820,12 +820,12 @@ Metadata should contain array-like data with a batch dimension:
     (4, 2)
     44100
 
-Adding Metadata to an Existing Tree
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Adding Extras to an Existing Tree
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``AudioTree`` is immutable, so you can't assign into ``metadata`` in place. Use
-:meth:`~audiotree.AudioTree.replace_metadata` to merge new entries — it's
-syntactic sugar for ``tree.replace(metadata={**tree.metadata, **kwargs})``. Keys
+``AudioTree`` is immutable, so you can't assign into ``extras`` in place. Use
+:meth:`~audiotree.AudioTree.replace_extras` to merge new entries — it's
+syntactic sugar for ``tree.replace(extras={**tree.extras, **kwargs})``. Keys
 you pass overwrite same-named existing keys, everything else is kept, and the
 original tree is untouched:
 
@@ -834,12 +834,12 @@ original tree is untouched:
     tree = AudioTree.create(
         np.zeros((2, 1, 44_100)),
         44_100,
-        metadata={"energy": np.array([0.8, 0.9])},
+        extras={"energy": np.array([0.8, 0.9])},
     )
-    tagged = tree.replace_metadata(onsets=np.array([[0.1], [0.2]]))
+    tagged = tree.replace_extras(onsets=np.array([[0.1], [0.2]]))
 
-    print(sorted(tagged.metadata.keys()))
-    print(sorted(tree.metadata.keys()))  # the original is unchanged
+    print(sorted(tagged.extras.keys()))
+    print(sorted(tree.extras.keys()))  # the original is unchanged
 
 .. testoutput::
 

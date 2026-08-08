@@ -156,8 +156,8 @@ def test_create_balanced_audio_dataset_with_saliency():
         items = []
         for i in range(num_files):
             item = ds[i]
-            # Remove metadata to avoid batching issues with variable-length arrays
-            item = item.replace(metadata={})
+            # Remove extras to avoid batching issues with variable-length arrays
+            item = item.replace(extras={})
             items.append(item)
 
         assert len(items) == num_files
@@ -298,7 +298,7 @@ def test_default_excerpt_varies_the_offset(tmp_path):
             num_epochs=None,
             **kwargs,
         )
-        return [float(ds[i].metadata["offset"][0]) for i in range(6)]
+        return [float(ds[i].extras["offset"][0]) for i in range(6)]
 
     assert len(set(offsets())) > 1
     # ...and the deterministic behavior is still reachable, by name.

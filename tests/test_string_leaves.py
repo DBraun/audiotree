@@ -1,6 +1,6 @@
-"""Sweep tests for string ``metadata`` leaves across every batch-axis operation.
+"""Sweep tests for string ``extras`` leaves across every batch-axis operation.
 
-``metadata`` may carry per-item strings (the TreeWriter/TreeDataSource
+``extras`` may carry per-item strings (the TreeWriter/TreeDataSource
 contract): a bare ``str`` means a batch of 1 and a list of strings holds one
 per batch item. Each operation here runs on a tree carrying *both* forms —
 including one nested inside a sub-dict, alongside a normal array leaf — and
@@ -25,7 +25,7 @@ def _item(i: int, bare: bool) -> AudioTree:
     return AudioTree(
         waveform=np.full((1, 1, 8), float(i), dtype=np.float32),
         sample_rate=16_000,
-        metadata={
+        extras={
             "tag": wrap(f"tag{i}"),
             "nested": {"group": wrap(f"group{i}")},
             "style": np.full((1, 4), i, dtype=np.int32),
@@ -39,7 +39,7 @@ def _batched(n: int) -> AudioTree:
         waveform=np.arange(n, dtype=np.float32)[:, None, None]
         * np.ones((n, 1, 8), dtype=np.float32),
         sample_rate=16_000,
-        metadata={
+        extras={
             "tag": [f"tag{i}" for i in range(n)],
             "nested": {"group": [f"group{i}" for i in range(n)]},
             "style": np.arange(n, dtype=np.int32)[:, None] * np.ones((n, 4), np.int32),
@@ -51,10 +51,10 @@ def _assert_aligned(tree: AudioTree, expected: list):
     """Every leaf — arrays and strings alike — holds ``expected``'s items in order."""
     ids = [int(v) for v in np.asarray(tree.waveform)[:, 0, 0]]
     assert ids == list(expected)
-    assert tree.metadata["tag"] == [f"tag{i}" for i in expected]
-    assert tree.metadata["nested"]["group"] == [f"group{i}" for i in expected]
+    assert tree.extras["tag"] == [f"tag{i}" for i in expected]
+    assert tree.extras["nested"]["group"] == [f"group{i}" for i in expected]
     np.testing.assert_array_equal(
-        np.asarray(tree.metadata["style"])[:, 0], np.asarray(expected)
+        np.asarray(tree.extras["style"])[:, 0], np.asarray(expected)
     )
 
 
@@ -128,8 +128,8 @@ def test_getitem(key, expected):
 def test_getitem_normalizes_a_bare_str():
     """Indexing a batch-of-1 tree returns its bare-str leaves in list form."""
     item = _item(5, bare=True)[0]
-    assert item.metadata["tag"] == ["tag5"]
-    assert item.metadata["nested"]["group"] == ["group5"]
+    assert item.extras["tag"] == ["tag5"]
+    assert item.extras["nested"]["group"] == ["group5"]
 
 
 def test_getitem_rejects_a_mismatched_mask():
@@ -171,17 +171,17 @@ def test_mini_batch_round_trip(bare: bool):
     mini = tree.reshape_mini_batches(2)
 
     # String leaves nest per mini-batch, mirroring the arrays' leading axes.
-    assert mini.metadata["tag"] == [
+    assert mini.extras["tag"] == [
         ["tag0", "tag1"],
         ["tag2", "tag3"],
         ["tag4", "tag5"],
     ]
-    assert mini.metadata["nested"]["group"][1] == ["group2", "group3"]
+    assert mini.extras["nested"]["group"][1] == ["group2", "group3"]
 
     # Indexing the rank-4 tree selects whole mini-batches, strings included.
     picked = mini[1]
     assert picked.waveform.shape == (1, 2, 1, 8)
-    assert picked.metadata["tag"] == [["tag2", "tag3"]]
+    assert picked.extras["tag"] == [["tag2", "tag3"]]
     _assert_aligned(picked.flatten_mini_batches(), [2, 3])
 
     for part, expected in zip(mini.split(3), ([0, 1], [2, 3], [4, 5])):
@@ -194,12 +194,12 @@ def test_mini_batch_round_trip(bare: bool):
 def test_reshape_mini_batches_bare_str():
     """A batch-of-1 tree's bare str nests like a one-item list."""
     mini = _item(4, bare=True).reshape_mini_batches(1)
-    assert mini.metadata["tag"] == [["tag4"]]
+    assert mini.extras["tag"] == [["tag4"]]
     _assert_aligned(mini.flatten_mini_batches(), [4])
 
 
 def test_reshape_mini_batches_rejects_a_misaligned_string_leaf():
     """A string list that disagrees with the batch size raises like an array would."""
-    tree = _batched(4).replace_metadata(tag=["only", "three", "tags"])
-    with pytest.raises(ValueError, match="[Ss]tring metadata"):
+    tree = _batched(4).replace_extras(tag=["only", "three", "tags"])
+    with pytest.raises(ValueError, match="[Ss]tring extras"):
         tree.reshape_mini_batches(2)

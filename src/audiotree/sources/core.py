@@ -26,12 +26,12 @@ OnReadError = Literal["raise", "skip", "warn"]
 
 _ON_READ_ERROR_VALUES = ("raise", "skip", "warn")
 
-#: Metadata key marking whether an item is a *substitute* for an unreadable
+#: Extras key marking whether an item is a *substitute* for an unreadable
 #: file. Present on every item of a dataset built with
 #: ``on_read_error != "raise"`` -- ``False`` for a real load, ``True`` for
 #: silence standing in for a file that failed to read. It is written for good
 #: items too because :meth:`AudioTree.batch` requires every item in a batch to
-#: carry the same metadata keys; a marker that appeared only on failures could
+#: carry the same extras keys; a marker that appeared only on failures could
 #: not be collated.
 READ_ERROR_KEY = "read_error"
 
@@ -113,7 +113,7 @@ def _substitute_silence(
     """Build the stand-in returned for an unreadable file.
 
     Digital silence of exactly the requested shape, tagged with the offending
-    path and with ``metadata[READ_ERROR_KEY] == True`` so nothing downstream can
+    path and with ``extras[READ_ERROR_KEY] == True`` so nothing downstream can
     mistake it for audio that was really on disk.
 
     The substitute must be *structurally* identical to a real load under the
@@ -131,8 +131,8 @@ def _substitute_silence(
         waveform,
         sample_rate,
         # ``from_file`` records the excerpt offset; match it so a substitute and
-        # a real load carry the same metadata keys and can be batched together.
-        metadata={
+        # a real load carry the same extras keys and can be batched together.
+        extras={
             "offset": np.array([0.0]),
             READ_ERROR_KEY: np.array([True]),
         },
@@ -147,7 +147,7 @@ def _substitute_silence(
 
 def _mark_read_ok(tree: AudioTree) -> AudioTree:
     """Tag a successfully loaded tree as *not* a read-error substitute."""
-    return tree.replace(metadata={**tree.metadata, READ_ERROR_KEY: np.array([False])})
+    return tree.replace(extras={**tree.extras, READ_ERROR_KEY: np.array([False])})
 
 
 def find_audio_files(
@@ -259,7 +259,7 @@ def _load_excerpt(
             "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
         excerpt: Which part of the file to take; see :class:`ExcerptConfig`.
             Defaults to a random offset.
-        source: Optional source group name (e.g., "music", "speech") to store in metadata.
+        source: Optional source group name (e.g., "music", "speech") to store in extras.
         channels: Expected channel count. A file with a different count raises,
             naming the file, instead of letting the mismatch surface as an
             opaque shape error at batch time. ``None`` disables the check.
@@ -307,7 +307,7 @@ def _load_excerpt(
             warnings.warn(
                 f"Substituting silence for unreadable audio file "
                 f"'{file_path}': {type(exc).__name__}: {exc}. Every "
-                f"substitute carries metadata[{READ_ERROR_KEY!r}] == True; pass "
+                f"substitute carries extras[{READ_ERROR_KEY!r}] == True; pass "
                 "on_read_error='raise' to fail on it instead.",
                 UserWarning,
                 stacklevel=2,
@@ -338,7 +338,7 @@ def _load_excerpt(
         )
 
     # Under a non-raising policy every item is marked, so that a substitute and
-    # a real load agree on their metadata keys and still batch together.
+    # a real load agree on their extras keys and still batch together.
     if on_read_error != "raise" and tree is not None and not substituted:
         tree = _mark_read_ok(tree)
     return tree
@@ -482,8 +482,8 @@ def create_audio_dataset(
         extensions: List of audio file extensions to search for. Defaults to [".wav", ".flac"].
         excerpt: Which part of each file to take; see :class:`ExcerptConfig`.
             Defaults to a uniformly random offset.
-        source: Optional source group name (e.g., "music", "speech") to store in metadata.
-            If None, no source metadata is added.
+        source: Optional source group name (e.g., "music", "speech") to store in extras.
+            If None, no ``source`` entry is added to extras.
         channels: Expected channel count of every file, so that a mixed-channel
             corpus fails at load time with the offending filename instead of at
             batch time with a shape error. Ignored when ``mono=True`` (everything
@@ -507,12 +507,12 @@ def create_audio_dataset(
             or retry a different file: a hole breaks fixed-size batching, and a
             silent retry both over-samples the healthy files and hides the
             problem. Instead every item of such a dataset carries
-            ``metadata["read_error"]``, ``True`` on a substitute and ``False``
+            ``extras["read_error"]``, ``True`` on a substitute and ``False``
             on a real load, alongside the usual ``filepath``, so the failure is
             visible in-band. Filter on it, or count it, with e.g.
-            ``bool(tree.metadata["read_error"][i])``.
+            ``bool(tree.extras["read_error"][i])``.
 
-            Note that the marker changes the metadata keys of *every* item, so
+            Note that the marker changes the extras keys of *every* item, so
             a dataset built with ``"skip"``/``"warn"`` cannot be batched
             together with one built with ``"raise"``.
 
@@ -687,7 +687,7 @@ def _stamp_source(tree: AudioTree | None, group_name: str) -> AudioTree | None:
     :func:`create_audio_dataset`'s ``source=`` argument, but a pre-built
     ``datasets`` entry (built with the default ``source=None``) carries no such
     key. :meth:`AudioTree.batch` requires every item in a batch to expose the
-    same metadata keys, so a batch spanning a file group and a pre-built group
+    same extras keys, so a batch spanning a file group and a pre-built group
     would fail its pytree check on the missing ``source`` -- intermittently,
     since a single-group batch collates fine. Mapping this over each pre-built
     dataset gives every group one consistent ``source`` schema.
@@ -703,7 +703,7 @@ def _stamp_source(tree: AudioTree | None, group_name: str) -> AudioTree | None:
         return None
     batch_size = _leading_axis_size(tree.waveform, tree.codes, tree.latents)
     encoded = AudioTree._encode_filepaths([group_name] * batch_size)
-    return tree.replace(metadata={**tree.metadata, "source": encoded})
+    return tree.replace(extras={**tree.extras, "source": encoded})
 
 
 def create_balanced_audio_dataset(
@@ -749,7 +749,7 @@ def create_balanced_audio_dataset(
             These datasets will be mixed with file-based sources. Useful for combining
             different data sources or including pre-processed datasets. Each item of a
             pre-built dataset is stamped with ``source=`` its group name (overwriting any
-            ``source`` it already carried), so it exposes the same metadata schema as the
+            ``source`` it already carried), so it exposes the same extras schema as the
             file-based groups and the two collate together under :meth:`AudioTree.batch`.
             IMPORTANT: Pre-constructed datasets MUST already be repeated (call `.repeat()`
             before passing them) to ensure infinite sampling. If a finite dataset is passed,
@@ -800,7 +800,7 @@ def create_balanced_audio_dataset(
             (and, like ``channels``, is not supported alongside
             ``window``). Pre-constructed ``datasets`` keep whatever
             policy they were built with -- mixing a ``"raise"`` dataset with a
-            ``"skip"`` one produces items with different metadata keys, which
+            ``"skip"`` one produces items with different extras keys, which
             :meth:`AudioTree.batch` cannot collate.
 
     Returns:
@@ -981,7 +981,7 @@ def create_balanced_audio_dataset(
                 pad_mode=pad_mode,
                 extensions=extensions,
                 excerpt=excerpt,
-                source=group_name,  # Set source metadata to group name
+                source=group_name,  # Set source extras to group name
                 channels=channels,
                 on_read_error=on_read_error,
             )

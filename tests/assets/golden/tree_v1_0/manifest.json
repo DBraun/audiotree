@@ -8,10 +8,10 @@
     1,
     0
   ],
-  "producer": "audiotree 1.0.0",
+  "producer": "audiotree 1.0.0rc2",
   "num_samples": 4,
   "expected_samples": 4,
-  "created_at": "2026-07-24T22:46:44.439636",
+  "created_at": "2026-08-08T10:56:57.824594",
   "structure": {
     "type": "dict",
     "children": {
@@ -20,7 +20,7 @@
         "sample_rate": 16000,
         "children": {
           "waveform": "audio.waveform",
-          "metadata": {
+          "extras": {
             "type": "dict",
             "children": {}
           }

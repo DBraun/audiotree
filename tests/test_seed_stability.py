@@ -75,7 +75,7 @@ def _identity(item) -> Item:
     """Reduce one dataset item to ``(basename, offset)``."""
     return (
         os.path.basename(item.filepath[0]),
-        round(float(item.metadata["offset"][0]), OFFSET_DECIMALS),
+        round(float(item.extras["offset"][0]), OFFSET_DECIMALS),
     )
 
 

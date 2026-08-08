@@ -9,7 +9,7 @@ import audiotree.transforms
 def test_batch_transform_with_dataloader():
     """AudioTree.batch collates correctly as grain's batch_fn."""
 
-    # Create a simple data source that yields AudioTree objects with filepath metadata
+    # Create a simple data source that yields AudioTree objects with filepath extras
     audio_trees = []
     sample_rate = 44100
     duration = 0.1
@@ -19,7 +19,7 @@ def test_batch_transform_with_dataloader():
         # Create fake audio data
         waveform = np.random.randn(1, num_samples).astype(np.float32)
 
-        # Create AudioTree with filepath metadata
+        # Create AudioTree with filepath extras
         audio_tree = audiotree.AudioTree.create(
             waveform=waveform,
             sample_rate=sample_rate,

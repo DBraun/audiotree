@@ -28,7 +28,8 @@ At a glance
 
 The five that break the most code, in rough order:
 
-#. ``audio_data`` is ``waveform``, and every ``loudness`` spelling is ``lufs``.
+#. ``audio_data`` is ``waveform``, every ``loudness`` spelling is ``lufs``, and
+   ``metadata`` is ``extras``.
 #. Transforms are snake_case **functions**, not PascalCase classes, and take flat
    keyword parameters instead of a ``config`` dict.
 #. ``audiotree.datasources`` is ``audiotree.sources``, and its data-source classes
@@ -68,9 +69,11 @@ AudioTree
    * - ``AudioTree.create(filepaths=...)``
      - ``AudioTree.create(filepath=...)`` — singular, and it still accepts either
        one path or a list of them (one per batch item)
+   * - ``AudioTree.metadata``
+     - ``AudioTree.extras`` — see `metadata is now extras`_
 
-The two field renames also change **keyword arguments** everywhere the fields are
-constructible — ``AudioTree(waveform=..., lufs=...)``, ``create()``,
+The three field renames also change **keyword arguments** everywhere the fields
+are constructible — ``AudioTree(waveform=..., lufs=...)``, ``create()``,
 ``from_file()``, ``tree.replace()`` — and the on-disk leaf/column names (see
 `On-disk data`_).
 
@@ -87,6 +90,40 @@ constructible — ``AudioTree(waveform=..., lufs=...)``, ``create()``,
     tree = AudioTree.create(x, 44_100)
     tree = tree.replace_lufs()
     print(tree.waveform.shape, tree.lufs)
+
+metadata is now extras
+~~~~~~~~~~~~~~~~~~~~~~
+
+The per-item dict of extra array/string leaves that batch with the waveform —
+labels, embeddings, provenance like ``filepath`` / ``source`` / ``offset``,
+``read_error``, ``codec_scale`` — is now ``AudioTree.extras``. 0.2.x spelled it
+``metadata`` too (inherited from audiotools), so unlike most renames on this page
+this one reaches back to released code. Every API spelling follows:
+``AudioTree.create(extras=...)``, ``from_file(extras=...)``,
+``tree.extras["..."]``, ``tree.replace_extras(...)``.
+
+The on-disk spellings follow as well: an ``AudioWriter`` NPZ manifest stores
+each entry as an ``extras_<key>`` column (with presence mask
+``__mask_extras_<key>``), and a ``TreeWriter`` dataset stores the structure node
+and leaf paths as ``extras.<key>`` rather than ``metadata.<key>``.
+
+There is no read-side alias for the old spelling. Both readers validate their
+inputs strictly — ``TreeDataSource`` rejects an unknown structure child by name
+at construction, and the NPZ readers reject any manifest column that is not a
+recognized part of the schema, also by name. A consequence: a dataset written by
+the ``1.0.0rc1``/``rc2`` prereleases (which spelled the field ``metadata``) fails
+loudly at read instead of silently coming back with empty ``extras``, and must
+be rewritten. The rewrite is mechanical: in a ``TreeWriter`` dataset, rename the
+AudioTree structure node ``"metadata"`` to ``"extras"`` along with its leaf
+paths and files in ``manifest.json``; in an NPZ manifest, rename the
+``metadata_*`` / ``__mask_metadata_*`` columns to ``extras_*`` /
+``__mask_extras_*``.
+
+Deliberately **not** renamed: ``TreeWriter(metadata=...)``, the manifest's
+top-level ``"metadata"`` key, and ``TreeDataSource.get_metadata()`` — true
+dataset-level metadata, facts about the whole render. Half the point of the
+rename is that "metadata" now unambiguously means that, while ``extras`` is the
+per-item payload that trains with the audio.
 
 One spelling per loudness concept
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -313,7 +350,7 @@ that behavior is gone.
 Two consequences worth knowing: a transform that changes a field's *shape* cannot
 be mixed item-by-item and now raises a clear error at ``prob < 1``; and ``prob < 1``
 now works at all on the JAX backend, where it previously crashed on any tree
-carrying ``metadata["filepath"]`` (which ``from_file`` always sets) or on any
+carrying ``extras["filepath"]`` (which ``from_file`` always sets) or on any
 transform that nulls ``lufs``.
 
 Misspelled transform parameters raise
@@ -576,7 +613,7 @@ that does both simply satisfies both. The
 codec owns resampling, channel handling and output shapes, so the transform no
 longer repacks codes into ``(batch, codebooks*channels, frames)``: ``AudioTree.codes``
 holds exactly what the codec returned, and a non-``None`` ``scale`` is kept under
-``metadata["codec_scale"]``.
+``extras["codec_scale"]``.
 
 .. skip-snippet-exec: the "Before" half is pre-1.0 API and cannot run.
 
@@ -649,7 +686,7 @@ Smaller behavior changes
        ``keep_lufs=True``
      - Code reading ``tree.lufs`` after these now sees ``None``. Call
        ``replace_lufs()`` again.
-   * - ``roll()`` sets ``metadata["offset"]`` to ``None``
+   * - ``roll()`` sets ``extras["offset"]`` to ``None``
      - It no longer points at sample 0 once the waveform has been shifted.
    * - The JAX ``shift_phase()`` draws **one phase angle per batch item**, not
        one per ``(batch, channel)``
@@ -695,9 +732,10 @@ more than accommodating development-time artifacts.
 
 If re-rendering a large pre-1.0 ``TreeWriter`` corpus is genuinely impractical, the
 field renames are mechanical: rename each ``*audio_data.bin`` to ``*waveform.bin``
-and each ``*loudness.bin`` to ``*lufs.bin``, replace those names in
+and each ``*loudness.bin`` to ``*lufs.bin``, rename the ``metadata`` structure node
+and its ``metadata.*`` leaves to ``extras`` / ``extras.*``, replace those names in
 ``manifest.json``, and add the header. The same applies to the ``loudness`` column
-in an ``AudioWriter`` NPZ manifest. This is unsupported; the reader validates the
+and any ``metadata_*`` columns in an ``AudioWriter`` NPZ manifest. This is unsupported; the reader validates the
 manifest strictly (``num_samples``, each leaf's ``shape_per_sample`` and an
 allow-listed ``dtype``, and every ``children`` key against the real ``AudioTree``
 fields), so a hand-edit that is close but not exact will be rejected.
@@ -727,7 +765,8 @@ What that buys you across 1.x is spelled out in :ref:`api_stability`.
 Checklist
 ---------
 
-#. ``grep`` for ``audio_data`` and ``loudness`` and take the renames above.
+#. ``grep`` for ``audio_data``, ``loudness`` and ``.metadata`` and take the
+   renames above.
 #. Switch ``audiotree.datasources`` imports to ``audiotree.sources``, and the
    data-source classes to ``create_audio_dataset()`` /
    ``create_balanced_audio_dataset()``.

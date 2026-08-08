@@ -84,6 +84,18 @@ tokens — cached next to (or instead of) the waveform and read back later as a
 zero-copy memmap slice via :class:`~audiotree.sources.TreeDataSource`.
 
 .. note::
+   **Two different "metadata"s, one name kept.** The AudioTree field for per-item
+   payload arrays is called ``extras`` — it holds data that batches and trains
+   *with* the audio (labels, embeddings, provenance), and TreeWriter stores each
+   entry as its own leaf under ``extras.<key>``. Separately,
+   ``TreeWriter(metadata=...)`` accepts true *dataset-level* metadata — free-form
+   facts about the whole render (a description, a git commit, a source corpus) —
+   stored once under the manifest's top-level ``"metadata"`` key and read back
+   with :meth:`~audiotree.sources.TreeDataSource.get_metadata`. Only the per-item
+   field was renamed; the dataset-level parameter, manifest key, and reader keep
+   the name ``metadata``, which now unambiguously means data *about* the dataset.
+
+.. note::
    :class:`~audiotree.sources.TreeDataSource` validates the dataset when you
    **construct** it, not when you first read from it. Alongside the manifest's
    declared shapes, dtypes and field names, every leaf's ``.bin`` is measured
@@ -181,30 +193,30 @@ then to the full ``int16`` range ``[-32767, 32767]``:
     # 2. Quantize [-1, 1] to the full int16 range for compact storage.
     spec_i16 = np.round(spec_unit * 32767.0).astype(np.int16)
 
-    # Carry the int16 feature in the AudioTree's metadata (a pytree node), so it
+    # Carry the int16 feature in the AudioTree's extras (a pytree node), so it
     # batches and indexes alongside the waveform. TreeWriter keeps each leaf's
     # dtype, so the spectrogram is written to disk as int16.
     record = AudioTree.create(
         jnp.zeros((n_items, 1, 16_000)),
         16_000,
-        metadata={"spectrogram": spec_i16},
+        extras={"spectrogram": spec_i16},
     )
     with TreeWriter("features", expected_samples=n_items) as writer:
         writer.write(record)
 
-    # In the data loader, dequantize metadata["spectrogram"] back to float32.
+    # In the data loader, dequantize extras["spectrogram"] back to float32.
     def dequantize(audio_tree):
-        spec = audio_tree.metadata["spectrogram"].astype(np.float32) / 32767.0
+        spec = audio_tree.extras["spectrogram"].astype(np.float32) / 32767.0
         return audio_tree.replace(
-            metadata={**audio_tree.metadata, "spectrogram": spec}
+            extras={**audio_tree.extras, "spectrogram": spec}
         )
 
     ds = grain.MapDataset.source(TreeDataSource("features")).map(dequantize)
 
     item = ds[0]
-    print(item.metadata["spectrogram"].dtype)
-    print(item.metadata["spectrogram"].shape)   # the batch axis of 1 is added back
-    print(bool(np.all(np.abs(item.metadata["spectrogram"]) <= 1.0)))
+    print(item.extras["spectrogram"].dtype)
+    print(item.extras["spectrogram"].shape)     # the batch axis of 1 is added back
+    print(bool(np.all(np.abs(item.extras["spectrogram"]) <= 1.0)))
 
 .. testoutput::
 
@@ -225,7 +237,7 @@ On a large pre-rendered corpus the raw waveform often dwarfs the features you
 actually train on. Two knobs keep such datasets cheap:
 
 - **Drop the waveform at write time.** ``AudioTree.replace(waveform=None)`` yields
-  a *feature-only* tree — ``codes``, ``latents``, or a ``metadata`` feature with no
+  a *feature-only* tree — ``codes``, ``latents``, or an ``extras`` feature with no
   audio. :class:`~audiotree.tree_writer.TreeWriter` simply omits the missing leaf,
   and it reads back as ``None``.
 - **Skip leaves at read time.** :class:`~audiotree.sources.TreeDataSource` accepts
@@ -247,7 +259,7 @@ actually train on. Two knobs keep such datasets cheap:
     wet = AudioTree.create(
         jnp.zeros((n, 1, 16_000)),
         16_000,
-        metadata={"mel": np.zeros((n, 80, 32), np.float32)},
+        extras={"mel": np.zeros((n, 80, 32), np.float32)},
     ).replace(waveform=None)              # feature-only: no audio is written
 
     with TreeWriter("prerendered", expected_samples=n) as writer:
@@ -255,7 +267,7 @@ actually train on. Two knobs keep such datasets cheap:
 
     # Full read: wet.waveform was never written, so it comes back None.
     item = TreeDataSource("prerendered")[0]
-    print(item["wet"].waveform is None, item["wet"].metadata["mel"].shape)
+    print(item["wet"].waveform is None, item["wet"].extras["mel"].shape)
 
     # Lean read: also skip the dry audio memmap (huge on a real corpus).
     lean = TreeDataSource("prerendered", exclude_prefixes=["dry.waveform"])[0]
@@ -374,14 +386,14 @@ Control NPZ file compression for different trade-offs:
 
 Compression is recommended for most cases as the size savings (often 5-10x) outweigh the minimal performance impact.
 
-Metadata Tracking
+Manifest Tracking
 ~~~~~~~~~~~~~~~~~
 
-AudioWriter automatically tracks all AudioTree metadata in the manifest:
+AudioWriter automatically tracks the AudioTree's per-item fields in the manifest:
 
 .. testcode::
 
-    # Create AudioTree with comprehensive metadata
+    # Create AudioTree with comprehensive per-item fields
     meta_tree = AudioTree.create(
         np.random.randn(2, 1, 44_100),
         sample_rate=44_100,
@@ -406,7 +418,7 @@ The manifest will contain:
   ``note_duration``, ``codes``, ``latents``, and the source ``filepath``
 - **Custom tags**: Any additional metadata passed via the ``tags`` parameter,
   stored as ``tags_*`` columns
-- **Metadata arrays**: every non-nested ``metadata`` entry, as a ``metadata_*``
+- **Extras arrays**: every non-nested ``extras`` entry, as an ``extras_*``
   column
 
 A column that some rows lack is stored with a presence mask, so a missing value is
@@ -414,6 +426,11 @@ genuinely *absent* on read-back rather than standing in as a sentinel like ``-1`
 ``NaN`` or ``""``. That matters for a ``filter_fn``: use ``entry.get(...)`` with
 your own default rather than ``entry[...]`` for any column that may be absent
 (``"tags"`` included — it appears only on rows that have at least one tag).
+
+The column set is closed: readers validate every column of a manifest against
+this schema and reject an unrecognized column by name, so a manifest that has
+drifted from the format fails loudly at read rather than being partially and
+silently ignored.
 
 Choosing an encoding subtype
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -587,9 +604,9 @@ Use :class:`~audiotree.sources.audio.AudioDataSource` to read AudioWriter output
     # Access individual items
     loaded_tree = source[0]
     print(loaded_tree.sample_rate)
-    print(loaded_tree.lufs)   # Metadata is restored
+    print(loaded_tree.lufs)   # Manifest fields are restored
 
-    # Filter by metadata
+    # Filter by manifest columns
     loud_source = source.filter_by_lufs(min_lufs=-18.0)
 
     # Filter by tags
@@ -606,7 +623,7 @@ Manifest-Only: Saving Embeddings (No Audio)
 Sometimes the payload you want to save is not audio but a per-item array a model
 produced — an embedding, a projection, a set of predicted parameters. Pass
 ``write_audio=False`` to write **only** the NPZ manifest, with your arrays carried
-in ``metadata``. No WAV files are written, so a large evaluation set of embeddings
+in ``extras``. No WAV files are written, so a large evaluation set of embeddings
 costs almost nothing on disk:
 
 .. testcode::
@@ -616,13 +633,13 @@ costs almost nothing on disk:
     from audiotree import AudioTree, AudioWriter
 
     # A batch of clips, each with an embedding a model produced. Carry the
-    # embeddings (and any ids you need) in metadata — an active pytree node.
+    # embeddings (and any ids you need) in extras — an active pytree node.
     rng = np.random.default_rng(0)
     n_items = 100
     batch = AudioTree.create(
         rng.standard_normal((n_items, 1, 16_000)).astype(np.float32),
         16_000,
-        metadata={
+        extras={
             "embedding": rng.standard_normal((n_items, 128)).astype(np.float32),
             "label": np.arange(n_items),
         },
@@ -645,16 +662,16 @@ predicate (evaluated per manifest entry) selects a subset at load time:
 
 .. testcode::
 
-    # The whole manifest as one tree; metadata arrays round-trip exactly.
+    # The whole manifest as one tree; extras arrays round-trip exactly.
     tree = AudioTree.from_manifest("embeddings/manifest.npz")
-    print(tree.metadata["embedding"].shape)
+    print(tree.extras["embedding"].shape)
 
-    # filter_fn sees each entry's columns as ``metadata_<key>``; keep labels < 10.
+    # filter_fn sees each entry's columns as ``extras_<key>``; keep labels < 10.
     subset = AudioTree.from_manifest(
         "embeddings/manifest.npz",
-        filter_fn=lambda entry: entry["metadata_label"] < 10,
+        filter_fn=lambda entry: entry["extras_label"] < 10,
     )
-    print(subset.metadata["embedding"].shape)
+    print(subset.extras["embedding"].shape)
 
 .. testoutput::
 
@@ -667,25 +684,25 @@ predicate (evaluated per manifest entry) selects a subset at load time:
    axis — ideal for a one-shot analysis pass over saved embeddings.
    :class:`~audiotree.sources.AudioDataSource` (above) is instead a Grain
    ``RandomAccessDataSource`` that yields one item at a time in manifest order, for
-   feeding a pipeline. ``from_manifest`` restores the ``metadata_*`` arrays, the
+   feeding a pipeline. ``from_manifest`` restores the ``extras_*`` arrays, the
    label fields (``lufs``, ``pitch``, ``codes``, …), and the source ``filepath``
    column — so ``loaded.filepath`` matches the paths you wrote.
 
-Metadata Flow Example
-~~~~~~~~~~~~~~~~~~~~~
+Extras Flow Example
+~~~~~~~~~~~~~~~~~~~
 
-Here's how metadata flows through AudioTree transformations and into the manifest:
+Here's how extras flow through AudioTree transformations and into the manifest:
 
 .. testcode::
 
     from audiotree import AudioTree, AudioWriter
     import numpy as np
 
-    # Load with rich metadata
+    # Load with rich extras
     audio_tree = AudioTree.from_file(
         "input.wav",
         sample_rate=44_100,
-        metadata={
+        extras={
             "instrument": "guitar",
             "style": "rock",
             "bpm": 120,
@@ -693,13 +710,13 @@ Here's how metadata flows through AudioTree transformations and into the manifes
         }
     )
 
-    # Metadata is preserved through transformations
+    # Extras are preserved through transformations
     processed = audio_tree.resample(16_000)
     processed = processed.replace_lufs()
 
-    # Check metadata is still there
-    print(processed.metadata["instrument"])
-    print(processed.metadata["bpm"])
+    # Check the extras are still there
+    print(processed.extras["instrument"])
+    print(processed.extras["bpm"])
 
     # Write with additional tags
     with AudioWriter("output_flow") as writer:
@@ -711,7 +728,7 @@ Here's how metadata flows through AudioTree transformations and into the manifes
     120
 
 When read back via :class:`~audiotree.sources.audio.AudioDataSource`, the per-item
-metadata is restored as batched arrays (so a single-item read gives ``array(['guitar'])``
+extras are restored as batched arrays (so a single-item read gives ``array(['guitar'])``
 for a string field):
 
 .. testcode::
@@ -719,7 +736,7 @@ for a string field):
     from audiotree.sources import AudioDataSource
     source = AudioDataSource.from_writer_output("output_flow")
     loaded = source[0]
-    print(loaded.metadata["instrument"])
+    print(loaded.extras["instrument"])
 
 .. testoutput::
 

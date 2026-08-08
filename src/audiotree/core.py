@@ -245,7 +245,7 @@ class ExcerptConfig:
 
 
 # Fixed width (in Unicode code points) for filepath/source strings encoded into
-# metadata arrays, so they can be batched and stored in fixed-width int32 arrays.
+# extras arrays, so they can be batched and stored in fixed-width int32 arrays.
 # Strings longer than this raise in ``_encode_string`` rather than being
 # truncated, to avoid silently corrupting paths.
 _str_max_length = 1024
@@ -272,7 +272,7 @@ def _is_integer_scalar(key) -> bool:
 def _is_string_list(x) -> bool:
     """Whether *x* is a non-empty list of strings.
 
-    Such lists are supported ``metadata`` leaves (see ``tree_writer``), so the
+    Such lists are supported ``extras`` leaves (see ``tree_writer``), so the
     batch-axis operations treat them as a single leaf and index them
     element-wise rather than letting ``jax.tree_util`` descend into the list and
     slice each string's characters.
@@ -281,7 +281,7 @@ def _is_string_list(x) -> bool:
 
 
 def _is_string_leaf(x) -> bool:
-    """Whether *x* is a string ``metadata`` leaf, in any of its batch forms.
+    """Whether *x* is a string ``extras`` leaf, in any of its batch forms.
 
     The forms track the tree's leading axes (see ``tree_writer``): a bare
     ``str`` is a batch of 1, a list of strings holds one per batch item, a
@@ -436,10 +436,10 @@ def _leading_axis_size(*candidates) -> Optional[int]:
 #: :meth:`AudioTree._invalidate_derived`.
 DERIVED_FIELDS: tuple = ("lufs", "lufs_windows", "codes", "latents")
 
-#: ``metadata`` keys that are derived in the same way. ``"codec_scale"`` is
+#: ``extras`` keys that are derived in the same way. ``"codec_scale"`` is
 #: written by ``encode_with_codec`` alongside ``codes`` and is meaningless once
 #: those tokens are gone.
-DERIVED_METADATA_KEYS: tuple = ("codec_scale",)
+DERIVED_EXTRAS_KEYS: tuple = ("codec_scale",)
 
 
 class _AudioTreeFields(TypedDict, total=False):
@@ -461,13 +461,13 @@ class _AudioTreeFields(TypedDict, total=False):
     note_duration: ArrayLike | None
     codes: ArrayLike | None
     latents: ArrayLike | None
-    metadata: dict
+    extras: dict
 
 
 @struct.dataclass
 class AudioTree:
     """
-    A `flax.struct.dataclass`_ for holding audio information including a waveform, sample rate, and metadata.
+    A `flax.struct.dataclass`_ for holding audio information including a waveform, sample rate, and extras.
 
     The ``AudioTree`` class is inspired by Descript AudioTools's `AudioSignal`_.
         .. _AudioSignal: https://github.com/descriptinc/audiotools/blob/master/audiotools/core/audio_signal.py
@@ -493,7 +493,7 @@ class AudioTree:
             The value is not necessarily the same as the duration of the audio data. The shape is ``(Batch,)``.
         codes (np.ndarray or jax.Array, optional): The neural audio codec tokens for the audio.
         latents (np.ndarray or jax.Array, optional): The latent representations of the audio.
-        metadata (dict): Any extra metadata can be placed here. Provenance lives here too, under the
+        extras (dict): Any extra per-item data can be placed here. Provenance lives here too, under the
             ``"filepath"`` and ``"source"`` keys (encoded arrays, read back via the :attr:`filepath`
             and :attr:`source` properties); pass ``filepath=`` / ``source=`` to :meth:`create` rather
             than encoding them by hand.
@@ -520,7 +520,7 @@ class AudioTree:
     note_duration: ArrayLike | None = None
     codes: ArrayLike | None = None
     latents: ArrayLike | None = None
-    metadata: dict = struct.field(pytree_node=True, default_factory=dict)
+    extras: dict = struct.field(pytree_node=True, default_factory=dict)
 
     def replace(self, **updates: Unpack[_AudioTreeFields]) -> Self:
         """Return a new ``AudioTree`` with the given fields replaced.
@@ -563,14 +563,14 @@ class AudioTree:
         note_duration: ArrayLike | None = None,
         codes: ArrayLike | None = None,
         latents: ArrayLike | None = None,
-        metadata: dict | None = None,
+        extras: dict | None = None,
         filepath: Union[str, Path, List[Union[str, Path]]] | None = None,
         source: Union[str, List[str]] | None = None,
     ) -> Self:
         """Create an ``AudioTree``, normalizing the waveform to ``(Batch, Channels, Samples)``.
 
         A bare ``(Samples,)`` or ``(Channels, Samples)`` waveform gains the missing leading axes, so
-        you don't have to reshape by hand. ``filepath`` and ``source`` are encoded into ``metadata``.
+        you don't have to reshape by hand. ``filepath`` and ``source`` are encoded into ``extras``.
 
         Args:
             waveform: Audio of shape ``(Samples)``, ``(Channels, Samples)``, or
@@ -586,12 +586,12 @@ class AudioTree:
             note_duration: Optional per-note duration ``(Batch,)`` (not the audio duration).
             codes: Optional neural-codec tokens.
             latents: Optional latent representations.
-            metadata: Optional extra metadata dict (copied, not mutated).
-            filepath: Optional path(s) for the batch; encoded into ``metadata["filepath"]`` and read
+            extras: Optional extras dict of additional per-item leaves (copied, not mutated).
+            filepath: Optional path(s) for the batch; encoded into ``extras["filepath"]`` and read
                 back via the :attr:`filepath` property. Pass a single path to tag the whole batch
                 (it is repeated for every item), or a list with one path per batch item.
             source: Optional source-group name(s) (e.g. ``"music"``), encoded into
-                ``metadata["source"]`` and read back via the :attr:`source` property. Pass a
+                ``extras["source"]`` and read back via the :attr:`source` property. Pass a
                 single string to tag the whole batch, or a list with one name per batch item
                 (unlike :meth:`from_file`, which only accepts a single string).
 
@@ -624,11 +624,11 @@ class AudioTree:
                     f"call reshape_mini_batches() to add a mini-batch axis."
                 )
 
-        # Handle metadata and filepath
-        if metadata is None:
-            metadata = {}
+        # Handle extras and filepath
+        if extras is None:
+            extras = {}
         else:
-            metadata = metadata.copy()  # Don't modify the original dict
+            extras = extras.copy()  # Don't modify the original dict
 
         # A single string tags the whole batch: encode once and repeat, so that
         # ``tree[2].filepath`` and any filtered sub-batch keep their provenance
@@ -652,10 +652,10 @@ class AudioTree:
             return encoded
 
         if filepath is not None:
-            metadata["filepath"] = _encode_provenance("filepath", filepath)
+            extras["filepath"] = _encode_provenance("filepath", filepath)
 
         if source is not None:
-            metadata["source"] = _encode_provenance("source", source)
+            extras["source"] = _encode_provenance("source", source)
 
         return cls(
             waveform=waveform,
@@ -667,7 +667,7 @@ class AudioTree:
             note_duration=note_duration,
             codes=codes,
             latents=latents,
-            metadata=metadata,
+            extras=extras,
         )
 
     def _invalidate_derived(
@@ -677,8 +677,8 @@ class AudioTree:
 
         The single place that decides what "the audio changed" invalidates.
         ``lufs``, ``lufs_windows``, ``codes``, ``latents`` and
-        ``metadata["codec_scale"]`` (:data:`DERIVED_FIELDS` /
-        :data:`DERIVED_METADATA_KEYS`) all describe one specific waveform; every
+        ``extras["codec_scale"]`` (:data:`DERIVED_FIELDS` /
+        :data:`DERIVED_EXTRAS_KEYS`) all describe one specific waveform; every
         length-, rate-, channel- or energy-changing operation routes through
         here so none of them can be forgotten one method at a time.
 
@@ -687,14 +687,14 @@ class AudioTree:
                 does not want cleared -- e.g. :meth:`normalize_lufs` shifts
                 ``lufs``/``lufs_windows`` by the gain it applied rather than
                 discarding them. Keeping ``"codes"`` also keeps
-                ``metadata["codec_scale"]``, which is only meaningful with them.
+                ``extras["codec_scale"]``, which is only meaningful with them.
             **updates: Forwarded to :meth:`replace`, and applied *after* the
                 invalidation so a caller can supply a fresh value for a derived
                 field.
 
         Returns:
             AudioTree: A copy with the stale derived fields set to ``None``,
-            stale derived ``metadata`` keys removed, and ``updates`` applied.
+            stale derived ``extras`` keys removed, and ``updates`` applied.
 
         Raises:
             ValueError: If ``keep`` names something that is not a derived field.
@@ -707,39 +707,39 @@ class AudioTree:
         cleared: dict = {name: None for name in DERIVED_FIELDS if name not in keep}
 
         if "codes" not in keep:
-            metadata = updates.get("metadata", self.metadata)
-            if any(key in metadata for key in DERIVED_METADATA_KEYS):
-                updates["metadata"] = {
+            extras = updates.get("extras", self.extras)
+            if any(key in extras for key in DERIVED_EXTRAS_KEYS):
+                updates["extras"] = {
                     key: value
-                    for key, value in metadata.items()
-                    if key not in DERIVED_METADATA_KEYS
+                    for key, value in extras.items()
+                    if key not in DERIVED_EXTRAS_KEYS
                 }
 
         return self.replace(**(cleared | dict(updates)))
 
-    def replace_metadata(self, **kwargs) -> Self:
-        """Return a new ``AudioTree`` with ``kwargs`` merged into ``metadata``.
+    def replace_extras(self, **kwargs) -> Self:
+        """Return a new ``AudioTree`` with ``kwargs`` merged into ``extras``.
 
-        Syntactic sugar for ``self.replace(metadata={**self.metadata, **kwargs})``.
-        Keys in ``kwargs`` overwrite existing ``metadata`` keys with the same name;
-        all other keys are kept. Neither the original tree nor its ``metadata``
+        Syntactic sugar for ``self.replace(extras={**self.extras, **kwargs})``.
+        Keys in ``kwargs`` overwrite existing ``extras`` keys with the same name;
+        all other keys are kept. Neither the original tree nor its ``extras``
         dict is mutated. For a key that isn't a valid Python identifier, use the
-        ``self.replace(metadata=...)`` form directly.
+        ``self.replace(extras=...)`` form directly.
 
         Args:
-            **kwargs: Entries to merge into ``metadata``. Values should be arrays
+            **kwargs: Entries to merge into ``extras``. Values should be arrays
                 (or pytrees of arrays) so the result stays batchable and jittable.
 
         Returns:
-            AudioTree: A new ``AudioTree`` with the merged ``metadata``.
+            AudioTree: A new ``AudioTree`` with the merged ``extras``.
 
         Example:
             >>> audio = AudioTree.create(jnp.zeros((44100,)), 44100)
-            >>> audio = audio.replace_metadata(tempo=np.array([120.0]))
-            >>> audio.metadata["tempo"]
+            >>> audio = audio.replace_extras(tempo=np.array([120.0]))
+            >>> audio.extras["tempo"]
             array([120.])
         """
-        return self.replace(metadata=self.metadata | kwargs)
+        return self.replace(extras=self.extras | kwargs)
 
     def replace_lufs(
         self,
@@ -914,7 +914,7 @@ class AudioTree:
         to achieve the target LUFS. The returned AudioTree has updated
         ``waveform``, ``lufs``, and ``lufs_windows`` fields (a constant gain shifts
         every window's LUFS by the same amount). Changing the level invalidates
-        ``codes``, ``latents`` and ``metadata["codec_scale"]``, which describe the
+        ``codes``, ``latents`` and ``extras["codec_scale"]``, which describe the
         audio at its previous level.
 
         Items whose loudness is not finite are **passed through unscaled**. Digital
@@ -995,7 +995,7 @@ class AudioTree:
         s = str(s)
         if len(s) > _str_max_length:
             raise ValueError(
-                f"String of length {len(s)} exceeds the metadata encoding limit "
+                f"String of length {len(s)} exceeds the extras encoding limit "
                 f"of {_str_max_length} characters and would be truncated: {s!r}. "
                 "Increase audiotree.core._str_max_length to store longer strings."
             )
@@ -1050,7 +1050,7 @@ class AudioTree:
         """
         if encoded.ndim < 2:
             raise ValueError(
-                f"metadata[{key!r}] must have a leading batch axis, i.e. shape "
+                f"extras[{key!r}] must have a leading batch axis, i.e. shape "
                 f"(Batch, {_str_max_length}), got rank {encoded.ndim} "
                 f"{tuple(encoded.shape)}. Encode it with "
                 f"AudioTree.create({key}=...) rather than by hand."
@@ -1061,7 +1061,7 @@ class AudioTree:
 
     @property
     def filepath(self) -> Union[List[str], List[list]]:
-        """Return the decoded filepaths stored in ``metadata['filepath']``.
+        """Return the decoded filepaths stored in ``extras['filepath']``.
 
         One string per batch item. A mini-batched tree (rank 4, from
         :meth:`reshape_mini_batches`) has two leading axes, so it returns one
@@ -1069,15 +1069,15 @@ class AudioTree:
         axes. Call :meth:`flatten_mini_batches` first for a flat list.
 
         An empty list is returned if the AudioTree does not contain any filepath
-        metadata.
+        extras.
         """
-        if "filepath" not in self.metadata:
+        if "filepath" not in self.extras:
             return []
-        return self._decode_strings(self.metadata["filepath"], "filepath")
+        return self._decode_strings(self.extras["filepath"], "filepath")
 
     @property
     def source(self) -> Union[List[str], List[list]]:
-        """Return the decoded source names stored in ``metadata['source']``.
+        """Return the decoded source names stored in ``extras['source']``.
 
         Source names indicate which data source group each item in the batch came from.
         For example, if an AudioDataSimpleSource was created with
@@ -1087,11 +1087,11 @@ class AudioTree:
         mini-batch.
 
         An empty list is returned if the AudioTree does not contain any source
-        metadata.
+        extras.
         """
-        if "source" not in self.metadata:
+        if "source" not in self.extras:
             return []
-        return self._decode_strings(self.metadata["source"], "source")
+        return self._decode_strings(self.extras["source"], "source")
 
     @property
     def samples(self) -> int:
@@ -1162,7 +1162,7 @@ class AudioTree:
         )
 
     def _array_leaves(self):
-        """Every non-``None`` array field, waveform first. Skips ``metadata``."""
+        """Every non-``None`` array field, waveform first. Skips ``extras``."""
         for name in ARRAY_FIELDS:
             value = getattr(self, name, None)
             if value is not None:
@@ -1209,8 +1209,8 @@ class AudioTree:
         An integer key selects a single item but keeps the leading batch axis
         (a batch of 1); a slice, a list of indices, or a boolean mask selects a
         sub-batch. Every array field — including ``codes``, ``latents``, and the
-        ``metadata`` arrays — is indexed along the same axis so the fields stay
-        rank-aligned. String ``metadata`` leaves are selected element-wise with
+        ``extras`` arrays — is indexed along the same axis so the fields stay
+        rank-aligned. String ``extras`` leaves are selected element-wise with
         the same key and always come back as a list (a bare ``str``, the
         batch-of-1 form, becomes a one-item list).
 
@@ -1263,7 +1263,7 @@ class AudioTree:
         | None = "constant",
         filepath: Union[str, Path, List[Union[str, Path]]] | None = None,
         source: str | None = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        extras: Optional[Dict[str, Any]] = None,
         # AudioTree properties
         lufs: Optional[ArrayLike] = None,
         lufs_windows: Optional[ArrayLike] = None,
@@ -1288,11 +1288,11 @@ class AudioTree:
                 "constant" (zeros, default), "edge" (repeat edge), "reflect" (mirror), "symmetric" (mirror with edge),
                 "wrap" (circular/loop), or None (no padding).
             filepath (Union[str, Path, List[str | Path]], optional): One or more paths to store in the returned
-                ``AudioTree``'s metadata. If *None* (default) the provided ``audio_path`` will be used.
+                ``AudioTree``'s extras. If *None* (default) the provided ``audio_path`` will be used.
             source (str, optional): The source group name for this audio file (e.g., "music", "speech").
-                This is stored in metadata and accessible via the ``source`` property.
-            metadata (dict, optional): Additional metadata to include in the AudioTree. This metadata is merged with
-                automatically generated fields (offset, note_duration, filepath).
+                This is stored in extras and accessible via the ``source`` property.
+            extras (dict, optional): Additional extras to include in the AudioTree. These are merged with
+                automatically generated entries (offset, note_duration, filepath).
             lufs (np.ndarray or jax.Array, optional): Integrated loudness (LUFS) values to assign to the AudioTree.
             lufs_windows (np.ndarray or jax.Array, optional): Per-window loudness (LUFS) values to assign to the AudioTree.
             pitch (np.ndarray or jax.Array, optional): Pitch values to assign to the AudioTree.
@@ -1349,14 +1349,14 @@ class AudioTree:
         if target_length is not None and data.shape[-1] > target_length:
             data = data[..., :target_length]
 
-        # Start with user-provided metadata or empty dict
-        if metadata is None:
-            combined_metadata = {}
+        # Start with user-provided extras or empty dict
+        if extras is None:
+            combined_extras = {}
         else:
-            combined_metadata = metadata.copy()  # Don't modify the original
+            combined_extras = extras.copy()  # Don't modify the original
 
-        # Add automatic metadata (these override user metadata to ensure correctness)
-        combined_metadata["offset"] = np.array([offset])
+        # Add automatic extras (these override user extras to ensure correctness)
+        combined_extras["offset"] = np.array([offset])
 
         if filepath is None:
             paths_to_store = [audio_path]
@@ -1367,10 +1367,10 @@ class AudioTree:
             else:
                 paths_to_store = list(filepath)
 
-        combined_metadata["filepath"] = cls._encode_filepaths(paths_to_store)
+        combined_extras["filepath"] = cls._encode_filepaths(paths_to_store)
 
         if source is not None:
-            combined_metadata["source"] = cls._encode_filepaths([source])
+            combined_extras["source"] = cls._encode_filepaths([source])
 
         # Wrap scalar properties in arrays with batch dimension
         # This ensures consistency - all AudioTree properties should have batch dimension
@@ -1387,7 +1387,7 @@ class AudioTree:
         return cls(
             waveform=data,
             sample_rate=sample_rate,
-            metadata=combined_metadata,
+            extras=combined_extras,
             lufs=wrap_if_scalar(lufs, np.float32),
             lufs_windows=lufs_windows,
             pitch=wrap_if_scalar(pitch, np.float32),
@@ -1419,7 +1419,7 @@ class AudioTree:
             audio_dir: Optional directory containing audio files. If None, uses manifest directory
             filter_fn: Optional predicate called with one manifest entry, a
                 ``dict`` keyed by column name (``"filename"``, ``"sample_rate"``,
-                the AudioTree label fields, ``"metadata_*"``, plus ``"tags"``);
+                the AudioTree label fields, ``"extras_*"``, plus ``"tags"``);
                 return ``True`` to load that entry. These are the entries of
                 :func:`audiotree._manifest.read_entries`, the same ones
                 :class:`~audiotree.sources.AudioDataSource` passes *its*
@@ -1542,24 +1542,24 @@ class AudioTree:
             # No audio files - create zeros
             waveform = np.zeros((len(entries), channels, samples), dtype=np.float32)
 
-        # Build metadata dictionary
-        metadata = {}
-        metadata_columns = sorted(
-            {key for entry in entries for key in entry if key.startswith("metadata_")}
+        # Build extras dictionary
+        extras = {}
+        extras_columns = sorted(
+            {key for entry in entries for key in entry if key.startswith("extras_")}
         )
-        for key in metadata_columns:
-            metadata[key[len("metadata_") :]] = stack_column(key)
+        for key in extras_columns:
+            extras[key[len("extras_") :]] = stack_column(key)
 
         # Build AudioTree kwargs
         tree_kwargs = {
             "sample_rate": sample_rate,
-            "metadata": metadata,
+            "extras": extras,
         }
 
         # Restore the source filepath. AudioWriter stores them as a top-level
-        # ``filepath`` column of decoded strings (not under a ``metadata_``
+        # ``filepath`` column of decoded strings (not under an ``extras_``
         # prefix), so passing them back through ``filepath=`` re-encodes them
-        # into ``metadata['filepath']`` and makes the ``.filepath`` property work.
+        # into ``extras['filepath']`` and makes the ``.filepath`` property work.
         filepaths = stack_column("filepath")
         if filepaths is not None:
             tree_kwargs["filepath"] = [str(p) for p in filepaths]
@@ -1718,7 +1718,7 @@ class AudioTree:
 
         Changing the channel count changes the audio, so every derived field
         (``lufs``, ``lufs_windows``, ``codes``, ``latents``,
-        ``metadata["codec_scale"]``) is invalidated. A waveform that is already
+        ``extras["codec_scale"]``) is invalidated. A waveform that is already
         mono is returned unchanged, derived fields and all.
 
         Args:
@@ -1756,7 +1756,7 @@ class AudioTree:
 
         Changing the channel count changes the audio, so every derived field
         (``lufs``, ``lufs_windows``, ``codes``, ``latents``,
-        ``metadata["codec_scale"]``) is invalidated. A waveform that is already
+        ``extras["codec_scale"]``) is invalidated. A waveform that is already
         stereo is returned unchanged, derived fields and all.
 
         Returns:
@@ -1875,7 +1875,7 @@ class AudioTree:
 
         Changing the sample rate changes the audio's length and its samples, so
         every derived field (``lufs``, ``lufs_windows``, ``codes``, ``latents``,
-        ``metadata["codec_scale"]``) is invalidated. Resampling to the rate the
+        ``extras["codec_scale"]``) is invalidated. Resampling to the rate the
         tree already has returns it unchanged, derived fields and all.
 
         Returns:
@@ -1968,7 +1968,7 @@ class AudioTree:
         split_batch_size = total_batch_size // n_splits
 
         # Slice the batch axis with the same leaf definition ``__getitem__``
-        # uses, so a string metadata leaf is sliced element-wise
+        # uses, so a string extras leaf is sliced element-wise
         # (``names[i*s:(i+1)*s]``) instead of ``jax.tree_util`` descending into
         # it and slicing each string's characters.
         return [
@@ -1986,7 +1986,7 @@ class AudioTree:
         """Reshape batch dimension into mini-batches by adding a new leading axis.
 
         Transforms audio data from shape (B, C, T) to (num_mini_batches, mini_batch_size, C, T),
-        where B must be evenly divisible by mini_batch_size. String metadata
+        where B must be evenly divisible by mini_batch_size. String extras
         leaves nest the same way: a list of B strings becomes num_mini_batches
         lists of mini_batch_size strings, so indexing a mini-batch keeps them
         aligned with the arrays.
@@ -2021,7 +2021,7 @@ class AudioTree:
 
         # Reshape AudioTree to have leading mini-batch dimension
         # From (B, C, T) to (num_mini_batches, mini_batch_size, C, T)
-        # Only reshape array-like objects since metadata can contain non-arrays
+        # Only reshape array-like objects since extras can contain non-arrays
         def reshape_leaf(x):
             if _is_string_leaf(x):
                 # Nest to match the new leading axes, like the encoded
@@ -2030,7 +2030,7 @@ class AudioTree:
                 strings = _as_string_list(x)
                 if len(strings) != B:
                     raise ValueError(
-                        f"String metadata leaf has {len(strings)} items but "
+                        f"String extras leaf has {len(strings)} items but "
                         f"the batch size is {B}."
                     )
                 return [
@@ -2050,7 +2050,7 @@ class AudioTree:
 
         Undoes the operation performed by reshape_mini_batches(), transforming
         audio data from shape (num_mini_batches, mini_batch_size, C, T) back to
-        (B, C, T). String metadata leaves lose their per-mini-batch nesting the
+        (B, C, T). String extras leaves lose their per-mini-batch nesting the
         same way, back to one string per item.
 
         Returns:
@@ -2086,7 +2086,7 @@ class AudioTree:
 
         # Flatten the first two dimensions
         # From (num_mini_batches, mini_batch_size, C, T) to (B, C, T)
-        # Only reshape array-like objects since metadata can contain non-arrays
+        # Only reshape array-like objects since extras can contain non-arrays
         def flatten_leaf(x):
             if _is_string_leaf(x):
                 # Undo ``reshape_mini_batches``'s nesting: one list per
@@ -2112,7 +2112,7 @@ class AudioTree:
         Returns:
             AudioTree: A tree holding the kept items. When nothing is kept, the
             result has ``batch_size == 0`` (every array field is empty along the
-            batch axis, every string metadata leaf is ``[]``) rather than being
+            batch axis, every string extras leaf is ``[]``) rather than being
             ``None``. Filtering an already-empty tree returns such an empty
             tree without calling ``predicate``, so chained filters compose.
 
@@ -2228,8 +2228,8 @@ PYTREE_FIELDS: tuple = tuple(
     f.name for f in dataclasses.fields(AudioTree) if f.metadata.get("pytree_node", True)
 )
 
-#: Pytree fields holding a single array, so ``metadata`` (a dict) is excluded.
-ARRAY_FIELDS: tuple = tuple(f for f in PYTREE_FIELDS if f != "metadata")
+#: Pytree fields holding a single array, so ``extras`` (a dict) is excluded.
+ARRAY_FIELDS: tuple = tuple(f for f in PYTREE_FIELDS if f != "extras")
 
 #: Per-item labels: the array fields other than the waveform itself. These are
 #: what the writers record as manifest columns.
@@ -2245,7 +2245,7 @@ def _concatenate(arrays: Sequence[ArrayLike], axis: int = 0) -> ArrayLike:
     concatenation JAX -- ``jnp.concatenate`` accepts NumPy operands, so a mixed
     sequence still works and lands on device.
 
-    String metadata leaves (a supported ``metadata`` type) are joined as Python
+    String extras leaves (a supported ``extras`` type) are joined as Python
     lists, since ``np``/``jnp.concatenate`` cannot concatenate bare strings.
     A bare ``str`` counts as a batch of 1 (the form ``TreeDataSource`` yields
     per item), so the result is always a flat list with one string per item.

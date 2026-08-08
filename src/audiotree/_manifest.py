@@ -48,12 +48,33 @@ from . import _format
 
 #: Prefix of the boolean presence mask belonging to ``<column>``. Distinct from
 #: ``_format.NPZ_HEADER_PREFIX`` so header, mask and data keys never collide:
-#: data columns are named after AudioTree fields, ``metadata_*`` or ``tags_*``,
+#: data columns are named after AudioTree fields, ``extras_*`` or ``tags_*``,
 #: none of which can start with an underscore.
 MASK_PREFIX = "__mask_"
 
 #: Nested under ``entry["tags"]`` by :func:`read_entries`.
 TAG_PREFIX = "tags_"
+
+#: Prefix of the per-item columns derived from ``AudioTree.extras``.
+EXTRAS_PREFIX = "extras_"
+
+#: The bookkeeping columns ``AudioWriter`` records per entry. Must stay in sync
+#: with ``AudioWriter._create_manifest_entry``, which is the only producer of
+#: this format; ``tests/test_writer.py`` holds the two together.
+_BOOKKEEPING_COLUMNS = frozenset(
+    {
+        "index",
+        "filename",
+        "sample_rate",
+        "channels",
+        "samples",
+        "duration_seconds",
+        "files_written",
+        "subtype",
+        "timestamp",
+        "filepath",
+    }
+)
 
 
 class ManifestColumns(NamedTuple):
@@ -443,8 +464,10 @@ def read_columns(path: Union[str, Path]) -> ManifestColumns:
 
     Raises:
         ValueError: If the file carries no audiotree header, is a different
-            format, needs a newer reader, stores pickled objects, or declares a
-            row count its columns do not match.
+            format, needs a newer reader, stores pickled objects, declares a
+            row count its columns do not match, or holds a column outside the
+            format's schema (the bookkeeping columns, the AudioTree label
+            fields, and the ``extras_``/``tags_`` prefixes).
     """
     path = Path(path)
     data = _load_npz(path)
@@ -477,6 +500,33 @@ def read_columns(path: Union[str, Path]) -> ManifestColumns:
             masks[key[len(MASK_PREFIX) :]] = array
         else:
             columns[key] = array
+
+    # The format has a closed column schema: the bookkeeping columns, the
+    # AudioTree label fields, and the ``extras_``/``tags_`` prefixes. Every
+    # consumer routes a column by its name, so an unrecognized one -- a typo, a
+    # corrupted key, a column written by some other version of this format --
+    # would not error anywhere downstream; it would just silently drop out of
+    # every loaded tree. Stale input fails by name here instead.
+    from .core import LABEL_FIELDS  # deferred: audiotree.core imports this module
+
+    unknown = sorted(
+        name
+        for name in set(columns) | set(masks)
+        if name not in _BOOKKEEPING_COLUMNS
+        and name not in LABEL_FIELDS
+        and not name.startswith(EXTRAS_PREFIX)
+        and not name.startswith(TAG_PREFIX)
+    )
+    if unknown:
+        raise ValueError(
+            f"{source}: manifest holds unrecognized column(s) "
+            f"{', '.join(repr(n) for n in unknown)}. An AudioWriter manifest "
+            f"stores only its bookkeeping columns, the AudioTree label fields, "
+            f"and {EXTRAS_PREFIX!r}/{TAG_PREFIX!r}-prefixed columns; anything "
+            f"else would be silently ignored. The manifest is corrupt, or was "
+            f"written by an incompatible version of audiotree -- re-render "
+            f"the dataset."
+        )
 
     # A manifest is untrusted input: a column shorter than the declared row
     # count would read past its end (or, worse, silently pair row i of one
@@ -538,7 +588,7 @@ def read_entries(path: Union[str, Path]) -> List[Dict[str, Any]]:
 
         * every column that has a value for that row, under its stored name --
           so ``"filename"``, ``"sample_rate"``, the AudioTree label fields, and
-          ``"metadata_*"`` keys keep their prefix. Values keep the dtype they
+          ``"extras_*"`` keys keep their prefix. Values keep the dtype they
           were written with (a NumPy scalar, or a sub-array for an
           array-valued column); string columns come back as ``str`` and bytes
           columns as ``bytes``.
@@ -576,7 +626,7 @@ def read_entries(path: Union[str, Path]) -> List[Dict[str, Any]]:
                         f"Manifest {path} stores a non-scalar value for tag "
                         f"{tag_name!r} in entry {row} (shape {value.shape}). Tag "
                         f"values must be scalars (str, int, float, bool or None); "
-                        f"store array-valued information as AudioTree metadata "
+                        f"store array-valued information as AudioTree extras "
                         f"instead."
                     )
                 # Tags are plain scalars the caller handed in, not typed audio

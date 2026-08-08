@@ -77,24 +77,24 @@ def test_reencode_with_scaleless_codec_drops_stale_codec_scale():
     """Fresh codes must not keep the previous codec's codec_scale.
 
     The docs' re-encode recipe clears via tree.replace(codes=None), which does
-    no metadata invalidation -- so the transform itself must drop the old
+    no extras invalidation -- so the transform itself must drop the old
     scale, or a decoder honoring codec_scale would rescale the new codec's
     output by the old codec's factor.
     """
     tree = _audio_tree()
     encoded_a = encode_with_codec(FakeCodec(scale=0.5)).map(tree)
-    assert "codec_scale" in encoded_a.metadata
+    assert "codec_scale" in encoded_a.extras
 
     encoded_b = encode_with_codec(FakeCodec(scale=None)).map(
         encoded_a.replace(codes=None)
     )
-    assert "codec_scale" not in encoded_b.metadata
+    assert "codec_scale" not in encoded_b.extras
 
     encoded_c = encode_with_codec(FakeCodec(scale=2.0)).map(
         encoded_a.replace(codes=None)
     )
     np.testing.assert_array_equal(
-        encoded_c.metadata["codec_scale"], np.full(3, 2.0, np.float32)
+        encoded_c.extras["codec_scale"], np.full(3, 2.0, np.float32)
     )
 
 

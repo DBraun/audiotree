@@ -309,7 +309,7 @@ class TestCreateBalancedAudioDataset:
             assert isinstance(item, AudioTree)
 
     def test_mixed_file_and_preconstructed_groups_batch_together(self):
-        """A file group and a pre-built dataset group must share a metadata schema.
+        """A file group and a pre-built dataset group must share an extras schema.
 
         The docstring's own example mixes ``sources=`` with ``datasets=``. File
         groups are stamped with ``source=group_name``; a pre-built dataset built
@@ -343,13 +343,13 @@ class TestCreateBalancedAudioDataset:
 
             items = [ds[i] for i in range(len(ds))]
 
-            # Both groups expose an identical metadata schema, each carrying a
+            # Both groups expose an identical extras schema, each carrying a
             # `source` set to its group name.
             keys_by_source: Dict[str, set] = {}
             for item in items:
                 assert len(item.source) == 1
                 keys_by_source.setdefault(item.source[0], set()).update(
-                    item.metadata.keys()
+                    item.extras.keys()
                 )
             assert set(keys_by_source) == {"speech", "preprocessed"}
             assert keys_by_source["speech"] == keys_by_source["preprocessed"]
@@ -743,7 +743,7 @@ class TestBalancedDatasetValidation:
 
         The marker lands on *every* item, from every group, so the groups
         collate with each other -- a substitute in one group and a real load in
-        another must agree on their metadata keys.
+        another must agree on their extras keys.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             a_dir = _create_test_audio_files(tmpdir, "a", 2)
@@ -763,7 +763,7 @@ class TestBalancedDatasetValidation:
             batch = AudioTree.batch(items)
             assert batch.waveform.shape == (12, 1, 22050)
 
-            flags = np.asarray(batch.metadata[READ_ERROR_KEY])
+            flags = np.asarray(batch.extras[READ_ERROR_KEY])
             # Each group cycles over 3 files, one of which is corrupt, so a
             # third of the mix is substituted -- and both groups contribute.
             assert flags.sum() == 4

@@ -17,7 +17,7 @@ def test_round_trip_npz_manifest():
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        # Create test data with metadata
+        # Create test data with extras
         waveform = np.random.randn(3, 2, 22050)  # 3 batch, 2 channels
         audio_tree = AudioTree.create(
             waveform,
@@ -45,12 +45,12 @@ def test_round_trip_npz_manifest():
             # Check audio shape (should be single item, not batch)
             assert loaded_tree.waveform.shape == (1, 2, 22050)
 
-            # Check restored metadata
+            # Check restored extras
             assert loaded_tree.lufs[0] == audio_tree.lufs[i]
             assert loaded_tree.pitch[0] == audio_tree.pitch[i]
             assert loaded_tree.velocity[0] == audio_tree.velocity[i]
 
-            # Check manifest metadata via get_entry (metadata removed from audio_tree for batch compatibility)
+            # Check manifest extras via get_entry (extras removed from audio_tree for batch compatibility)
             entry = source.get_entry(i)
             assert entry["filepath"] == f"original{i + 1}.wav"
             assert entry["tags"]["dataset"] == "test"
@@ -366,13 +366,13 @@ def test_grain_dataloader_with_batch_transform():
         print("✓ AudioDataSource items are compatible with AudioTree.batch")
 
 
-def test_manifest_metadata_with_batch_transform():
-    """Metadata arrays from a manifest survive AudioTree.batch."""
+def test_manifest_extras_with_batch_transform():
+    """Extras arrays from a manifest survive AudioTree.batch."""
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
 
-        # Create test data with metadata arrays
+        # Create test data with extras arrays
         np.random.seed(42)
         batch_size = 8
         param_dim = 185
@@ -380,48 +380,48 @@ def test_manifest_metadata_with_batch_transform():
         waveform = np.random.randn(batch_size, 2, 1000).astype(np.float32)
         audio_tree = AudioTree(waveform, 44100)
 
-        # Add metadata arrays that should be preserved through write/read
+        # Add extras arrays that should be preserved through write/read
         audio_tree = audio_tree.replace(
             lufs=np.linspace(-30.0, -10.0, batch_size),
-            metadata={
+            extras={
                 "params": np.random.randn(batch_size, param_dim).astype(np.float32),
                 "confidence": np.linspace(0.5, 1.0, batch_size).astype(np.float32),
             },
         )
 
-        # Write with NPZ manifest (metadata will be saved)
+        # Write with NPZ manifest (extras will be saved)
         with AudioWriter(output_dir) as writer:
             writer.write(audio_tree)
 
-        # Load data back with metadata
+        # Load data back with extras
         source = AudioDataSource.from_writer_output(output_dir)
 
-        # Load items and check metadata is present
+        # Load items and check extras is present
         items = []
         for i in range(len(source)):
             item = source[i]
-            # Check metadata was loaded
-            assert "params" in item.metadata
-            assert "confidence" in item.metadata
+            # Check extras was loaded
+            assert "params" in item.extras
+            assert "confidence" in item.extras
             # Check shapes (should have batch dimension)
-            assert item.metadata["params"].shape == (1, param_dim)
-            assert item.metadata["confidence"].shape == (1,)
+            assert item.extras["params"].shape == (1, param_dim)
+            assert item.extras["confidence"].shape == (1,)
             items.append(item)
 
         # Create batches
         batch1 = AudioTree.batch(items[0:4])
         AudioTree.batch(items[4:8])
 
-        # Check batched metadata
-        assert "params" in batch1.metadata
-        assert batch1.metadata["params"].shape == (4, param_dim)
-        assert "confidence" in batch1.metadata
-        assert batch1.metadata["confidence"].shape == (4,)
+        # Check batched extras
+        assert "params" in batch1.extras
+        assert batch1.extras["params"].shape == (4, param_dim)
+        assert "confidence" in batch1.extras
+        assert batch1.extras["confidence"].shape == (4,)
 
         # Verify values are correct
         expected_confidence_batch1 = np.linspace(0.5, 1.0, 8)[:4]
         assert np.allclose(
-            batch1.metadata["confidence"].squeeze(), expected_confidence_batch1
+            batch1.extras["confidence"].squeeze(), expected_confidence_batch1
         )
 
 
@@ -436,7 +436,7 @@ def test_manifest_with_batch_transform():
         waveform = np.random.randn(8, 2, 1000).astype(np.float32)
         audio_tree = AudioTree(waveform, 44100)
 
-        # Add some metadata
+        # Add some extras
         audio_tree = audio_tree.replace(
             lufs=np.linspace(-30.0, -10.0, 8),
             pitch=np.linspace(60.0, 72.0, 8),
@@ -455,8 +455,8 @@ def test_manifest_with_batch_transform():
         items = []
         for i in range(len(source)):
             item = source[i]
-            # Remove metadata to avoid batching issues
-            item = item.replace(metadata={})
+            # Remove extras to avoid batching issues
+            item = item.replace(extras={})
             items.append(item)
 
         # Create first batch
@@ -506,7 +506,7 @@ if __name__ == "__main__":
     test_get_entry()
     test_grain_integration()
     test_grain_dataloader_with_batch_transform()
-    test_manifest_metadata_with_batch_transform()
+    test_manifest_extras_with_batch_transform()
     test_manifest_with_batch_transform()
     print("All tests passed!")
 
@@ -816,7 +816,7 @@ def test_getitem_substitutes_marked_silence(tmp_path, breakage, policy):
     assert item.waveform.shape == (1, 2, 8000)
     assert item.sample_rate == 8000
     assert not np.any(np.asarray(item.waveform))
-    assert bool(item.metadata[READ_ERROR_KEY][0]) is True
+    assert bool(item.extras[READ_ERROR_KEY][0]) is True
     assert item.filepath[0].endswith("audio_0001.wav")
     # Manifest-side labels survive: only the audio was lost.
     assert float(item.lufs[0]) == pytest.approx(-18.0)
@@ -848,16 +848,16 @@ def test_substituted_and_real_items_batch_together(tmp_path):
 
     batch = AudioTree.batch([source[i] for i in range(len(source))])
     assert batch.waveform.shape == (3, 2, 8000)
-    assert np.asarray(batch.metadata[READ_ERROR_KEY]).tolist() == [False, True, False]
+    assert np.asarray(batch.extras[READ_ERROR_KEY]).tolist() == [False, True, False]
 
 
 def test_getitem_marker_is_absent_under_the_default_policy(tmp_path):
-    """The default policy leaves the metadata as it was before the knob existed."""
+    """The default policy leaves the extras as it was before the knob existed."""
     with AudioWriter(tmp_path) as writer:
         writer.write(AudioTree.create(np.zeros((2, 1, 8000), dtype=np.float32), 8000))
 
     source = AudioDataSource.from_writer_output(tmp_path)
-    assert READ_ERROR_KEY not in source[0].metadata
+    assert READ_ERROR_KEY not in source[0].extras
 
 
 def test_unknown_on_read_error_is_rejected_at_construction(tmp_path):
@@ -894,8 +894,8 @@ def test_silence_substitute_collates_under_resampling(tmp_path):
         items = [source[i] for i in range(len(source))]
 
     real, substitute = items[0], items[1]
-    assert bool(real.metadata[READ_ERROR_KEY][0]) is False
-    assert bool(substitute.metadata[READ_ERROR_KEY][0]) is True
+    assert bool(real.extras[READ_ERROR_KEY][0]) is False
+    assert bool(substitute.extras[READ_ERROR_KEY][0]) is True
     # The substitute carries the target geometry, matching its resampled peers.
     assert substitute.waveform.shape == real.waveform.shape == (1, 2, 16000)
     assert substitute.sample_rate == 16000

@@ -501,23 +501,23 @@ def _check_roll_range(min_seconds: float, max_seconds: float) -> None:
         )
 
 
-def _invalidate_offset(metadata: dict) -> dict:
+def _invalidate_offset(extras: dict) -> dict:
     """Drop a stale source-file ``offset`` after a time shift.
 
-    ``AudioTree.from_file`` records ``metadata["offset"]`` as the source-file
+    ``AudioTree.from_file`` records ``extras["offset"]`` as the source-file
     time (in seconds) of sample 0. Rolling shifts the waveform along the time
     axis, so that recorded offset no longer points at sample 0 and is set to
-    ``None``. Metadata without an ``offset`` key is returned unchanged.
+    ``None``. An extras dict without an ``offset`` key is returned unchanged.
 
     Args:
-        metadata: The AudioTree metadata dict to inspect.
+        extras: The AudioTree extras dict to inspect.
 
     Returns:
-        The metadata dict, with ``offset`` invalidated to ``None`` if present.
+        The extras dict, with ``offset`` invalidated to ``None`` if present.
     """
-    if "offset" not in metadata:
-        return metadata
-    return {**metadata, "offset": None}
+    if "offset" not in extras:
+        return extras
+    return {**extras, "offset": None}
 
 
 def _roll_jax(
@@ -562,9 +562,9 @@ def _roll_jax(
     # zeros out part of the signal, changing it. Either way, rolling moves samples
     # across window boundaries, so ``lufs_windows`` is invalidated below.
     lufs = None if mode == "constant" else audio_tree.lufs
-    metadata = _invalidate_offset(audio_tree.metadata)
+    extras = _invalidate_offset(audio_tree.extras)
     return audio_tree.replace(
-        waveform=rolled_audio, lufs=lufs, lufs_windows=None, metadata=metadata
+        waveform=rolled_audio, lufs=lufs, lufs_windows=None, extras=extras
     )
 
 
@@ -604,9 +604,9 @@ def _roll_np(
     # zeros out part of the signal, changing it. Either way, rolling moves samples
     # across window boundaries, so ``lufs_windows`` is invalidated below.
     lufs = None if mode == "constant" else audio_tree.lufs
-    metadata = _invalidate_offset(audio_tree.metadata)
+    extras = _invalidate_offset(audio_tree.extras)
     return audio_tree.replace(
-        waveform=result, lufs=lufs, lufs_windows=None, metadata=metadata
+        waveform=result, lufs=lufs, lufs_windows=None, extras=extras
     )
 
 

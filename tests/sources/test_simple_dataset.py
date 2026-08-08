@@ -605,7 +605,7 @@ def test_on_read_error_substitutes_marked_silence(kind, policy, restore_permissi
         # Digital silence, so it cannot be mistaken for audio that was there.
         assert not np.any(np.asarray(tree.waveform))
         # ...and it says so in-band, naming the file it stands in for.
-        assert bool(tree.metadata[READ_ERROR_KEY][0]) is True
+        assert bool(tree.extras[READ_ERROR_KEY][0]) is True
         assert tree.filepath == [str(path)]
 
 
@@ -642,7 +642,7 @@ def test_on_read_error_survives_a_whole_epoch_and_batches(policy):
     """A corpus with junk in it iterates to the end and still collates.
 
     Both the good items and the substitutes carry ``read_error``, so
-    ``AudioTree.batch`` -- which requires matching metadata keys -- can stack
+    ``AudioTree.batch`` -- which requires matching extras keys -- can stack
     them, and a caller can count the losses from the batch itself.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -666,7 +666,7 @@ def test_on_read_error_survives_a_whole_epoch_and_batches(policy):
         assert all(item is not None for item in items)
         batch = AudioTree.batch(items)
         assert batch.waveform.shape == (5, 1, 22050)
-        flags = np.asarray(batch.metadata[READ_ERROR_KEY])
+        flags = np.asarray(batch.extras[READ_ERROR_KEY])
         assert flags.tolist() == [False, False, False, True, True]
         assert [Path(p).name for p in batch.filepath[3:]] == ["bad_0.wav", "bad_1.wav"]
 
@@ -699,7 +699,7 @@ def test_on_read_error_substitute_batches_under_loudest_excerpt(policy):
             # find_audio_files sorts, so the good file comes first.
             good, substitute = ds[0], ds[1]
 
-        assert bool(substitute.metadata[READ_ERROR_KEY][0]) is True
+        assert bool(substitute.extras[READ_ERROR_KEY][0]) is True
         # Digital silence measures (near) -inf LUFS: very low, never NaN.
         lufs = float(np.asarray(substitute.lufs).reshape(-1)[0])
         assert not np.isnan(lufs)
@@ -746,7 +746,7 @@ def test_truncated_data_is_not_a_read_error():
             excerpt=ExcerptConfig(strategy="start"),
             on_read_error="skip",
         )
-        assert bool(marked.metadata[READ_ERROR_KEY][0]) is False
+        assert bool(marked.extras[READ_ERROR_KEY][0]) is False
 
 
 def test_on_read_error_rejects_an_unknown_policy():
@@ -789,7 +789,7 @@ def test_on_read_error_needs_a_channel_count_for_multichannel():
             on_read_error="skip",
         )
         assert ds[0].waveform.shape == (1, 2, 22050)
-        assert bool(ds[0].metadata[READ_ERROR_KEY][0]) is True
+        assert bool(ds[0].extras[READ_ERROR_KEY][0]) is True
         assert ds[1].waveform.shape == (1, 2, 22050)
 
 

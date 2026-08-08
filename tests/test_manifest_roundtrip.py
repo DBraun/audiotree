@@ -46,11 +46,11 @@ def test_array_valued_string_column_round_trips_direct(tmp_path):
     """A ``<U`` column of per-row string arrays comes back as equal sub-arrays."""
     path = tmp_path / "manifest.npz"
     rows = [np.array(["alice", "bob"]), np.array(["carol", "dan"])]
-    _manifest.write(path, {"metadata_speakers": rows}, len(rows))
+    _manifest.write(path, {"extras_speakers": rows}, len(rows))
 
     entries = _manifest.read_entries(path)
     for entry, row in zip(entries, rows):
-        cell = entry["metadata_speakers"]
+        cell = entry["extras_speakers"]
         assert isinstance(cell, np.ndarray), (
             f"got {type(cell).__name__}, not a sub-array"
         )
@@ -62,11 +62,11 @@ def test_array_valued_bytes_column_round_trips_direct(tmp_path):
     """A ``|S`` column of per-row bytes arrays comes back as equal sub-arrays."""
     path = tmp_path / "manifest.npz"
     rows = [np.array([b"x", b"yy"]), np.array([b"zzz", b"w"])]
-    _manifest.write(path, {"metadata_raw": rows}, len(rows))
+    _manifest.write(path, {"extras_raw": rows}, len(rows))
 
     entries = _manifest.read_entries(path)
     for entry, row in zip(entries, rows):
-        cell = entry["metadata_raw"]
+        cell = entry["extras_raw"]
         assert isinstance(cell, np.ndarray), (
             f"got {type(cell).__name__}, not a sub-array"
         )
@@ -79,26 +79,26 @@ def test_scalar_string_and_bytes_cells_still_decode_to_python(tmp_path):
     path = tmp_path / "manifest.npz"
     _manifest.write(
         path,
-        {"filepath": ["a.wav", "b.wav"], "metadata_blob": [b"one", b"two"]},
+        {"filepath": ["a.wav", "b.wav"], "extras_blob": [b"one", b"two"]},
         2,
     )
 
     entries = _manifest.read_entries(path)
     assert entries[0]["filepath"] == "a.wav"
     assert isinstance(entries[0]["filepath"], str)
-    assert entries[1]["metadata_blob"] == b"two"
-    assert isinstance(entries[1]["metadata_blob"], bytes)
+    assert entries[1]["extras_blob"] == b"two"
+    assert isinstance(entries[1]["extras_blob"], bytes)
 
 
 def test_array_valued_string_column_round_trips_end_to_end():
-    """Array-valued string metadata survives AudioWriter -> read_entries."""
+    """Array-valued string extras survives AudioWriter -> read_entries."""
     speakers = np.array([["alice", "bob"], ["carol", "dan"]])
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree.create(
             np.zeros((2, 1, 8), dtype=np.float32),
             sample_rate=16000,
-            metadata={"speakers": speakers},
+            extras={"speakers": speakers},
         )
         with AudioWriter(output_dir, write_audio=False) as writer:
             writer.write(tree)
@@ -106,21 +106,21 @@ def test_array_valued_string_column_round_trips_end_to_end():
         entries = _manifest.read_entries(output_dir / "manifest.npz")
 
     for entry, expected in zip(entries, speakers):
-        cell = entry["metadata_speakers"]
+        cell = entry["extras_speakers"]
         assert isinstance(cell, np.ndarray)
         assert cell.dtype.kind == "U"
         np.testing.assert_array_equal(cell, expected)
 
 
 def test_array_valued_bytes_column_round_trips_end_to_end():
-    """Array-valued bytes metadata survives AudioWriter -> read_entries."""
+    """Array-valued bytes extras survives AudioWriter -> read_entries."""
     raw = np.array([[b"x", b"yy"], [b"zzz", b"w"]])
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
         tree = AudioTree.create(
             np.zeros((2, 1, 8), dtype=np.float32),
             sample_rate=16000,
-            metadata={"raw": raw},
+            extras={"raw": raw},
         )
         with AudioWriter(output_dir, write_audio=False) as writer:
             writer.write(tree)
@@ -128,7 +128,7 @@ def test_array_valued_bytes_column_round_trips_end_to_end():
         entries = _manifest.read_entries(output_dir / "manifest.npz")
 
     for entry, expected in zip(entries, raw):
-        cell = entry["metadata_raw"]
+        cell = entry["extras_raw"]
         assert isinstance(cell, np.ndarray)
         assert cell.dtype.kind == "S"
         np.testing.assert_array_equal(cell, expected)
@@ -174,12 +174,12 @@ def test_python_float_round_trips_without_rounding(tmp_path):
 def test_numpy_int32_scalar_keeps_its_dtype(tmp_path):
     """An explicit ``np.int32`` sample must stay int32 -- widening is for bare ints."""
     path = tmp_path / "manifest.npz"
-    _manifest.write(path, {"metadata_narrow": [np.int32(5)]}, 1)
+    _manifest.write(path, {"extras_narrow": [np.int32(5)]}, 1)
 
     columns = _manifest.read_columns(path)
-    assert columns.columns["metadata_narrow"].dtype == np.int32
+    assert columns.columns["extras_narrow"].dtype == np.int32
     entries = _manifest.read_entries(path)
-    assert entries[0]["metadata_narrow"] == 5
+    assert entries[0]["extras_narrow"] == 5
 
 
 # --- m10: bool/numeric columns reject non-homogeneous contaminants ---
@@ -211,19 +211,23 @@ def test_uniform_bool_int_float_columns_still_round_trip(tmp_path):
     path = tmp_path / "manifest.npz"
     _manifest.write(
         path,
-        {"flag": [True, False], "count": [1, 2], "amount": [1.5, 2.5]},
+        {
+            "extras_flag": [True, False],
+            "extras_count": [1, 2],
+            "extras_amount": [1.5, 2.5],
+        },
         2,
     )
 
     columns = _manifest.read_columns(path)
-    assert columns.columns["flag"].dtype == np.bool_
-    assert columns.columns["count"].dtype == np.int64
-    assert columns.columns["amount"].dtype == np.float64
+    assert columns.columns["extras_flag"].dtype == np.bool_
+    assert columns.columns["extras_count"].dtype == np.int64
+    assert columns.columns["extras_amount"].dtype == np.float64
 
     entries = _manifest.read_entries(path)
-    assert [e["flag"] for e in entries] == [True, False]
-    assert [e["count"] for e in entries] == [1, 2]
-    assert [e["amount"] for e in entries] == [1.5, 2.5]
+    assert [e["extras_flag"] for e in entries] == [True, False]
+    assert [e["extras_count"] for e in entries] == [1, 2]
+    assert [e["extras_amount"] for e in entries] == [1.5, 2.5]
 
 
 # --- m9: trailing NULs in string/bytes cells are rejected, not truncated ---
@@ -248,13 +252,13 @@ def test_strings_and_bytes_without_trailing_nul_unaffected(tmp_path):
     path = tmp_path / "manifest.npz"
     _manifest.write(
         path,
-        {"s": ["a\x00b", "plain"], "b": [b"a\x00b", b"plain"]},
+        {"extras_s": ["a\x00b", "plain"], "extras_b": [b"a\x00b", b"plain"]},
         2,
     )
 
     entries = _manifest.read_entries(path)
-    assert [e["s"] for e in entries] == ["a\x00b", "plain"]
-    assert [e["b"] for e in entries] == [b"a\x00b", b"plain"]
+    assert [e["extras_s"] for e in entries] == ["a\x00b", "plain"]
+    assert [e["extras_b"] for e in entries] == [b"a\x00b", b"plain"]
 
 
 # --- n5: a column literally named 'tags' is reserved ---
@@ -312,14 +316,14 @@ def test_float32_embedding_rows_round_trip_with_dtype(tmp_path):
         np.array([0.1, 0.2, 0.3], dtype=np.float32),
         np.array([0.4, 0.5, 0.6], dtype=np.float32),
     ]
-    _manifest.write(path, {"metadata_embedding": rows}, len(rows))
+    _manifest.write(path, {"extras_embedding": rows}, len(rows))
 
     columns = _manifest.read_columns(path)
-    assert columns.columns["metadata_embedding"].dtype == np.float32
+    assert columns.columns["extras_embedding"].dtype == np.float32
 
     entries = _manifest.read_entries(path)
     for entry, row in zip(entries, rows):
-        cell = entry["metadata_embedding"]
+        cell = entry["extras_embedding"]
         assert isinstance(cell, np.ndarray)
         assert cell.dtype == np.float32
         np.testing.assert_array_equal(cell, row)
@@ -331,15 +335,15 @@ def test_array_rows_of_same_kind_promote_to_the_widest_width(tmp_path):
     path = tmp_path / "manifest.npz"
     int_rows = [np.array([1, 2], dtype=np.int32), np.array([3, 2**40])]
     str_rows = [np.array(["ab", "c"]), np.array(["longer", "strings!"])]
-    _manifest.write(path, {"n": int_rows, "s": str_rows}, 2)
+    _manifest.write(path, {"extras_n": int_rows, "extras_s": str_rows}, 2)
 
     columns = _manifest.read_columns(path)
-    assert columns.columns["n"].dtype == np.int64
-    assert columns.columns["s"].dtype.kind == "U"
+    assert columns.columns["extras_n"].dtype == np.int64
+    assert columns.columns["extras_s"].dtype.kind == "U"
 
     entries = _manifest.read_entries(path)
-    np.testing.assert_array_equal(entries[1]["n"], [3, 2**40])
-    np.testing.assert_array_equal(entries[1]["s"], ["longer", "strings!"])
+    np.testing.assert_array_equal(entries[1]["extras_n"], [3, 2**40])
+    np.testing.assert_array_equal(entries[1]["extras_s"], ["longer", "strings!"])
 
 
 def test_string_list_row_with_trailing_nul_raises(tmp_path):
@@ -359,3 +363,109 @@ def test_bytes_list_row_with_trailing_nul_raises(tmp_path):
     rows = [np.array([b"ok", b"fine"]), [b"bad\x00", b"fine"]]
     with pytest.raises(ValueError, match=r"column 'b'.*NUL"):
         _manifest.write(path, {"b": rows}, 2)
+
+
+# --- strict column schema: unrecognized columns fail by name at read time ---
+
+
+def _write_dataset_with_stray_column(directory: Path) -> Path:
+    """Write a real one-item dataset, then smuggle a stray column into its NPZ.
+
+    The writer can only produce schema-valid manifests, so the stray key is
+    spliced in after the fact -- exactly the shape of corruption (or of a file
+    from an incompatible format revision) the reader must refuse.
+    """
+    tree = AudioTree.create(np.zeros((1, 1, 80), dtype=np.float32), 8000)
+    with AudioWriter(directory) as writer:
+        writer.write(tree)
+    manifest_path = directory / "manifest.npz"
+    with np.load(manifest_path, allow_pickle=False) as npz:
+        payload = dict(npz)
+    payload["bogus_col"] = np.array([1])
+    with open(manifest_path, "wb") as fh:
+        np.savez(fh, **payload)
+    return manifest_path
+
+
+def test_unrecognized_column_is_rejected_by_name(tmp_path):
+    """The format's column schema is closed: no consumer routes an unknown
+    column anywhere, so it would silently vanish from every loaded tree.
+    ``read_columns`` refuses it by name instead."""
+    path = tmp_path / "manifest.npz"
+    _manifest.write(path, {"extras_ok": [1.0], "bogus_col": [1]}, 1)
+    with pytest.raises(ValueError, match=r"unrecognized column.*'bogus_col'"):
+        _manifest.read_columns(path)
+    with pytest.raises(ValueError, match=r"unrecognized column.*'bogus_col'"):
+        _manifest.read_entries(path)
+
+
+def test_mask_of_unrecognized_column_is_rejected(tmp_path):
+    """A presence mask names its column, so a stray ``__mask_`` key is held to
+    the same schema as the column it claims to describe."""
+    path = tmp_path / "manifest.npz"
+    payload = _manifest.encode({"extras_x": [1.0, 2.0]}, 2)
+    payload[f"{_manifest.MASK_PREFIX}bogus_col"] = np.array([True, False])
+    with open(path, "wb") as fh:
+        np.savez(fh, **payload)
+    with pytest.raises(ValueError, match=r"unrecognized column.*'bogus_col'"):
+        _manifest.read_columns(path)
+
+
+def test_mask_of_absent_column_is_rejected(tmp_path):
+    """A mask for a schema-valid name that is not a column of this manifest is
+    still refused: it describes nothing."""
+    path = tmp_path / "manifest.npz"
+    payload = _manifest.encode({"extras_x": [1.0, 2.0]}, 2)
+    payload[f"{_manifest.MASK_PREFIX}lufs"] = np.array([True, False])
+    with open(path, "wb") as fh:
+        np.savez(fh, **payload)
+    with pytest.raises(
+        ValueError, match=r"presence mask for 'lufs', which is not a column"
+    ):
+        _manifest.read_columns(path)
+
+
+def test_from_manifest_goes_through_the_strict_schema(tmp_path):
+    """``AudioTree.from_manifest`` reads via the shared parser, so a stray
+    column fails there too rather than being silently dropped."""
+    manifest_path = _write_dataset_with_stray_column(tmp_path)
+    with pytest.raises(ValueError, match=r"unrecognized column.*'bogus_col'"):
+        AudioTree.from_manifest(manifest_path)
+
+
+def test_audio_data_source_goes_through_the_strict_schema(tmp_path):
+    """``AudioDataSource`` reads via the shared parser as well."""
+    from audiotree.sources import AudioDataSource
+
+    manifest_path = _write_dataset_with_stray_column(tmp_path)
+    with pytest.raises(ValueError, match=r"unrecognized column.*'bogus_col'"):
+        AudioDataSource(manifest_path)
+
+
+def test_every_writer_column_passes_the_strict_schema(tmp_path):
+    """The reader's allow-list must cover everything the writer can record:
+    every bookkeeping column, every label field, filepath, extras and tags."""
+    from audiotree.core import LABEL_FIELDS
+
+    tree = AudioTree.create(
+        np.zeros((2, 1, 80), dtype=np.float32),
+        8000,
+        lufs=np.array([-20.0, -18.0], dtype=np.float32),
+        lufs_windows=np.zeros((2, 1), dtype=np.float32),
+        pitch=np.array([60, 61], dtype=np.int16),
+        velocity=np.array([100, 99], dtype=np.int16),
+        note_duration=np.array([0.5, 0.6], dtype=np.float32),
+        codes=np.zeros((2, 2, 4), dtype=np.int32),
+        latents=np.zeros((2, 3), dtype=np.float32),
+        extras={"energy": np.array([0.1, 0.2], dtype=np.float32)},
+        filepath=["a.wav", "b.wav"],
+    )
+    with AudioWriter(tmp_path, include_timestamp=True) as writer:
+        writer.write(tree, tags={"split": "train"})
+
+    columns = _manifest.read_columns(tmp_path / "manifest.npz").columns
+    assert set(LABEL_FIELDS) <= set(columns)
+    assert "extras_energy" in columns
+    assert "tags_split" in columns
+    assert "timestamp" in columns
+    assert "filepath" in columns

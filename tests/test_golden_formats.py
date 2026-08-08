@@ -65,6 +65,10 @@ def test_golden_tree_header():
     assert manifest["leaves"]["audio.waveform"]["dtype"] == "float32"
     assert manifest["leaves"]["audio.waveform"]["shape_per_sample"] == [1, 8]
     assert manifest["leaves"]["audio.waveform"]["file"] == "audio.waveform.bin"
+    # The AudioTree node's extras dict is stored under the children key
+    # "extras" -- the on-disk spelling is part of the format contract.
+    audio_children = manifest["structure"]["children"]["audio"]["children"]
+    assert sorted(audio_children) == ["extras", "waveform"]
 
 
 def test_golden_tree_reads_with_expected_values():
@@ -121,6 +125,14 @@ def test_golden_manifest_stores_no_object_arrays():
     assert all(array.dtype != object for array in data.values())
 
 
+def test_golden_manifest_stores_extras_under_their_prefix():
+    """Per-item ``AudioTree.extras`` land as ``extras_<key>`` columns -- the
+    on-disk spelling is part of the format contract."""
+    data = load_manifest(MANIFEST_DIR / "manifest.npz")
+    assert data["extras_energy"].dtype == np.float32
+    np.testing.assert_allclose(data["extras_energy"], [0.5, 0.25, 0.125])
+
+
 def test_golden_manifest_records_a_lossless_subtype():
     """The committed audio is float WAV, and the manifest says so."""
     data = load_manifest(MANIFEST_DIR / "manifest.npz")
@@ -142,10 +154,12 @@ def test_golden_manifest_masks_the_absent_tag():
 
 
 @pytest.mark.parametrize(
-    "index,peak,pitch,velocity",
-    [(0, 0.25, 60, 100), (1, 0.5, 61, 99), (2, 0.75, 62, 98)],
+    "index,peak,pitch,velocity,energy",
+    [(0, 0.25, 60, 100, 0.5), (1, 0.5, 61, 99, 0.25), (2, 0.75, 62, 98, 0.125)],
 )
-def test_golden_manifest_reads_with_expected_values(index, peak, pitch, velocity):
+def test_golden_manifest_reads_with_expected_values(
+    index, peak, pitch, velocity, energy
+):
     """Audio, dtypes and per-item scalars all survive the committed manifest."""
     source = AudioDataSource.from_writer_output(MANIFEST_DIR)
     assert len(source) == 3
@@ -160,6 +174,10 @@ def test_golden_manifest_reads_with_expected_values(index, peak, pitch, velocity
     np.testing.assert_array_equal(item.velocity, [velocity])
     assert item.pitch.dtype == np.int32
     assert item.velocity.dtype == np.int32
+
+    # The extras_energy column comes back under tree.extras, batch axis intact.
+    np.testing.assert_allclose(item.extras["energy"], [energy])
+    assert item.extras["energy"].dtype == np.float32
 
 
 def test_golden_manifest_batches_without_corruption():
