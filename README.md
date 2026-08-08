@@ -145,7 +145,7 @@ Upgrading from 0.2.x is a breaking change; see the
    author = {Braun, David},
    title = {{AudioTree}},
    url = {https://github.com/DBraun/audiotree},
-   version = {1.0.0rc2},
+   version = {1.0.0rc3},
    year = {2026}
 }
 ```
