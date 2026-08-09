@@ -269,6 +269,11 @@ class AudioDataSource(grain.RandomAccessDataSource):
             },
             "filepath": entry.get("filepath") or str(audio_path),
         }
+        # A real load restores the recorded source group into its metadata
+        # container; the substitute must match structurally or the two refuse
+        # to batch together.
+        if entry.get("source") is not None:
+            tree_kwargs["source"] = entry["source"]
         for field_name in LABEL_FIELDS:
             if field_name in entry:
                 tree_kwargs[field_name] = _with_batch_axis(entry[field_name])
@@ -325,12 +330,14 @@ class AudioDataSource(grain.RandomAccessDataSource):
         # Check if audio files were actually written
         files_written = entry.get("files_written", True)
 
-        # The original source path is stored as a top-level ``filepath`` column
-        # (a decoded string), distinct from the on-disk output ``filename``.
-        # Restore it so ``.filepath`` reports where the item came from, matching
-        # AudioTree.from_manifest. When the tree was written without a source
-        # path the column is absent and ``.filepath`` stays unset.
+        # The provenance is stored as top-level ``filepath`` / ``source``
+        # columns (decoded strings), distinct from the on-disk output
+        # ``filename``. Restore them into the metadata container so
+        # ``.filepath`` / ``.source`` report where the item came from, matching
+        # AudioTree.from_manifest. When the tree was written without them the
+        # columns are absent and the properties stay unset.
         source_filepath = entry.get("filepath")
+        source_group = entry.get("source")
 
         if files_written:
             # Audio files exist - load from disk
@@ -349,6 +356,8 @@ class AudioDataSource(grain.RandomAccessDataSource):
             # Prefer the recorded source path over the output audio path.
             if source_filepath is not None:
                 tree_kwargs["filepath"] = source_filepath
+            if source_group is not None:
+                tree_kwargs["source"] = source_group
 
             # Add AudioTree fields dynamically from manifest, each with an
             # explicit leading batch axis. ``from_file`` only adds one to a
@@ -389,9 +398,11 @@ class AudioDataSource(grain.RandomAccessDataSource):
                 "extras": extras,
             }
 
-            # Restore the recorded source path (there is no audio file here).
+            # Restore the recorded provenance (there is no audio file here).
             if source_filepath is not None:
                 tree_kwargs["filepath"] = source_filepath
+            if source_group is not None:
+                tree_kwargs["source"] = source_group
 
             # Add AudioTree fields dynamically from manifest, each with an
             # explicit leading batch axis (see the files_written branch above).

@@ -22,7 +22,8 @@ transform them.
 - ``lufs`` / ``lufs_windows`` — loudness, filled on demand, ``(B,)`` / ``(B, Windows)``
 - ``pitch``, ``velocity``, ``note_duration`` — optional per-item labels (MIDI pitch/velocity, note length), ``(B,)`` each
 - ``codes`` / ``latents`` — neural-codec tokens or latent embeddings, ``(B, ...)``
-- ``extras`` — a dict of your own ``(B, ...)`` arrays (source paths land in ``extras["filepath"]``)
+- ``extras`` — a dict of your own ``(B, ...)`` arrays that batch with the audio
+- ``metadata`` — library-managed provenance (the encoded ``filepath`` / ``source``); read it through the decoded ``.filepath`` and ``.source`` properties
 
 AudioTree integrates with `Grain`_ to provide complete data pipelines. Load audio from directories,
 apply balanced sampling across groups, and chain augmentations:

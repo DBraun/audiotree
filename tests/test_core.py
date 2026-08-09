@@ -24,7 +24,8 @@ def test_audiotree_create_with_filepaths():
         5,
     )  # Should be expanded to (batch, channels, samples)
     assert tree1.filepath == ["test1.wav"]
-    assert "filepath" in tree1.extras
+    assert "filepath" in tree1.metadata
+    assert tree1.extras == {}  # provenance never lands in the user dict
 
     # Test with 2D audio data and single filepath Path
     audio_2d = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])  # 2 channels, 3 samples
@@ -50,7 +51,7 @@ def test_audiotree_create_with_filepaths():
 
     assert tree4.waveform.shape == (1, 1, 5)
     assert tree4.filepath == []  # Empty list when no filepaths provided
-    assert "filepath" not in tree4.extras
+    assert "filepath" not in tree4.metadata
 
 
 def test_audiotree_create_with_source():
@@ -59,21 +60,22 @@ def test_audiotree_create_with_source():
     audio_1d = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
     tree1 = AudioTree.create(audio_1d, 44100, source="music")
     assert tree1.source == ["music"]
-    assert "source" in tree1.extras
+    assert "source" in tree1.metadata
+    assert tree1.extras == {}
 
     # A list gives one source name per batch item (unlike from_file).
     audio_batch = np.zeros((3, 1, 4))  # (batch=3, channels, samples)
     tree2 = AudioTree.create(audio_batch, 44100, source=["drums", "vocal", "impulse"])
     assert tree2.source == ["drums", "vocal", "impulse"]
 
-    # No source -> no extras key, empty list (unchanged behavior).
+    # No source -> no metadata key, empty list (unchanged behavior).
     tree3 = AudioTree.create(audio_1d, 44100)
     assert tree3.source == []
-    assert "source" not in tree3.extras
+    assert "source" not in tree3.metadata
 
 
 def test_filepath_too_long_raises():
-    """Filepaths longer than the extras limit raise instead of truncating."""
+    """Filepaths longer than the encoding limit raise instead of truncating."""
     from audiotree.core import _str_max_length
 
     audio = np.zeros((1, 1, 5))
@@ -85,7 +87,7 @@ def test_filepath_too_long_raises():
 
     # One character over the limit raises rather than silently truncating.
     too_long = "a" * (_str_max_length + 1)
-    with pytest.raises(ValueError, match="exceeds the extras encoding limit"):
+    with pytest.raises(ValueError, match="exceeds the provenance encoding limit"):
         AudioTree.create(audio, 44100, filepath=too_long)
 
 
@@ -259,7 +261,7 @@ def test_provenance_decodes_at_rank_4():
     assert tree.filepath == ["f0.wav", "f1.wav", "f2.wav", "f3.wav"]
 
     mini = tree.reshape_mini_batches(2)
-    assert mini.extras["filepath"].shape == (2, 2, 1024)
+    assert mini.metadata["filepath"].shape == (2, 2, 1024)
     # Previously a ValueError from NumPy ("truth value of an array ... is
     # ambiguous"): the decoder assumed the leading axis was the batch.
     assert mini.filepath == [["f0.wav", "f1.wav"], ["f2.wav", "f3.wav"]]
@@ -279,7 +281,7 @@ def test_provenance_without_leading_axis_raises():
 
     encoded = AudioTree._encode_filepaths(["only.wav"])[0]  # (1024,), no batch axis
     assert encoded.shape == (_str_max_length,)
-    tree = AudioTree(np.zeros((1, 1, 16)), 16000, extras={"filepath": encoded})
+    tree = AudioTree(np.zeros((1, 1, 16)), 16000, metadata={"filepath": encoded})
     with pytest.raises(ValueError, match="must have a leading batch axis"):
         tree.filepath
 
@@ -362,7 +364,7 @@ def test_create_rejects_provenance_list_of_wrong_length():
 
     # A single value still broadcasts across the whole batch.
     bc = AudioTree.create(waveform, 16000, filepath="one.wav")
-    assert bc.extras["filepath"].shape[0] == 4
+    assert bc.metadata["filepath"].shape[0] == 4
     assert bc.filepath == ["one.wav"] * 4
 
 
@@ -397,9 +399,10 @@ def test_audiotree_create_extras_handling():
         waveform, sample_rate, extras=existing_extras, filepath="test.wav"
     )
 
-    # Should preserve existing extras and add filepath
-    assert tree1.extras["custom_key"] == "custom_value"
-    assert "filepath" in tree1.extras
+    # Should preserve existing extras; the filepath goes to metadata, so the
+    # user's dict is exactly what was passed in.
+    assert tree1.extras == {"custom_key": "custom_value"}
+    assert "filepath" in tree1.metadata
     assert tree1.filepath == ["test.wav"]
 
     # Test that original extras dict is not modified
@@ -407,7 +410,8 @@ def test_audiotree_create_extras_handling():
 
     # Test with filepaths but no existing extras
     tree2 = AudioTree.create(waveform, sample_rate, filepath="test2.wav")
-    assert "filepath" in tree2.extras
+    assert "filepath" in tree2.metadata
+    assert tree2.extras == {}
     assert tree2.filepath == ["test2.wav"]
 
 
@@ -1165,7 +1169,7 @@ def test_create_broadcasts_a_single_name_over_the_batch(key):
     tree = AudioTree.create(waveform, 44100, **{key: "music.wav"})
 
     assert getattr(tree, key) == ["music.wav"] * 4
-    assert tree.extras[key].shape[0] == 4
+    assert tree.metadata[key].shape[0] == 4
     assert getattr(tree[2], key) == ["music.wav"]
     assert getattr(tree[1:], key) == ["music.wav"] * 3
 
@@ -1173,7 +1177,7 @@ def test_create_broadcasts_a_single_name_over_the_batch(key):
     per_item = AudioTree.create(waveform, 44100, **{key: list("abcd")})
     assert getattr(per_item, key) == list("abcd")
     single = AudioTree.create(np.zeros((1, 1, 8)), 44100, **{key: "one.wav"})
-    assert single.extras[key].shape[0] == 1
+    assert single.metadata[key].shape[0] == 1
 
 
 def test_create_broadcasts_over_token_only_batches():

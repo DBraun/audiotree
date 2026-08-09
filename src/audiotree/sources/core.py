@@ -259,7 +259,7 @@ def _load_excerpt(
             "symmetric" (mirror with edge), "wrap" (circular), or None (no padding).
         excerpt: Which part of the file to take; see :class:`ExcerptConfig`.
             Defaults to a random offset.
-        source: Optional source group name (e.g., "music", "speech") to store in extras.
+        source: Optional source group name (e.g., "music", "speech") stored as provenance.
         channels: Expected channel count. A file with a different count raises,
             naming the file, instead of letting the mismatch surface as an
             opaque shape error at batch time. ``None`` disables the check.
@@ -482,7 +482,7 @@ def create_audio_dataset(
         extensions: List of audio file extensions to search for. Defaults to [".wav", ".flac"].
         excerpt: Which part of each file to take; see :class:`ExcerptConfig`.
             Defaults to a uniformly random offset.
-        source: Optional source group name (e.g., "music", "speech") to store in extras.
+        source: Optional source group name (e.g., "music", "speech") stored as provenance.
             If None, no ``source`` entry is added to extras.
         channels: Expected channel count of every file, so that a mixed-channel
             corpus fails at load time with the offending filename instead of at
@@ -686,11 +686,11 @@ def _stamp_source(tree: AudioTree | None, group_name: str) -> AudioTree | None:
     File-based groups get their ``source`` from
     :func:`create_audio_dataset`'s ``source=`` argument, but a pre-built
     ``datasets`` entry (built with the default ``source=None``) carries no such
-    key. :meth:`AudioTree.batch` requires every item in a batch to expose the
-    same extras keys, so a batch spanning a file group and a pre-built group
-    would fail its pytree check on the missing ``source`` -- intermittently,
-    since a single-group batch collates fine. Mapping this over each pre-built
-    dataset gives every group one consistent ``source`` schema.
+    provenance. :meth:`AudioTree.batch` requires every item in a batch to
+    expose the same ``metadata`` keys, so a batch spanning a file group and a
+    pre-built group would fail its pytree check on the missing ``source`` --
+    intermittently, since a single-group batch collates fine. Mapping this over
+    each pre-built dataset gives every group one consistent ``source`` schema.
 
     The group name the caller chose *here* wins, overwriting any ``source`` the
     dataset already carried -- exactly as a file group's name overrides whatever
@@ -703,7 +703,7 @@ def _stamp_source(tree: AudioTree | None, group_name: str) -> AudioTree | None:
         return None
     batch_size = _leading_axis_size(tree.waveform, tree.codes, tree.latents)
     encoded = AudioTree._encode_filepaths([group_name] * batch_size)
-    return tree.replace(extras={**tree.extras, "source": encoded})
+    return tree.replace(metadata={**tree.metadata, "source": encoded})
 
 
 def create_balanced_audio_dataset(
@@ -749,7 +749,7 @@ def create_balanced_audio_dataset(
             These datasets will be mixed with file-based sources. Useful for combining
             different data sources or including pre-processed datasets. Each item of a
             pre-built dataset is stamped with ``source=`` its group name (overwriting any
-            ``source`` it already carried), so it exposes the same extras schema as the
+            ``source`` it already carried), so it exposes the same provenance schema as the
             file-based groups and the two collate together under :meth:`AudioTree.batch`.
             IMPORTANT: Pre-constructed datasets MUST already be repeated (call `.repeat()`
             before passing them) to ensure infinite sampling. If a finite dataset is passed,
@@ -981,7 +981,7 @@ def create_balanced_audio_dataset(
                 pad_mode=pad_mode,
                 extensions=extensions,
                 excerpt=excerpt,
-                source=group_name,  # Set source extras to group name
+                source=group_name,  # Stamp provenance with the group name
                 channels=channels,
                 on_read_error=on_read_error,
             )

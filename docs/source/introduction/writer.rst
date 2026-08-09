@@ -84,16 +84,31 @@ tokens — cached next to (or instead of) the waveform and read back later as a
 zero-copy memmap slice via :class:`~audiotree.sources.TreeDataSource`.
 
 .. note::
-   **Two different "metadata"s, one name kept.** The AudioTree field for per-item
-   payload arrays is called ``extras`` — it holds data that batches and trains
-   *with* the audio (labels, embeddings, provenance), and TreeWriter stores each
-   entry as its own leaf under ``extras.<key>``. Separately,
-   ``TreeWriter(metadata=...)`` accepts true *dataset-level* metadata — free-form
-   facts about the whole render (a description, a git commit, a source corpus) —
-   stored once under the manifest's top-level ``"metadata"`` key and read back
-   with :meth:`~audiotree.sources.TreeDataSource.get_metadata`. Only the per-item
-   field was renamed; the dataset-level parameter, manifest key, and reader keep
-   the name ``metadata``, which now unambiguously means data *about* the dataset.
+   **Three named concepts, one word "metadata".** An AudioTree carries two
+   per-item dicts that TreeWriter serializes as separate children, and the
+   writer itself takes a third, unrelated ``metadata=`` parameter:
+
+   * ``extras`` — *your* per-item payload: arrays that batch and train **with**
+     the audio (labels, embeddings, features). TreeWriter stores each entry as
+     its own leaf under ``extras.<key>``, and the namespace stays yours — the
+     library plants only the documented plain-array keys there (``offset``,
+     ``read_error``, ``codec_scale``), never ``filepath`` or ``source``.
+   * ``metadata`` — the *library's* per-item provenance: the encoded
+     ``filepath`` and ``source`` arrays recording where each item came from.
+     You never index this container directly — pass ``filepath=`` /
+     ``source=`` to :meth:`~audiotree.AudioTree.create` and read the decoded
+     ``.filepath`` / ``.source`` properties. TreeWriter stores it as a
+     ``metadata`` node holding exactly those two leaves; the schema is closed,
+     so a ``metadata`` node containing any other key is rejected by name at
+     read.
+   * ``TreeWriter(metadata=...)`` — true *dataset-level* metadata: free-form
+     facts about the whole render (a description, a git commit, a source
+     corpus), stored once under the manifest's top-level ``"metadata"`` key and
+     read back with :meth:`~audiotree.sources.TreeDataSource.get_metadata`.
+
+   The split is what makes each name honest: ``extras`` is payload that trains
+   with the audio, per-item ``metadata`` is data *about* the audio (where it
+   came from), and the writer's ``metadata=`` is data about the dataset.
 
 .. note::
    :class:`~audiotree.sources.TreeDataSource` validates the dataset when you
@@ -312,7 +327,7 @@ actually train on. Two knobs keep such datasets cheap:
 AudioWriter
 -----------
 
-The :class:`~audiotree.writer.AudioWriter` class writes AudioTree objects as individual audio files with automatic manifest generation. This is useful for creating datasets, exporting processed audio, and maintaining organized collections of audio files with their associated metadata.
+The :class:`~audiotree.writer.AudioWriter` class writes AudioTree objects as individual audio files with automatic manifest generation. This is useful for creating datasets, exporting processed audio, and maintaining organized collections of audio files with their associated per-item records.
 
 Basic Usage
 ~~~~~~~~~~~
@@ -345,7 +360,7 @@ AudioWriter sequentially writes AudioTree batches to disk, automatically handlin
 Manifest Formats
 ~~~~~~~~~~~~~~~~
 
-AudioWriter generates manifests in NPZ format to track written files and their metadata:
+AudioWriter generates manifests in NPZ format to track written files and their per-item columns:
 
 NPZ Format
 ^^^^^^^^^^
@@ -415,11 +430,15 @@ The manifest will contain:
   soundfile subtype each item was actually encoded with (absent for a
   ``write_audio=False`` run, where nothing was encoded)
 - **AudioTree fields**: ``lufs``, ``lufs_windows``, ``pitch``, ``velocity``,
-  ``note_duration``, ``codes``, ``latents``, and the source ``filepath``
+  ``note_duration``, ``codes``, and ``latents``
+- **Provenance columns**: ``filepath`` and ``source`` — two dedicated
+  bookkeeping columns recording where each item came from, mirroring the
+  ``.filepath`` / ``.source`` properties
 - **Custom tags**: Any additional metadata passed via the ``tags`` parameter,
   stored as ``tags_*`` columns
 - **Extras arrays**: every non-nested ``extras`` entry, as an ``extras_*``
-  column
+  column — this namespace is purely user payload; the library plants no
+  columns of its own there
 
 A column that some rows lack is stored with a presence mask, so a missing value is
 genuinely *absent* on read-back rather than standing in as a sentinel like ``-1``,
@@ -685,8 +704,9 @@ predicate (evaluated per manifest entry) selects a subset at load time:
    :class:`~audiotree.sources.AudioDataSource` (above) is instead a Grain
    ``RandomAccessDataSource`` that yields one item at a time in manifest order, for
    feeding a pipeline. ``from_manifest`` restores the ``extras_*`` arrays, the
-   label fields (``lufs``, ``pitch``, ``codes``, …), and the source ``filepath``
-   column — so ``loaded.filepath`` matches the paths you wrote.
+   label fields (``lufs``, ``pitch``, ``codes``, …), and the ``filepath`` /
+   ``source`` provenance columns — so ``loaded.filepath`` and ``loaded.source``
+   match what you wrote.
 
 Extras Flow Example
 ~~~~~~~~~~~~~~~~~~~

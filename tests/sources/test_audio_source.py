@@ -851,6 +851,42 @@ def test_substituted_and_real_items_batch_together(tmp_path):
     assert np.asarray(batch.extras[READ_ERROR_KEY]).tolist() == [False, True, False]
 
 
+def test_substitute_matches_provenance_of_real_items(tmp_path):
+    """With filepath/source columns in the manifest, a silence substitute
+    reconstructs the same metadata container as a real load -- or the pytree
+    structures diverge and the batch fails far from the broken file."""
+    tree = AudioTree.create(
+        np.random.randn(3, 1, 8000).astype(np.float32),
+        sample_rate=8000,
+        filepath=[f"origin_{i}.wav" for i in range(3)],
+        source=["music", "speech", "music"],
+    )
+    with AudioWriter(tmp_path) as writer:
+        writer.write(tree)
+    _empty(Path(tmp_path) / "audio_0001.wav")
+
+    source = AudioDataSource.from_writer_output(tmp_path, on_read_error="skip")
+    items = [source[i] for i in range(3)]
+    real, substitute = items[0], items[1]
+
+    assert bool(substitute.extras[READ_ERROR_KEY][0]) is True
+    assert (
+        sorted(substitute.metadata)
+        == sorted(real.metadata)
+        == [
+            "filepath",
+            "source",
+        ]
+    )
+    # The substitute reports the *recorded* provenance, not the output WAV.
+    assert substitute.filepath == ["origin_1.wav"]
+    assert substitute.source == ["speech"]
+
+    batch = AudioTree.batch(items)
+    assert batch.filepath == [f"origin_{i}.wav" for i in range(3)]
+    assert batch.source == ["music", "speech", "music"]
+
+
 def test_getitem_marker_is_absent_under_the_default_policy(tmp_path):
     """The default policy leaves the extras as it was before the knob existed."""
     with AudioWriter(tmp_path) as writer:

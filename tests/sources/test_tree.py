@@ -1407,3 +1407,78 @@ def test_no_test_leaves_a_tree_source_open():
         "removed on Windows. Close these, or scope them with `with`:\n  "
         + "\n  ".join(offenders)
     )
+
+
+# === Provenance (AudioTree.metadata) ===
+
+
+def test_provenance_round_trips_through_tree_writer(tmp_path):
+    """filepath/source live in the metadata container and survive the trip.
+
+    The container holds fixed-width int encodings, so this needs no bagz --
+    provenance rides the ordinary array-leaf path.
+    """
+    tree = AudioTree.create(
+        np.zeros((4, 1, 32), dtype=np.float32),
+        16000,
+        filepath=[f"take_{i}.wav" for i in range(4)],
+        source=["music", "music", "speech", "speech"],
+        extras={"energy": np.arange(4, dtype=np.float32)},
+    )
+
+    with TreeWriter(tmp_path, expected_samples=4) as w:
+        w.write(tree)
+
+    source = TreeDataSource(tmp_path)
+    items = [source[i] for i in range(4)]
+    for i, sample in enumerate(items):
+        assert sample.filepath == [f"take_{i}.wav"]
+        assert sample.source == ["music" if i < 2 else "speech"]
+        # extras stays purely user payload.
+        assert sorted(sample.extras) == ["energy"]
+    batched = AudioTree.batch(items)
+    assert batched.filepath == tree.filepath
+    assert batched.source == tree.source
+    source.close()
+
+
+def test_metadata_node_with_unknown_child_is_refused_by_name(tmp_path):
+    """The metadata container's schema is closed: {"filepath", "source"} only.
+
+    An rc1/rc2-era dataset whose ``metadata`` node held user payload must fail
+    loudly at construction rather than silently reconstructing that payload
+    into the library-internal container. The writer will happily serialize a
+    hand-built tree carrying such a key (the constructor stores its arguments
+    verbatim), so the guard has to live in the reader.
+    """
+    tree = AudioTree(
+        waveform=np.zeros((2, 1, 16), dtype=np.float32),
+        sample_rate=16000,
+        metadata={"loudness_profile": np.zeros((2, 3), dtype=np.float32)},
+    )
+    with TreeWriter(tmp_path, expected_samples=2) as w:
+        w.write(tree)
+
+    with pytest.raises(
+        ValueError, match=r"metadata node.*'loudness_profile'.*belongs in 'extras'"
+    ):
+        TreeDataSource(tmp_path)
+
+
+def test_legacy_metadata_node_with_only_provenance_reads_as_provenance(tmp_path):
+    """A metadata node holding only filepath/source keeps its original
+    semantics -- genuine convergence with the rc1-era layout, with no
+    rename-aware code anywhere: the reader reconstructs the node as the
+    ``metadata`` field and the properties decode it."""
+    tree = AudioTree.create(
+        np.zeros((2, 1, 16), dtype=np.float32), 16000, filepath="legacy.wav"
+    )
+    # The node this writes is byte-for-byte what an rc1-era writer produced
+    # for a metadata dict holding only the encoded "filepath".
+    with TreeWriter(tmp_path, expected_samples=2) as w:
+        w.write(tree)
+
+    source = TreeDataSource(tmp_path)
+    assert source[1].filepath == ["legacy.wav"]
+    assert source[1].source == []
+    source.close()

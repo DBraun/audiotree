@@ -19,10 +19,12 @@ def _item(i: int, bare: bool) -> AudioTree:
     """A batch-of-1 tree whose string leaves are bare or one-item lists.
 
     ``bare=True`` is what ``TreeDataSource`` yields per item; both forms mean
-    the same thing and must batch/index identically.
+    the same thing and must batch/index identically. Every fixture also
+    carries encoded provenance, so the ``metadata`` container is exercised
+    through the same operations as the string leaves.
     """
     wrap = (lambda s: s) if bare else (lambda s: [s])
-    return AudioTree(
+    return AudioTree.create(
         waveform=np.full((1, 1, 8), float(i), dtype=np.float32),
         sample_rate=16_000,
         extras={
@@ -30,12 +32,14 @@ def _item(i: int, bare: bool) -> AudioTree:
             "nested": {"group": wrap(f"group{i}")},
             "style": np.full((1, 4), i, dtype=np.int32),
         },
+        filepath=f"file{i}.wav",
+        source=f"src{i}",
     )
 
 
 def _batched(n: int) -> AudioTree:
-    """A batch-of-``n`` tree with list-form string leaves."""
-    return AudioTree(
+    """A batch-of-``n`` tree with list-form string leaves and provenance."""
+    return AudioTree.create(
         waveform=np.arange(n, dtype=np.float32)[:, None, None]
         * np.ones((n, 1, 8), dtype=np.float32),
         sample_rate=16_000,
@@ -44,11 +48,13 @@ def _batched(n: int) -> AudioTree:
             "nested": {"group": [f"group{i}" for i in range(n)]},
             "style": np.arange(n, dtype=np.int32)[:, None] * np.ones((n, 4), np.int32),
         },
+        filepath=[f"file{i}.wav" for i in range(n)],
+        source=[f"src{i}" for i in range(n)],
     )
 
 
 def _assert_aligned(tree: AudioTree, expected: list):
-    """Every leaf — arrays and strings alike — holds ``expected``'s items in order."""
+    """Every leaf — arrays, strings and provenance — holds ``expected``'s items in order."""
     ids = [int(v) for v in np.asarray(tree.waveform)[:, 0, 0]]
     assert ids == list(expected)
     assert tree.extras["tag"] == [f"tag{i}" for i in expected]
@@ -56,6 +62,8 @@ def _assert_aligned(tree: AudioTree, expected: list):
     np.testing.assert_array_equal(
         np.asarray(tree.extras["style"])[:, 0], np.asarray(expected)
     )
+    assert tree.filepath == [f"file{i}.wav" for i in expected]
+    assert tree.source == [f"src{i}" for i in expected]
 
 
 @pytest.mark.parametrize("bare", [True, False], ids=["bare-str", "list-of-str"])
@@ -178,10 +186,20 @@ def test_mini_batch_round_trip(bare: bool):
     ]
     assert mini.extras["nested"]["group"][1] == ["group2", "group3"]
 
+    # Provenance nests per mini-batch too, matching the documented rank-4
+    # behaviour of the .filepath/.source properties.
+    assert mini.filepath == [
+        ["file0.wav", "file1.wav"],
+        ["file2.wav", "file3.wav"],
+        ["file4.wav", "file5.wav"],
+    ]
+    assert mini.source[2] == ["src4", "src5"]
+
     # Indexing the rank-4 tree selects whole mini-batches, strings included.
     picked = mini[1]
     assert picked.waveform.shape == (1, 2, 1, 8)
     assert picked.extras["tag"] == [["tag2", "tag3"]]
+    assert picked.filepath == [["file2.wav", "file3.wav"]]
     _assert_aligned(picked.flatten_mini_batches(), [2, 3])
 
     for part, expected in zip(mini.split(3), ([0, 1], [2, 3], [4, 5])):

@@ -123,13 +123,9 @@ def _serialize_structure(pytree) -> Tuple[Any, List[str], List[str]]:
                 if value is None:
                     continue
                 child_prefix = f"{prefix}.{fname}" if prefix else fname
-                if fname == "extras":
-                    if not value:  # empty dict
-                        children["extras"] = {"type": "dict", "children": {}}
-                    else:
-                        children["extras"] = _walk(value, child_prefix)
-                else:
-                    children[fname] = _walk(value, child_prefix)
+                # The dict fields (``extras``, ``metadata``) take the generic
+                # dict branch below; an empty one becomes an empty dict node.
+                children[fname] = _walk(value, child_prefix)
             return {
                 "type": "AudioTree",
                 "sample_rate": node.sample_rate,
@@ -185,11 +181,7 @@ def _extract_leaves(
                 if value is None:
                     continue
                 child_prefix = f"{prefix}.{fname}" if prefix else fname
-                if fname == "extras":
-                    if value:
-                        _walk(value, child_prefix)
-                else:
-                    _walk(value, child_prefix)
+                _walk(value, child_prefix)
             return
 
         if isinstance(node, dict):

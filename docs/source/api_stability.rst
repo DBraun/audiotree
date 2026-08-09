@@ -107,6 +107,13 @@ Also public:
 
   ``AudioCodec`` and ``LatentAudioCodec`` are protocols, not transforms, and are
   not called this way at all.
+* **The provenance properties, not their encoding.** Per-item provenance is
+  written with ``create(filepath=..., source=...)`` and read with the decoded
+  ``AudioTree.filepath`` / ``AudioTree.source`` properties — that pair is the
+  contract. ``AudioTree.metadata``, the library-managed container that carries
+  their jit-safe fixed-width integer encodings, has a closed schema (exactly
+  ``filepath`` and ``source``; anything else is rejected by name at read) and
+  is not meant to be indexed directly; user payload belongs in ``extras``.
 * **The three on-disk formats** — a ``TreeWriter`` directory, an ``AudioWriter``
   NPZ manifest, and a windowed-LUFS cache. See `On-disk formats`_.
 * **Two codec protocols**, both ``@runtime_checkable`` and each declaring exactly

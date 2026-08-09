@@ -990,7 +990,7 @@ def test_audiotree_from_manifest_restores_filepaths():
 
     AudioWriter stores filepaths as a top-level ``filepath`` manifest column
     (not under a ``extras_`` prefix). from_manifest must round-trip that
-    column back into ``extras['filepath']``; otherwise ``.filepath`` is
+    column back into the ``metadata`` container; otherwise ``.filepath`` is
     silently empty on the loaded tree.
     """
     paths = ["clip_0.wav", "clip_1.wav", "clip_2.wav", "clip_3.wav"]

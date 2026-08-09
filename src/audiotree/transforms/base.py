@@ -253,6 +253,9 @@ def _select_transformed(new_leaf, old_leaf, mask, xp):
         for key, value in old_leaf.extras.items()
         if key in new_leaf.extras
     }
+    # ``metadata`` (encoded filepath/source provenance) is not in ``updates``
+    # on purpose: no transform changes where an item came from, so the
+    # original's container is carried through by ``replace`` untouched.
     return old_leaf.replace(**updates)
 
 

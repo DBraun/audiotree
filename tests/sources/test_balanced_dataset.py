@@ -343,13 +343,13 @@ class TestCreateBalancedAudioDataset:
 
             items = [ds[i] for i in range(len(ds))]
 
-            # Both groups expose an identical extras schema, each carrying a
-            # `source` set to its group name.
+            # Both groups expose an identical provenance schema, each
+            # carrying a `source` set to its group name.
             keys_by_source: Dict[str, set] = {}
             for item in items:
                 assert len(item.source) == 1
                 keys_by_source.setdefault(item.source[0], set()).update(
-                    item.extras.keys()
+                    item.metadata.keys()
                 )
             assert set(keys_by_source) == {"speech", "preprocessed"}
             assert keys_by_source["speech"] == keys_by_source["preprocessed"]

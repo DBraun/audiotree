@@ -245,9 +245,9 @@ class ExcerptConfig:
 
 
 # Fixed width (in Unicode code points) for filepath/source strings encoded into
-# extras arrays, so they can be batched and stored in fixed-width int32 arrays.
-# Strings longer than this raise in ``_encode_string`` rather than being
-# truncated, to avoid silently corrupting paths.
+# metadata arrays, so they can be batched and stored in fixed-width int32
+# arrays. Strings longer than this raise in ``_encode_string`` rather than
+# being truncated, to avoid silently corrupting paths.
 _str_max_length = 1024
 
 
@@ -462,6 +462,7 @@ class _AudioTreeFields(TypedDict, total=False):
     codes: ArrayLike | None
     latents: ArrayLike | None
     extras: dict
+    metadata: dict
 
 
 @struct.dataclass
@@ -493,10 +494,15 @@ class AudioTree:
             The value is not necessarily the same as the duration of the audio data. The shape is ``(Batch,)``.
         codes (np.ndarray or jax.Array, optional): The neural audio codec tokens for the audio.
         latents (np.ndarray or jax.Array, optional): The latent representations of the audio.
-        extras (dict): Any extra per-item data can be placed here. Provenance lives here too, under the
-            ``"filepath"`` and ``"source"`` keys (encoded arrays, read back via the :attr:`filepath`
-            and :attr:`source` properties); pass ``filepath=`` / ``source=`` to :meth:`create` rather
-            than encoding them by hand.
+        extras (dict): Any extra per-item data can be placed here. This dict is yours: the library
+            never plants keys of its own in it, apart from bookkeeping some operations record as
+            plain arrays you read directly (``"offset"`` from :meth:`from_file`, ``"read_error"``
+            from the data sources' non-raising read policies, and ``"codec_scale"`` alongside
+            ``codes``).
+        metadata (dict): Library-managed provenance container -- not for user data (put your own
+            data in ``extras``). It holds only the encoded ``"filepath"`` and ``"source"`` arrays:
+            pass ``filepath=`` / ``source=`` to :meth:`create` to fill it, and read the strings back
+            via the :attr:`filepath` and :attr:`source` properties rather than touching it directly.
 
     Example:
         >>> audio = AudioTree.create(jnp.zeros((2, 44100)), 44100)  # stereo, 1 s
@@ -521,6 +527,7 @@ class AudioTree:
     codes: ArrayLike | None = None
     latents: ArrayLike | None = None
     extras: dict = struct.field(pytree_node=True, default_factory=dict)
+    metadata: dict = struct.field(pytree_node=True, default_factory=dict)
 
     def replace(self, **updates: Unpack[_AudioTreeFields]) -> Self:
         """Return a new ``AudioTree`` with the given fields replaced.
@@ -570,7 +577,8 @@ class AudioTree:
         """Create an ``AudioTree``, normalizing the waveform to ``(Batch, Channels, Samples)``.
 
         A bare ``(Samples,)`` or ``(Channels, Samples)`` waveform gains the missing leading axes, so
-        you don't have to reshape by hand. ``filepath`` and ``source`` are encoded into ``extras``.
+        you don't have to reshape by hand. ``filepath`` and ``source`` are encoded into the
+        library-managed ``metadata`` container; ``extras`` is left to the caller.
 
         Args:
             waveform: Audio of shape ``(Samples)``, ``(Channels, Samples)``, or
@@ -587,11 +595,11 @@ class AudioTree:
             codes: Optional neural-codec tokens.
             latents: Optional latent representations.
             extras: Optional extras dict of additional per-item leaves (copied, not mutated).
-            filepath: Optional path(s) for the batch; encoded into ``extras["filepath"]`` and read
+            filepath: Optional path(s) for the batch; encoded into ``metadata["filepath"]`` and read
                 back via the :attr:`filepath` property. Pass a single path to tag the whole batch
                 (it is repeated for every item), or a list with one path per batch item.
             source: Optional source-group name(s) (e.g. ``"music"``), encoded into
-                ``extras["source"]`` and read back via the :attr:`source` property. Pass a
+                ``metadata["source"]`` and read back via the :attr:`source` property. Pass a
                 single string to tag the whole batch, or a list with one name per batch item
                 (unlike :meth:`from_file`, which only accepts a single string).
 
@@ -624,7 +632,7 @@ class AudioTree:
                     f"call reshape_mini_batches() to add a mini-batch axis."
                 )
 
-        # Handle extras and filepath
+        # Extras is pure user payload; copy so the caller's dict is not mutated.
         if extras is None:
             extras = {}
         else:
@@ -651,11 +659,12 @@ class AudioTree:
                 )
             return encoded
 
+        metadata = {}
         if filepath is not None:
-            extras["filepath"] = _encode_provenance("filepath", filepath)
+            metadata["filepath"] = _encode_provenance("filepath", filepath)
 
         if source is not None:
-            extras["source"] = _encode_provenance("source", source)
+            metadata["source"] = _encode_provenance("source", source)
 
         return cls(
             waveform=waveform,
@@ -668,6 +677,7 @@ class AudioTree:
             codes=codes,
             latents=latents,
             extras=extras,
+            metadata=metadata,
         )
 
     def _invalidate_derived(
@@ -995,9 +1005,10 @@ class AudioTree:
         s = str(s)
         if len(s) > _str_max_length:
             raise ValueError(
-                f"String of length {len(s)} exceeds the extras encoding limit "
-                f"of {_str_max_length} characters and would be truncated: {s!r}. "
-                "Increase audiotree.core._str_max_length to store longer strings."
+                f"String of length {len(s)} exceeds the provenance encoding "
+                f"limit of {_str_max_length} characters and would be truncated: "
+                f"{s!r}. Increase audiotree.core._str_max_length to store "
+                f"longer strings."
             )
         encoded = [ord(char) for char in s]
         encoded += [0] * (_str_max_length - len(encoded))
@@ -1050,7 +1061,7 @@ class AudioTree:
         """
         if encoded.ndim < 2:
             raise ValueError(
-                f"extras[{key!r}] must have a leading batch axis, i.e. shape "
+                f"metadata[{key!r}] must have a leading batch axis, i.e. shape "
                 f"(Batch, {_str_max_length}), got rank {encoded.ndim} "
                 f"{tuple(encoded.shape)}. Encode it with "
                 f"AudioTree.create({key}=...) rather than by hand."
@@ -1061,23 +1072,23 @@ class AudioTree:
 
     @property
     def filepath(self) -> Union[List[str], List[list]]:
-        """Return the decoded filepaths stored in ``extras['filepath']``.
+        """Return the decoded filepaths stored in ``metadata['filepath']``.
 
         One string per batch item. A mini-batched tree (rank 4, from
         :meth:`reshape_mini_batches`) has two leading axes, so it returns one
         list per mini-batch — the nesting always matches the tree's leading
         axes. Call :meth:`flatten_mini_batches` first for a flat list.
 
-        An empty list is returned if the AudioTree does not contain any filepath
-        extras.
+        An empty list is returned if the AudioTree does not carry filepath
+        provenance.
         """
-        if "filepath" not in self.extras:
+        if "filepath" not in self.metadata:
             return []
-        return self._decode_strings(self.extras["filepath"], "filepath")
+        return self._decode_strings(self.metadata["filepath"], "filepath")
 
     @property
     def source(self) -> Union[List[str], List[list]]:
-        """Return the decoded source names stored in ``extras['source']``.
+        """Return the decoded source names stored in ``metadata['source']``.
 
         Source names indicate which data source group each item in the batch came from.
         For example, if an AudioDataSimpleSource was created with
@@ -1086,12 +1097,12 @@ class AudioTree:
         :attr:`filepath`, a mini-batched (rank-4) tree nests one list per
         mini-batch.
 
-        An empty list is returned if the AudioTree does not contain any source
-        extras.
+        An empty list is returned if the AudioTree does not carry source
+        provenance.
         """
-        if "source" not in self.extras:
+        if "source" not in self.metadata:
             return []
-        return self._decode_strings(self.extras["source"], "source")
+        return self._decode_strings(self.metadata["source"], "source")
 
     @property
     def samples(self) -> int:
@@ -1162,7 +1173,8 @@ class AudioTree:
         )
 
     def _array_leaves(self):
-        """Every non-``None`` array field, waveform first. Skips ``extras``."""
+        """Every non-``None`` array field, waveform first. Skips the ``extras``
+        and ``metadata`` dicts."""
         for name in ARRAY_FIELDS:
             value = getattr(self, name, None)
             if value is not None:
@@ -1287,12 +1299,13 @@ class AudioTree:
                 ``pad_mode`` controls how the audio is right-padded (numpy.pad modes). Options:
                 "constant" (zeros, default), "edge" (repeat edge), "reflect" (mirror), "symmetric" (mirror with edge),
                 "wrap" (circular/loop), or None (no padding).
-            filepath (Union[str, Path, List[str | Path]], optional): One or more paths to store in the returned
-                ``AudioTree``'s extras. If *None* (default) the provided ``audio_path`` will be used.
+            filepath (Union[str, Path, List[str | Path]], optional): One or more paths to store as the returned
+                ``AudioTree``'s provenance (``metadata["filepath"]``, read back via the ``filepath``
+                property). If *None* (default) the provided ``audio_path`` will be used.
             source (str, optional): The source group name for this audio file (e.g., "music", "speech").
-                This is stored in extras and accessible via the ``source`` property.
-            extras (dict, optional): Additional extras to include in the AudioTree. These are merged with
-                automatically generated entries (offset, note_duration, filepath).
+                Stored as provenance (``metadata["source"]``) and accessible via the ``source`` property.
+            extras (dict, optional): Additional extras to include in the AudioTree. The automatically
+                recorded ``extras["offset"]`` overrides a user key of the same name.
             lufs (np.ndarray or jax.Array, optional): Integrated loudness (LUFS) values to assign to the AudioTree.
             lufs_windows (np.ndarray or jax.Array, optional): Per-window loudness (LUFS) values to assign to the AudioTree.
             pitch (np.ndarray or jax.Array, optional): Pitch values to assign to the AudioTree.
@@ -1358,6 +1371,9 @@ class AudioTree:
         # Add automatic extras (these override user extras to ensure correctness)
         combined_extras["offset"] = np.array([offset])
 
+        # Provenance goes into the library-managed ``metadata`` container, so
+        # the user's ``extras`` keys -- including one literally named
+        # "filepath" -- are never displaced.
         if filepath is None:
             paths_to_store = [audio_path]
         else:
@@ -1367,10 +1383,10 @@ class AudioTree:
             else:
                 paths_to_store = list(filepath)
 
-        combined_extras["filepath"] = cls._encode_filepaths(paths_to_store)
+        metadata = {"filepath": cls._encode_filepaths(paths_to_store)}
 
         if source is not None:
-            combined_extras["source"] = cls._encode_filepaths([source])
+            metadata["source"] = cls._encode_filepaths([source])
 
         # Wrap scalar properties in arrays with batch dimension
         # This ensures consistency - all AudioTree properties should have batch dimension
@@ -1388,6 +1404,7 @@ class AudioTree:
             waveform=data,
             sample_rate=sample_rate,
             extras=combined_extras,
+            metadata=metadata,
             lufs=wrap_if_scalar(lufs, np.float32),
             lufs_windows=lufs_windows,
             pitch=wrap_if_scalar(pitch, np.float32),
@@ -1556,13 +1573,17 @@ class AudioTree:
             "extras": extras,
         }
 
-        # Restore the source filepath. AudioWriter stores them as a top-level
-        # ``filepath`` column of decoded strings (not under an ``extras_``
-        # prefix), so passing them back through ``filepath=`` re-encodes them
-        # into ``extras['filepath']`` and makes the ``.filepath`` property work.
+        # Restore the provenance. AudioWriter stores it as top-level
+        # ``filepath`` / ``source`` columns of decoded strings (not under an
+        # ``extras_`` prefix), so passing them back through ``filepath=`` /
+        # ``source=`` re-encodes them into the ``metadata`` container and makes
+        # the ``.filepath`` / ``.source`` properties work.
         filepaths = stack_column("filepath")
         if filepaths is not None:
             tree_kwargs["filepath"] = [str(p) for p in filepaths]
+        sources = stack_column("source")
+        if sources is not None:
+            tree_kwargs["source"] = [str(s) for s in sources]
 
         # Add AudioTree fields from manifest
         for field_name in LABEL_FIELDS:
@@ -2228,8 +2249,9 @@ PYTREE_FIELDS: tuple = tuple(
     f.name for f in dataclasses.fields(AudioTree) if f.metadata.get("pytree_node", True)
 )
 
-#: Pytree fields holding a single array, so ``extras`` (a dict) is excluded.
-ARRAY_FIELDS: tuple = tuple(f for f in PYTREE_FIELDS if f != "extras")
+#: Pytree fields holding a single array, so the two dict fields (``extras``
+#: and ``metadata``) are excluded.
+ARRAY_FIELDS: tuple = tuple(f for f in PYTREE_FIELDS if f not in ("extras", "metadata"))
 
 #: Per-item labels: the array fields other than the waveform itself. These are
 #: what the writers record as manifest columns.

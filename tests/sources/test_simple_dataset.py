@@ -706,6 +706,12 @@ def test_on_read_error_substitute_batches_under_loudest_excerpt(policy):
         assert lufs < -70.0
         assert substitute.lufs_windows is not None
 
+        # Structural parity extends to the provenance container: the
+        # substitute carries the same metadata keys as a real load, and its
+        # filepath names the offending file.
+        assert sorted(substitute.metadata) == sorted(good.metadata)
+        assert Path(substitute.filepath[0]).name == "z_bad.wav"
+
         # Both positions: batch takes its reference structure from item 0, so
         # substitute-first and substitute-last used to fail differently.
         for ordering in ([good, substitute], [substitute, good]):
@@ -713,6 +719,7 @@ def test_on_read_error_substitute_batches_under_loudest_excerpt(policy):
             assert batch.waveform.shape == (2, 1, 22050)
             assert batch.lufs.shape == (2,)
             assert batch.lufs_windows.shape[0] == 2
+            assert len(batch.filepath) == 2
 
 
 def test_truncated_data_is_not_a_read_error():

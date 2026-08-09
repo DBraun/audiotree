@@ -248,8 +248,9 @@ file: a hole breaks fixed-size batching, and a silent retry both over-samples
 the healthy files and produces an item indistinguishable from real audio.
 
 So that the substitution stays detectable, every item of such a dataset carries
-``extras["read_error"]`` — ``True`` on a substitute, ``False`` on a real load
-— alongside the usual ``filepath``:
+``extras["read_error"]`` — a plain array in *your* ``extras`` dict, ``True`` on
+a substitute and ``False`` on a real load — alongside the usual ``.filepath``
+provenance:
 
 .. testcode:: readerrors
 
@@ -302,9 +303,9 @@ Time-Aligned Annotations
 When you take a random excerpt of a long recording, you often need the matching
 slice of a time-aligned annotation — a pianoroll, MIDI, F0 curve, or label
 track. Each loaded ``AudioTree`` records where its excerpt came from:
-``extras["offset"]`` (start time in seconds) and ``filepath``; the excerpt
-length is ``samples / sample_rate``. A `Grain`_ ``.map`` step can use those to
-load and slice the aligned annotation.
+``extras["offset"]`` (start time in seconds) and the ``.filepath`` provenance;
+the excerpt length is ``samples / sample_rate``. A `Grain`_ ``.map`` step can
+use those to load and slice the aligned annotation.
 
 In this example each ``<name>.wav`` has a sibling ``<name>.npy`` holding a
 ``(128, frames)`` pianoroll at a known frame rate:
@@ -343,7 +344,7 @@ In this example each ``<name>.wav`` has a sibling ``<name>.npy`` holding a
     PIANOROLL_FPS = 100  # frame rate of the .npy pianorolls
 
     # Random 1-second excerpts. Each loaded AudioTree records where its excerpt
-    # came from in ``extras["offset"]`` (seconds) and ``filepath``.
+    # came from in ``extras["offset"]`` (seconds) and the filepath provenance.
     ds = create_audio_dataset(
         sources=_piano_dir,
         sample_rate=16000,
@@ -433,8 +434,8 @@ model batches that already live on the GPU/TPU — and to overlap that transfer 
 the training step — wrap the ``IterDataset`` with
 :func:`grain.experimental.device_put`. It double-buffers: while the current batch
 trains, the next is staged on the device. Because an AudioTree is a Pytree, every
-array leaf (``waveform`` and each ``extras`` array) arrives on-device as a
-``jax.Array``:
+array leaf (``waveform``, each ``extras`` array, and the encoded provenance in
+``metadata``) arrives on-device as a ``jax.Array``:
 
 .. testcode::
 

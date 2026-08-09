@@ -29,7 +29,8 @@ At a glance
 The five that break the most code, in rough order:
 
 #. ``audio_data`` is ``waveform``, every ``loudness`` spelling is ``lufs``, and
-   ``metadata`` is ``extras``.
+   the merged ``metadata`` dict is split: payload keys are ``extras``, while
+   the ``filepath``/``source`` provenance keeps the ``metadata`` name.
 #. Transforms are snake_case **functions**, not PascalCase classes, and take flat
    keyword parameters instead of a ``config`` dict.
 #. ``audiotree.datasources`` is ``audiotree.sources``, and its data-source classes
@@ -69,8 +70,10 @@ AudioTree
    * - ``AudioTree.create(filepaths=...)``
      - ``AudioTree.create(filepath=...)`` — singular, and it still accepts either
        one path or a list of them (one per batch item)
-   * - ``AudioTree.metadata``
-     - ``AudioTree.extras`` — see `metadata is now extras`_
+   * - ``AudioTree.metadata`` (payload keys)
+     - ``AudioTree.extras`` — the ``filepath``/``source`` provenance stays
+       under the ``metadata`` name; see `metadata is split into extras and
+       provenance`_
 
 The three field renames also change **keyword arguments** everywhere the fields
 are constructible — ``AudioTree(waveform=..., lufs=...)``, ``create()``,
@@ -91,39 +94,60 @@ are constructible — ``AudioTree(waveform=..., lufs=...)``, ``create()``,
     tree = tree.replace_lufs()
     print(tree.waveform.shape, tree.lufs)
 
-metadata is now extras
-~~~~~~~~~~~~~~~~~~~~~~
+metadata is split into extras and provenance
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The per-item dict of extra array/string leaves that batch with the waveform —
-labels, embeddings, provenance like ``filepath`` / ``source`` / ``offset``,
-``read_error``, ``codec_scale`` — is now ``AudioTree.extras``. 0.2.x spelled it
-``metadata`` too (inherited from audiotools), so unlike most renames on this page
-this one reaches back to released code. Every API spelling follows:
-``AudioTree.create(extras=...)``, ``from_file(extras=...)``,
-``tree.extras["..."]``, ``tree.replace_extras(...)``.
+0.2.x carried one merged per-item dict, spelled ``metadata`` (inherited from
+audiotools): your payload leaves and the library's ``filepath``/``source``
+bookkeeping side by side in one namespace. 1.0 splits it in two — so unlike
+most renames on this page, this one reaches back to released code:
 
-The on-disk spellings follow as well: an ``AudioWriter`` NPZ manifest stores
-each entry as an ``extras_<key>`` column (with presence mask
-``__mask_extras_<key>``), and a ``TreeWriter`` dataset stores the structure node
-and leaf paths as ``extras.<key>`` rather than ``metadata.<key>``.
+* **Payload is** ``AudioTree.extras`` — the dict of *your* per-item
+  array/string leaves that batch with the waveform: labels, embeddings,
+  features. Every API spelling follows: ``AudioTree.create(extras=...)``,
+  ``from_file(extras=...)``, ``tree.extras["..."]``,
+  ``tree.replace_extras(...)``. The library plants only the documented
+  plain-array keys there (``offset``, ``read_error``, ``codec_scale``); it no
+  longer stores ``filepath`` or ``source`` in your namespace.
+* **Provenance keeps the** ``metadata`` **name** — now a library-managed
+  container holding exactly the encoded ``filepath`` and ``source`` arrays
+  (fixed-width integer encodings that survive jit and batching) and nothing
+  else. You do not read it directly: pass ``filepath=`` / ``source=`` to
+  ``create()`` and use the decoded ``.filepath`` / ``.source`` properties.
+  The schema is closed — a ``metadata`` node read off disk containing any key
+  other than ``filepath``/``source`` is rejected by name, the same
+  strict-validation stance the readers take with manifest columns.
 
-There is no read-side alias for the old spelling. Both readers validate their
-inputs strictly — ``TreeDataSource`` rejects an unknown structure child by name
-at construction, and the NPZ readers reject any manifest column that is not a
-recognized part of the schema, also by name. A consequence: a dataset written by
-the ``1.0.0rc1``/``rc2`` prereleases (which spelled the field ``metadata``) fails
-loudly at read instead of silently coming back with empty ``extras``, and must
-be rewritten. The rewrite is mechanical: in a ``TreeWriter`` dataset, rename the
-AudioTree structure node ``"metadata"`` to ``"extras"`` along with its leaf
-paths and files in ``manifest.json``; in an NPZ manifest, rename the
-``metadata_*`` / ``__mask_metadata_*`` columns to ``extras_*`` /
-``__mask_extras_*``.
+The on-disk spellings follow the split. A ``TreeWriter`` AudioTree node
+serializes both children: a ``metadata`` node with the ``filepath``/``source``
+leaves and an ``extras`` node with your leaves (paths ``extras.<key>``). An
+``AudioWriter`` NPZ manifest stores ``filepath`` and ``source`` as dedicated
+bookkeeping columns, and each ``extras`` entry as an ``extras_<key>`` column
+(with presence mask ``__mask_extras_<key>``) — the ``extras_*`` namespace is
+purely user payload.
 
-Deliberately **not** renamed: ``TreeWriter(metadata=...)``, the manifest's
-top-level ``"metadata"`` key, and ``TreeDataSource.get_metadata()`` — true
-dataset-level metadata, facts about the whole render. Half the point of the
-rename is that "metadata" now unambiguously means that, while ``extras`` is the
-per-item payload that trains with the audio.
+There is no read-side alias for the old merged layout, and both readers
+validate strictly — ``TreeDataSource`` rejects an unknown structure child by
+name at construction, and the NPZ readers reject any manifest column that is
+not a recognized part of the schema, also by name. The consequence for a
+dataset written by the ``1.0.0rc1``/``rc2`` prereleases (which shipped the old
+merged dict under ``metadata``) is exactly schema-shaped: a legacy ``metadata``
+node holding only ``filepath``/``source`` reads correctly, with its original
+meaning; one holding user payload fails loudly at read and must be rewritten.
+The rewrite is mechanical: in a ``TreeWriter`` dataset, move the payload leaf
+paths and files from ``metadata.<key>`` to ``extras.<key>`` in
+``manifest.json`` (``filepath`` and ``source`` stay under ``metadata``); in an
+NPZ manifest, rename the payload ``metadata_<key>`` / ``__mask_metadata_<key>``
+columns to ``extras_<key>`` / ``__mask_extras_<key>``, and the
+``metadata_source`` column to the dedicated ``source`` column (``filepath``
+was already a dedicated column and stays put).
+
+Deliberately untouched, and a third concept: ``TreeWriter(metadata=...)``, the
+manifest's top-level ``"metadata"`` key, and ``TreeDataSource.get_metadata()``
+— true *dataset-level* metadata, facts about the whole render. The three names
+now divide cleanly: ``extras`` is per-item payload that trains with the audio,
+per-item ``metadata`` is provenance about the audio, and the writer's
+``metadata=`` is data about the dataset.
 
 One spelling per loudness concept
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -350,8 +374,8 @@ that behavior is gone.
 Two consequences worth knowing: a transform that changes a field's *shape* cannot
 be mixed item-by-item and now raises a clear error at ``prob < 1``; and ``prob < 1``
 now works at all on the JAX backend, where it previously crashed on any tree
-carrying ``extras["filepath"]`` (which ``from_file`` always sets) or on any
-transform that nulls ``lufs``.
+carrying the string-encoded ``filepath`` provenance (which ``from_file`` always
+sets) or on any transform that nulls ``lufs``.
 
 Misspelled transform parameters raise
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -732,10 +756,12 @@ more than accommodating development-time artifacts.
 
 If re-rendering a large pre-1.0 ``TreeWriter`` corpus is genuinely impractical, the
 field renames are mechanical: rename each ``*audio_data.bin`` to ``*waveform.bin``
-and each ``*loudness.bin`` to ``*lufs.bin``, rename the ``metadata`` structure node
-and its ``metadata.*`` leaves to ``extras`` / ``extras.*``, replace those names in
+and each ``*loudness.bin`` to ``*lufs.bin``, move the ``metadata`` node's payload
+leaves to ``extras`` / ``extras.*`` (``filepath`` and ``source`` stay under
+``metadata``, whose read schema admits only those two), replace those names in
 ``manifest.json``, and add the header. The same applies to the ``loudness`` column
-and any ``metadata_*`` columns in an ``AudioWriter`` NPZ manifest. This is unsupported; the reader validates the
+and any payload ``metadata_*`` columns in an ``AudioWriter`` NPZ manifest
+(``metadata_source`` becomes the dedicated ``source`` column). This is unsupported; the reader validates the
 manifest strictly (``num_samples``, each leaf's ``shape_per_sample`` and an
 allow-listed ``dtype``, and every ``children`` key against the real ``AudioTree``
 fields), so a hand-edit that is close but not exact will be rejected.
@@ -766,7 +792,8 @@ Checklist
 ---------
 
 #. ``grep`` for ``audio_data``, ``loudness`` and ``.metadata`` and take the
-   renames above.
+   renames above — payload ``metadata`` keys are now ``extras`` keys, and
+   ``filepath``/``source`` are read through the properties, not a dict.
 #. Switch ``audiotree.datasources`` imports to ``audiotree.sources``, and the
    data-source classes to ``create_audio_dataset()`` /
    ``create_balanced_audio_dataset()``.

@@ -52,6 +52,15 @@ _RECONSTRUCTED_FIELDS = frozenset(["sample_rate"])
 # deliberately absent: it is optional and defaults to ``{}``.
 _REQUIRED_KEYS = ("num_samples", "structure", "leaves")
 
+# The only children an AudioTree ``metadata`` node may declare. ``metadata`` is
+# the library-managed provenance container, so its schema is closed: anything
+# else under it is either user payload that belongs in ``extras`` (a dataset
+# from the pre-1.0 era, when ``metadata`` was the user dict) or corruption, and
+# both are rejected by name rather than silently reconstructed into the
+# internal container. A node holding only these keys -- whichever era wrote it
+# -- reads back with today's semantics.
+_METADATA_CHILDREN = frozenset(["filepath", "source"])
+
 
 def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
     """Check a manifest's declared shapes, dtypes and names before using them.
@@ -242,6 +251,31 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
                         f"which the reader sets itself -- it would reach the "
                         f"AudioTree constructor as a duplicate argument"
                     )
+                if key == "metadata":
+                    node_children = children[key]
+                    if (
+                        not isinstance(node_children, dict)
+                        or node_children.get("type") != "dict"
+                    ):
+                        fail(
+                            f"AudioTree metadata node at {where} must be a "
+                            f"dict node, got {node_children!r}"
+                        )
+                    grandchildren = node_children.get("children", {})
+                    if not isinstance(grandchildren, dict):
+                        grandchildren = {}
+                    unknown = sorted(set(grandchildren) - _METADATA_CHILDREN)
+                    if unknown:
+                        fail(
+                            f"AudioTree metadata node at {where} declares "
+                            f"child(ren) {', '.join(repr(n) for n in unknown)}. "
+                            f"'metadata' is the library-managed provenance "
+                            f"container and may hold only "
+                            f"{sorted(_METADATA_CHILDREN)}; user payload "
+                            f"belongs in 'extras'. The dataset was written by "
+                            f"an incompatible version of audiotree, or is "
+                            f"corrupt -- re-render it."
+                        )
         for key, child in children.items():
             check_node(child, f"{path}.{key}" if path else str(key))
 

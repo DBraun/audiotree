@@ -73,6 +73,7 @@ _BOOKKEEPING_COLUMNS = frozenset(
         "subtype",
         "timestamp",
         "filepath",
+        "source",
     }
 )
 

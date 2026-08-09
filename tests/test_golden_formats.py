@@ -61,14 +61,27 @@ def test_golden_tree_header():
     assert manifest["min_reader_version"] == [1, 0]
     assert manifest["num_samples"] == 4
     assert manifest["metadata"] == {"note": "golden"}
-    assert sorted(manifest["leaves"]) == ["audio.waveform", "label"]
+    assert sorted(manifest["leaves"]) == [
+        "audio.extras.energy",
+        "audio.metadata.filepath",
+        "audio.metadata.source",
+        "audio.waveform",
+        "label",
+    ]
     assert manifest["leaves"]["audio.waveform"]["dtype"] == "float32"
     assert manifest["leaves"]["audio.waveform"]["shape_per_sample"] == [1, 8]
     assert manifest["leaves"]["audio.waveform"]["file"] == "audio.waveform.bin"
-    # The AudioTree node's extras dict is stored under the children key
-    # "extras" -- the on-disk spelling is part of the format contract.
+    # The AudioTree node's user extras dict and library-managed provenance
+    # container are stored under the children keys "extras" and "metadata" --
+    # the on-disk spellings are part of the format contract.
     audio_children = manifest["structure"]["children"]["audio"]["children"]
-    assert sorted(audio_children) == ["extras", "waveform"]
+    assert sorted(audio_children) == ["extras", "metadata", "waveform"]
+    assert sorted(audio_children["extras"]["children"]) == ["energy"]
+    # The provenance container's schema is closed: exactly these leaves, as
+    # fixed-width int32 encodings.
+    assert sorted(audio_children["metadata"]["children"]) == ["filepath", "source"]
+    assert manifest["leaves"]["audio.metadata.filepath"]["dtype"] == "int32"
+    assert manifest["leaves"]["audio.metadata.filepath"]["shape_per_sample"] == [1024]
 
 
 def test_golden_tree_reads_with_expected_values():
@@ -89,6 +102,15 @@ def test_golden_tree_reads_with_expected_values():
         )
         np.testing.assert_array_equal(sample["label"].ravel(), [index])
         assert sample["label"].dtype == np.int32
+
+        # Provenance reconstructs into the metadata container and decodes
+        # through the properties; extras stays pure user payload.
+        assert sample["audio"].filepath == [f"clip_{index}.wav"]
+        assert sample["audio"].source == ["music" if index < 2 else "speech"]
+        assert sorted(sample["audio"].extras) == ["energy"]
+        np.testing.assert_allclose(
+            sample["audio"].extras["energy"].ravel(), [0.5 / 2**index]
+        )
     source.close()
 
 
@@ -123,6 +145,17 @@ def test_golden_manifest_stores_no_object_arrays():
     assert data["filename"].dtype.kind == "U"
     assert data["subtype"].dtype.kind == "U"
     assert all(array.dtype != object for array in data.values())
+
+
+def test_golden_manifest_stores_provenance_in_dedicated_columns():
+    """``filepath`` and ``source`` are top-level columns of decoded strings --
+    the on-disk spelling is part of the format contract, and it leaves the
+    ``extras_*`` namespace purely for user payload."""
+    data = load_manifest(MANIFEST_DIR / "manifest.npz")
+    assert data["filepath"].dtype.kind == "U"
+    assert list(data["filepath"]) == ["src_00.wav", "src_01.wav", "src_02.wav"]
+    assert data["source"].dtype.kind == "U"
+    assert list(data["source"]) == ["music", "speech", "music"]
 
 
 def test_golden_manifest_stores_extras_under_their_prefix():
@@ -179,6 +212,10 @@ def test_golden_manifest_reads_with_expected_values(
     np.testing.assert_allclose(item.extras["energy"], [energy])
     assert item.extras["energy"].dtype == np.float32
 
+    # The provenance columns come back through the metadata container.
+    assert item.filepath == [f"src_{index:02d}.wav"]
+    assert item.source == [["music", "speech", "music"][index]]
+
 
 def test_golden_manifest_batches_without_corruption():
     """Batching the committed items stacks them along the batch axis."""
@@ -187,3 +224,5 @@ def test_golden_manifest_batches_without_corruption():
     assert batched.waveform.shape == (3, 1, 400)
     np.testing.assert_array_equal(batched.pitch.ravel(), [60, 61, 62])
     np.testing.assert_array_equal(batched.velocity.ravel(), [100, 99, 98])
+    assert batched.filepath == ["src_00.wav", "src_01.wav", "src_02.wav"]
+    assert batched.source == ["music", "speech", "music"]

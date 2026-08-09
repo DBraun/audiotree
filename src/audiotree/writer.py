@@ -13,11 +13,16 @@ from . import _manifest
 from ._fs import refuse_to_clobber
 from .core import LABEL_FIELDS, AudioTree, _require_batched_rank
 
-# Manifest columns hold one value per written item. Extras keys that describe
-# *where* an item came from are reconstructed by the reader instead.
-_SKIPPED_EXTRAS_KEYS = frozenset(
-    {"filepath", "offset", "duration", "manifest_index", "tags"}
-)
+# Manifest columns hold one value per written item. Provenance lives in the
+# AudioTree ``metadata`` container (its own ``filepath``/``source`` columns),
+# so ``extras_*`` columns are purely user payload -- except for these
+# bookkeeping keys, which describe the *read* that produced the item rather
+# than the item itself, and are not written as columns.
+_SKIPPED_EXTRAS_KEYS = frozenset({"offset", "duration", "manifest_index", "tags"})
+
+# The provenance strings ``AudioTree.metadata`` carries, each written to a
+# dedicated top-level manifest column of the same name.
+_PROVENANCE_COLUMNS = ("filepath", "source")
 
 # Subtypes that store a sample as written. Every other subtype quantizes onto a
 # fixed-point grid and hard-clips anything outside [-1, 1].
@@ -230,10 +235,11 @@ class AudioWriter:
         self.written_paths = []
         self.manifest_data = []
         self._expected_fields = None  # Track which AudioTree fields should be present
-        # The extras-column schema (which extras_* columns, and whether a
-        # filepath column) is fixed by the first write; later writes must match.
+        # The extras-column schema (which extras_* columns, and which
+        # provenance columns) is fixed by the first write; later writes must
+        # match.
         self._expected_extras_keys = None
-        self._expected_has_filepath = None
+        self._expected_provenance = None
         # Each column's logical value kind, pinned by its first value. Kind
         # drift (int rows, then a str row) is rejected at the offending write;
         # see _check_entry_kinds.
@@ -358,10 +364,12 @@ class AudioWriter:
         # write fails at its own call -- before its WAVs land -- rather than at
         # the next save/close, which would abort with the manifest unwritten.
         extras_keys = self._get_extras_column_keys(tree)
-        has_filepath = bool(tree.filepath)
+        provenance = {
+            column: bool(getattr(tree, column)) for column in _PROVENANCE_COLUMNS
+        }
         if self._expected_extras_keys is None:
             self._expected_extras_keys = extras_keys
-            self._expected_has_filepath = has_filepath
+            self._expected_provenance = provenance
         else:
             if extras_keys != self._expected_extras_keys:
                 missing = self._expected_extras_keys - extras_keys
@@ -381,27 +389,30 @@ class AudioWriter:
                     f"All AudioTrees written to the same manifest must carry the "
                     f"same extras keys."
                 )
-            if has_filepath != self._expected_has_filepath:
-                had = "had" if self._expected_has_filepath else "had no"
-                now = "has" if has_filepath else "has no"
-                raise ValueError(
-                    f"AudioTree 'filepath' presence doesn't match previous writes: "
-                    f"the first write {had} filepaths but this one {now}. The "
-                    f"'filepath' column must cover every entry or none."
-                )
+            for column in _PROVENANCE_COLUMNS:
+                if provenance[column] != self._expected_provenance[column]:
+                    had = "had" if self._expected_provenance[column] else "had no"
+                    now = "has" if provenance[column] else "has no"
+                    raise ValueError(
+                        f"AudioTree {column!r} presence doesn't match previous "
+                        f"writes: the first write {had} {column}s but this one "
+                        f"{now}. The {column!r} column must cover every entry "
+                        f"or none."
+                    )
 
         batch_size = tree.waveform.shape[0]
 
-        # A filepath list shorter than the batch would populate the 'filepath'
-        # column for only some items in this very write, producing a ragged
-        # column. Reject it here rather than at save time, with the WAVs unwritten.
-        filepaths = tree.filepath
-        if filepaths and len(filepaths) < batch_size:
-            raise ValueError(
-                f"AudioTree has {len(filepaths)} filepaths for a batch of "
-                f"{batch_size}; the 'filepath' column would cover only part of "
-                f"this write. Provide one filepath per item, or none."
-            )
+        # A provenance list shorter than the batch would populate its column
+        # for only some items in this very write, producing a ragged column.
+        # Reject it here rather than at save time, with the WAVs unwritten.
+        for column in _PROVENANCE_COLUMNS:
+            values = getattr(tree, column)
+            if values and len(values) < batch_size:
+                raise ValueError(
+                    f"AudioTree has {len(values)} {column}s for a batch of "
+                    f"{batch_size}; the {column!r} column would cover only part "
+                    f"of this write. Provide one {column} per item, or none."
+                )
         paths = []
         # (filename, peak, subtype) for every item this write clips.
         clipped: List[Tuple[str, float, Optional[str]]] = []
@@ -535,10 +546,12 @@ class AudioWriter:
             if field_value is not None:
                 entry[field_name] = _column_value(field_name, field_value, batch_index)
 
-        # Add source filepath if available (consistent naming)
-        filepaths = tree.filepath
-        if filepaths and batch_index < len(filepaths):
-            entry["filepath"] = filepaths[batch_index]
+        # Provenance (from the AudioTree metadata container), one dedicated
+        # column per string: the original source path and the source group.
+        for column in _PROVENANCE_COLUMNS:
+            values = getattr(tree, column)
+            if values and batch_index < len(values):
+                entry[column] = values[batch_index]
 
         # Add custom tags
         if tags:

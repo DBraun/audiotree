@@ -459,6 +459,7 @@ def test_every_writer_column_passes_the_strict_schema(tmp_path):
         latents=np.zeros((2, 3), dtype=np.float32),
         extras={"energy": np.array([0.1, 0.2], dtype=np.float32)},
         filepath=["a.wav", "b.wav"],
+        source=["music", "speech"],
     )
     with AudioWriter(tmp_path, include_timestamp=True) as writer:
         writer.write(tree, tags={"split": "train"})
@@ -469,3 +470,82 @@ def test_every_writer_column_passes_the_strict_schema(tmp_path):
     assert "tags_split" in columns
     assert "timestamp" in columns
     assert "filepath" in columns
+    assert "source" in columns
+
+
+# --- Provenance columns: dedicated filepath/source, extras_* left to the user ---
+
+
+def test_source_column_round_trips_through_both_readers(tmp_path):
+    """``source`` gets the same dedicated-column treatment as ``filepath``:
+    written top-level from the metadata container, reconstructed back into it
+    by both NPZ readers."""
+    from audiotree.sources import AudioDataSource
+
+    tree = AudioTree.create(
+        np.zeros((3, 1, 80), dtype=np.float32),
+        8000,
+        filepath=[f"in_{i}.wav" for i in range(3)],
+        source=["music", "speech", "music"],
+    )
+    with AudioWriter(tmp_path) as writer:
+        writer.write(tree)
+
+    columns = _manifest.read_columns(tmp_path / "manifest.npz").columns
+    assert "source" in columns and "filepath" in columns
+    # No library-planted key is left in the extras_* namespace.
+    assert not any(name.startswith("extras_") for name in columns)
+
+    loaded = AudioTree.from_manifest(tmp_path / "manifest.npz")
+    assert loaded.filepath == [f"in_{i}.wav" for i in range(3)]
+    assert loaded.source == ["music", "speech", "music"]
+    assert loaded.extras == {}
+
+    ds = AudioDataSource.from_writer_output(tmp_path)
+    assert [ds[i].source for i in range(3)] == [["music"], ["speech"], ["music"]]
+    assert ds[2].filepath == ["in_2.wav"]
+    # Offset bookkeeping aside, extras is untouched by provenance.
+    assert sorted(ds[0].extras) == ["offset"]
+
+
+def test_source_presence_must_match_previous_writes(tmp_path):
+    """The ``source`` column is held to the same cover-every-entry-or-none rule
+    as ``filepath``, rejected at the drifting write."""
+    with_source = AudioTree.create(
+        np.zeros((1, 1, 80), dtype=np.float32), 8000, source="music"
+    )
+    without_source = AudioTree.create(np.zeros((1, 1, 80), dtype=np.float32), 8000)
+    with AudioWriter(tmp_path) as writer:
+        writer.write(with_source)
+        with pytest.raises(ValueError, match=r"'source' presence doesn't match"):
+            writer.write(without_source)
+
+
+def test_user_extras_key_named_filepath_is_ordinary_payload(tmp_path):
+    """A user extras key literally named "filepath" is legal: it lands in the
+    ``extras_filepath`` column and never touches the provenance, which has its
+    own dedicated column sourced from the metadata container."""
+    from audiotree.sources import AudioDataSource
+
+    user_paths = np.array([[104, 105], [104, 111]], dtype=np.int32)  # arbitrary
+    tree = AudioTree.create(
+        np.zeros((2, 1, 80), dtype=np.float32),
+        8000,
+        extras={"filepath": user_paths},
+        filepath=["real_a.wav", "real_b.wav"],
+    )
+    with AudioWriter(tmp_path) as writer:
+        writer.write(tree)
+
+    columns = _manifest.read_columns(tmp_path / "manifest.npz").columns
+    assert "filepath" in columns  # provenance
+    assert "extras_filepath" in columns  # user payload
+
+    loaded = AudioTree.from_manifest(tmp_path / "manifest.npz")
+    assert loaded.filepath == ["real_a.wav", "real_b.wav"]
+    np.testing.assert_array_equal(loaded.extras["filepath"], user_paths)
+
+    ds = AudioDataSource.from_writer_output(tmp_path)
+    item = ds[1]
+    assert item.filepath == ["real_b.wav"]
+    np.testing.assert_array_equal(item.extras["filepath"], user_paths[1:2])

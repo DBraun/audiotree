@@ -119,7 +119,8 @@ AudioTree provides convenient methods for loading audio files:
         }
     )
 
-    # The filepath is automatically stored in extras
+    # The filepath is recorded as per-item provenance (see "Extras and
+    # Provenance" below) and read back through the property.
     print(audio_tree.filepath)
     print(audio_tree.extras["features_4d"])
 
@@ -343,7 +344,7 @@ Indexing and Iterating Batches
 
 An AudioTree behaves like a sequence over its leading (batch) axis. Indexing,
 slicing, ``len()``, and iteration keep every field — ``waveform``, ``codes``,
-``latents``, and the ``extras`` arrays — rank-aligned.
+``latents``, the ``extras`` arrays, and the encoded provenance — rank-aligned.
 
 .. testcode::
 
@@ -742,10 +743,12 @@ prefetches whole batches onto the accelerator as you iterate — see
    ``engine=`` arguments (see `Choosing a device and an engine`_) that run the
    kernel where you ask and return loudness in the waveform's own array library.
 
-Extras and Filepaths
---------------------
+Extras and Provenance
+---------------------
 
-AudioTree supports storing per-item extras and filepath information.
+AudioTree keeps two per-item containers deliberately apart: ``extras``, the
+dict of *your* payload arrays, and ``metadata``, a library-managed container
+recording where each item came from.
 
 Storing Filepaths
 ~~~~~~~~~~~~~~~~~
@@ -774,6 +777,26 @@ When creating AudioTree objects, you can associate them with source files:
 
     ['audio.wav']
     ['a.wav', 'b.wav', 'c.wav']
+
+Provenance: ``filepath`` and ``source``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``filepath`` and ``source`` (the group name a balanced dataset drew an item
+from) are *provenance* — data about the audio, not payload that trains with
+it. They live in ``AudioTree.metadata``, a library-managed container you never
+index directly: pass ``filepath=`` / ``source=`` to
+:meth:`~audiotree.AudioTree.create` (or let ``from_file`` and the dataset
+builders stamp them) and read the decoded strings back through the
+``.filepath`` / ``.source`` properties. Internally each string is encoded as a
+fixed-width integer array, which is what lets provenance survive ``jax.jit``,
+batching, and device transfers like every other leaf.
+
+The container's schema is closed: ``metadata`` holds the encoded ``filepath``
+and ``source`` and nothing else. A ``metadata`` node read off disk that
+contains any other key is rejected by name — the same strict-validation stance
+the manifest readers take with unknown columns. Everything user-shaped belongs
+in ``extras``, and the library plants only three documented plain-array keys
+there: ``offset``, ``read_error``, and ``codec_scale``.
 
 Understanding Extras
 ~~~~~~~~~~~~~~~~~~~~
@@ -891,7 +914,7 @@ batch of 1, exactly what ``write`` requires):
    raises a ``ValueError``, as does calling it on a mini-batched (rank-4) tree or
    on a token-only tree that carries ``codes``/``latents`` but no ``waveform`` —
    all three by name, rather than as a shape complaint from soundfile. To write a
-   whole batch in one call — with a manifest of per-item metadata — reach for
+   whole batch in one call — with a manifest of per-item columns — reach for
    :class:`~audiotree.writer.AudioWriter`, covered in the :ref:`writer` chapter.
 
 Next Steps
