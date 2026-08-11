@@ -6,171 +6,125 @@
 
 .. _transforms:
 
-Transforms
-======================
+Transforms in the Training Loop
+===============================
 
-..  
+Every augmentation ships with two backends that share the same names and
+parameters:
 
-.. ---------------------------
+- **NumPy** (``audiotree.transforms``) — for CPU Grain data pipelines. You chain
+  these onto a dataset with ``.map()`` / ``.random_map()``; that is the previous
+  chapter, :ref:`transform_chaining`. They take a ``np.random.Generator``.
+- **JAX** (``audiotree.transforms.jax``) — the same transforms built from JAX ops,
+  so they run on the accelerator and compose inside ``jax.jit``. They take a
+  ``jax.random.key``.
 
-Transforms in ``audiotree.transforms`` are `Grain`_
-`transformations <https://github.com/google/grain/blob/754636534bb16b5b2dd74970043d03e24ea44d3f/docs/transformations.md>`_ that operate on batches.
-Examples include:
+Reach for the JAX backend when you want to augment a batch **inside the training
+step**, on-device, instead of in CPU data-loader workers. A transform's
+``random_map`` is a plain function of ``(tree, key)``, so it traces cleanly under
+``@jax.jit`` right next to your model:
 
-   * GPU-based `volume normalization <https://github.com/boris-kuz/jaxloudnorm/pull/1>`_ to a LUFS value in a configurable uniformly sampled range
-   * Encoding to `DAC-JAX`_ audio tokens
-   * Swapping stereo channels
-   * Randomly shifting or corrupting the phase(s) of a waveform
-   * and more...
+.. testcode::
 
-Config
-------
-
-AudioTree is compatible with `ArgBind`_ but does not require it.
-For the examples directly below, some other setup is required, so consider this to be an overview.
-Before transformations, your data source might provide a single :class:`~audiotree.core.AudioTree` or a "tree" of :class:`~audiotree.core.AudioTree`:
-
-.. code-block:: python
-
-    from jax import numpy as jnp
+    import jax
+    import jax.numpy as jnp
     from audiotree import AudioTree
-    sample_rate = 44_100
-    data = jnp.zeros((16, 2, 441_000))  # dummy placeholder shaped (B, C, T)
-    audio_tree = AudioTree(data, sample_rate)
-    batch = {"src": [audio_tree, audio_tree], "target": audio_tree}
+    from audiotree.transforms import jax as jax_transforms
 
-Then from YAML you can write the following to get a 90% chance of a random volume change between -12 and 3 decibels on just the ``"src"`` :class:`~audiotree.core.AudioTree`:
-
-.. code-block:: yaml
-
-    VolumeChange.prob:
-        0.9
-    VolumeChange.config:
-        min_db: -12
-        max_db: 3
-    VolumeChange.scope:
-        src:
-            scope: True
-
-Split Seed
-----------
-
-By setting ``split_seed`` to False, you can apply the same augmentations to both the ``src`` and ``target``.
-
-.. code-block:: yaml
-
-    VolumeChange.split_seed: 0
-
-This would make the most sense if the waveforms in ``src`` and ``target`` have the same dimensions.
-For some transformations, having differently sized tensors would cause the augmentations to be different despite sharing the same ``jax.random.PRNGKey``.
+    # The same transform as the NumPy backend, but JAX-native (takes a jax.random.key).
+    augment = jax_transforms.volume_change(min_db=-6, max_db=6)
 
 
-Output Key
-----------
-
-You can specify an output key so that the result of the transformation is stored in a new sibling key:
-
-.. code-block:: yaml
-
-    VolumeChange.output_key: "src_modified"
-    VolumeChange.scope:
-        src:
-            scope: True
-
-The above will produce a batch *shaped* like this:
-
-.. code-block:: python
-
-    {
-        "src": [audio_tree, audio_tree],
-        "src_modified": [audio_tree, audio_tree],
-        "target": audio_tree,
-    }
-
-Scope
------
-
-Depending on the scope, we can end up with *multiple* new output leaves. Let's start with this batch:
-
-.. code-block:: python
-
-    batch = {
-        "src":
-        {
-            "GT": audio_tree
-        },
-        "target":
-        {
-            "GT": audio_tree
-        }
-    }
-
-Then with a scope of ``None`` (default) and this YAML:
-
-.. code-block:: yaml
-
-    VolumeChange.output_key: "modified"
-
-We can produce this shape:
-
-.. code-block:: python
-
-    {
-        "src":
-        {
-            "GT": audio_tree,
-            "modified": audio_tree
-        },
-        "target":
-        {
-            "GT": audio_tree,
-            "modified": audio_tree
-        }
-    }
-
-Inheritance
------------
-
-You can also make more powerful (but complex) configs and scopes:
-
-.. code-block:: yaml
-
-    VolumeChange.config:
-        max_db: 3
-        src:
-            min_db: -12
-        target:
-            min_db: -2
-
-Note that the ``max_db`` is inherited by both ``src`` and ``target``.
-This ability to inherit comes at the cost of potential name clashes between the keys of the config (e.g., ``"min_db"``, ``"max_db"``) and the keys in the AudioTree (``"src"``, ``"target"``, etc.).
-The user is expected to use a data source to create AudioTrees that avoid these clashes.
-
-Without ArgBind
----------------
-
-Above, we've been using ArgBind and YAML, but we can create transforms with just Python:
+    @jax.jit
+    def train_step(batch: AudioTree, key):
+        # Augment on-device, then run your model. A trivial energy statistic
+        # stands in for the model and loss here.
+        batch = augment.random_map(batch, key)
+        return jnp.mean(batch.waveform**2)
 
 
-.. code-block:: python
+    batch = AudioTree(jnp.full((8, 2, 16_000), 0.5), 16_000)
 
-    from audiotree.transforms import VolumeNorm
+    # Split a fresh key each step so every step augments differently.
+    key = jax.random.key(0)
+    for _ in range(3):
+        key, subkey = jax.random.split(key)
+        loss = train_step(batch, subkey)
 
-    config = {
-        "max_db": -6,
-        "src": {"min_db": -20},
-        "target": {"min_db": -15},
-    }
+    print(loss.shape)  # a scalar
+    print(bool(loss > 0))
 
-    transform = VolumeNorm(config=config, split_seed=True, prob=0.9, scope=None)
-    audio_tree = transform.random_map(audio_tree)
+.. testoutput::
 
-Further examples
-----------------
+    ()
+    True
 
-For now, the `tests/transforms/test_core.py <https://github.com/DBraun/audiotree/blob/main/tests/transforms/test_core.py>`_ is somewhat useful for thinking through the expected outputs.
-AudioTree is also used in `DAC-JAX`_, which `shows <https://github.com/DBraun/DAC-JAX/blob/main/scripts/input_pipeline.py>`_ how to use `ArgBind`_ and data sources.
+Chain several augmentations by splitting a key per random transform; map
+transforms such as ``trim`` and ``resample`` need no key and compose the same way:
 
-.. _ArgBind: https://github.com/pseeth/argbind/
-.. _DAC-JAX: https://github.com/DBraun/DAC-JAX
-.. _Grain: https://github.com/google/grain
+.. testcode::
+
+    gain = jax_transforms.volume_change(min_db=-6, max_db=6)
+    phase = jax_transforms.invert_phase(prob=0.5)
+    resize = jax_transforms.trim(length=0.5)  # a map transform
+
+
+    @jax.jit
+    def augment_batch(batch: AudioTree, key) -> AudioTree:
+        k1, k2 = jax.random.split(key)
+        batch = gain.random_map(batch, k1)
+        batch = phase.random_map(batch, k2)
+        batch = resize.map(batch)
+        return batch
+
+
+    out = augment_batch(batch, jax.random.key(1))
+    print(out.waveform.shape)
+
+.. testoutput::
+
+    (8, 2, 8000)
+
+Pair this with :func:`grain.experimental.device_put` (see
+:ref:`streaming-device-put`) to stream host batches onto the accelerator and
+augment them in the same jitted step that trains your model.
+
+.. note::
+   The full catalog of transforms — their shared parameters (``prob``,
+   ``split_seed``, ``scope``, ``output_key``), which ones invalidate the cached
+   ``lufs``, and the decorators for writing your own — lives in the
+   :mod:`audiotree.transforms` API reference. Both backends expose the same names
+   (``choose`` is the one exception — it branches in Python, so it cannot be
+   traced), so anything you configure for a Grain pipeline works here by importing
+   it from ``audiotree.transforms.jax``.
+
+   ``encode_with_codec`` and ``encode_latents`` are a special case in the other
+   direction: the two namespaces export the *same* objects, because the
+   arithmetic lives in the codec you supply rather than in audiotree. Neither
+   wraps the codec in ``jax.jit``, so a JAX codec traces into a step like the one
+   above. See :ref:`codecs`.
+
+.. note::
+   **Same names, same semantics, not bit-identical results.** The two backends
+   agree on what a transform *means* — and ``tests/transforms/test_backend_parity.py``
+   pins that agreement — but two implementations of the same DSP do not produce
+   identical floats:
+
+   - ``resample`` uses librosa/soxr on NumPy and a Julius-style sinc filter on
+     JAX. On band-limited content they agree to about ``8.5e-5`` absolute; on
+     broadband noise only to ~24 dB SNR, essentially all of it in the
+     anti-aliasing filter's transition band, where the two filter designs roll
+     off differently.
+   - ``volume_norm`` measures with the exact IIR K-weighting meter on NumPy
+     and ``jaxloudnorm``'s FIR-approximated K-weighting on JAX. Measured
+     loudness differs by up to 0.031 dB, so the output differs from the other
+     backend's by a pure scalar gain of about 0.036 dB.
+
+   Neither is a bug, but do not expect a NumPy-augmented run and a
+   JAX-augmented run to reproduce each other sample-for-sample.
+
+Next
+----
+
+With data loaded, augmented, and ready for training, the final Getting-started
+chapter, :ref:`writer`, shows how to write prepared datasets back to disk.
