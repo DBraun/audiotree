@@ -1,0 +1,19 @@
+# Normalize line endings: store text as LF in the repo and check out LF on
+# every platform. `text=auto` lets git auto-detect binary files and leave them
+# untouched. See https://git-scm.com/docs/gitattributes.
+* text=auto eol=lf
+
+# Windows batch scripts must keep CRLF to run correctly under cmd.exe.
+*.bat text eol=crlf
+
+# Explicit binary assets (never touch these).
+*.wav  binary
+*.flac binary
+*.mp3  binary
+*.ogg  binary
+*.bin  binary
+*.npy  binary
+*.npz  binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
