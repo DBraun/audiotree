@@ -1,27 +1,86 @@
-from .core import Identity
-from .core import VolumeChange
-from .core import VolumeNorm
-from .core import RescaleAudio
-from .core import InvertPhase
-from .core import SwapStereo
-from .core import CorruptPhase
-from .core import ShiftPhase
-from .core import Choose
-from .core import NeuralAudioCodecEncodeTransform
-from .core import NeuralLatentEncodeTransform
-from .core import ReduceBatchTransform
+"""AudioTree transforms for data augmentation.
+
+This module provides two sets of transforms:
+
+1. **NumPy transforms** (this module, ``audiotree.transforms``):
+   For CPU-based grain data pipelines. Uses NumPy operations and np.random.Generator.
+
+2. **JAX transforms** (``audiotree.transforms.jax``):
+   For GPU/JIT training pipelines. Uses JAX operations and jax.random.key.
+
+Example - CPU (grain pipeline)::
+
+    from audiotree.transforms import volume_norm, trim
+
+    # Create transform and apply with grain
+    transform = volume_norm(min_db=-20, max_db=-15)
+    ds = ds.random_map(transform, seed=42)
+
+Example - GPU (jitted training step)::
+
+    from audiotree.transforms import jax as jax_transforms
+    import argbind
+
+    # Bind all transforms for YAML configuration
+    transforms_lib = argbind.bind_module(jax_transforms)
+
+    @argbind.bind("train", "val")
+    def augment_batch(rng, batch, transforms: list[str] = None):
+        for transform_name in transforms or []:
+            transform = getattr(transforms_lib, transform_name)()
+            if hasattr(transform, "random_map"):
+                rng, subkey = jax.random.split(rng)
+                batch = transform.random_map(batch, subkey)
+            elif hasattr(transform, "map"):
+                batch = transform.map(batch)
+        return batch
+
+See also:
+    - :mod:`audiotree.transforms.jax` for GPU transforms
+"""
+
+from .codec import AudioCodec
+from .codec import LatentAudioCodec
+from .codec import encode_latents
+from .codec import encode_with_codec
+from .functional import identity
+from .functional import mono
+from .functional import stereo
+from .functional import resample
+from .functional import volume_change
+from .functional import volume_norm
+from .functional import rescale_audio
+from .functional import peak_norm
+from .functional import invert_phase
+from .functional import swap_stereo
+from .functional import corrupt_phase
+from .functional import shift_phase
+from .functional import roll
+from .functional import choose
+from .functional import trim
+
+from audiotree.transforms.decorators import map_transform, random_transform
 
 __all__ = [
-    "Identity",
-    "VolumeChange",
-    "VolumeNorm",
-    "RescaleAudio",
-    "InvertPhase",
-    "SwapStereo",
-    "CorruptPhase",
-    "ShiftPhase",
-    "Choose",
-    "NeuralAudioCodecEncodeTransform",
-    "NeuralLatentEncodeTransform",
-    "ReduceBatchTransform",
+    "map_transform",
+    "random_transform",
+    "AudioCodec",
+    "LatentAudioCodec",
+    "identity",
+    "mono",
+    "stereo",
+    "resample",
+    "volume_change",
+    "volume_norm",
+    "rescale_audio",
+    "peak_norm",
+    "invert_phase",
+    "swap_stereo",
+    "corrupt_phase",
+    "shift_phase",
+    "roll",
+    "choose",
+    "encode_with_codec",
+    "encode_latents",
+    "trim",
 ]
