@@ -1,0 +1,81 @@
+{
+  "format": "audiotree-tree",
+  "format_version": [
+    1,
+    0
+  ],
+  "min_reader_version": [
+    1,
+    0
+  ],
+  "producer": "audiotree 1.0.0rc3",
+  "num_samples": 4,
+  "expected_samples": 4,
+  "created_at": "2026-08-08T19:58:46.419587",
+  "structure": {
+    "type": "dict",
+    "children": {
+      "audio": {
+        "type": "AudioTree",
+        "sample_rate": 16000,
+        "children": {
+          "waveform": "audio.waveform",
+          "extras": {
+            "type": "dict",
+            "children": {
+              "energy": "audio.extras.energy"
+            }
+          },
+          "metadata": {
+            "type": "dict",
+            "children": {
+              "filepath": "audio.metadata.filepath",
+              "source": "audio.metadata.source"
+            }
+          }
+        }
+      },
+      "label": "label"
+    }
+  },
+  "leaves": {
+    "audio.waveform": {
+      "dtype": "float32",
+      "shape_per_sample": [
+        1,
+        8
+      ],
+      "file": "audio.waveform.bin"
+    },
+    "audio.extras.energy": {
+      "dtype": "float32",
+      "shape_per_sample": [],
+      "file": "audio.extras.energy.bin"
+    },
+    "audio.metadata.filepath": {
+      "dtype": "int32",
+      "shape_per_sample": [
+        1024
+      ],
+      "file": "audio.metadata.filepath.bin"
+    },
+    "audio.metadata.source": {
+      "dtype": "int32",
+      "shape_per_sample": [
+        1024
+      ],
+      "file": "audio.metadata.source.bin"
+    },
+    "label": {
+      "dtype": "int32",
+      "shape_per_sample": [
+        1
+      ],
+      "file": "label.bin"
+    }
+  },
+  "string_leaves": {},
+  "metadata": {
+    "note": "golden"
+  }
+}
