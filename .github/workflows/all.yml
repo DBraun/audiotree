@@ -4,99 +4,272 @@ on:
   push:
     branches:
       - main
+      - dev
+  # No branch filter: every pull request runs CI, whatever it targets.
   pull_request:
-    branches:
-      - main
   release:
     types: [published]
 
 jobs:
-  test:
+  version:
+    # The version is written by hand in four places and there is no build-time
+    # link between any of them. On an ordinary push this compares the three
+    # in-tree copies to each other so drift is found long before release day;
+    # on a published release the tag joins the comparison. `publish` needs this
+    # job, so a mistyped tag cannot reach PyPI -- and the first release is the
+    # one with no "File already exists" error to catch it.
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Check the version agrees everywhere it is written
+      env:
+        # Empty for pushes and pull requests; the tag for a published release.
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
+      run: |
+        python3 - <<'PY'
+        import os, pathlib, re, sys
+
+        SOURCES = {
+            # The single source of truth, read by pyproject.toml via hatchling.
+            "src/audiotree/__init__.py": r'^__version__ = "([^"]+)"',
+            "CITATION.cff": r'^version: "?([^"\s]+?)"?$',
+            # Ships in the wheel METADATA, so it renders on the PyPI page.
+            "README.md": r"^\s*version = \{([^}]+)\},$",
+        }
+
+        found = {}
+        for path, pattern in SOURCES.items():
+            text = pathlib.Path(path).read_text(encoding="utf-8")
+            hits = re.findall(pattern, text, re.MULTILINE)
+            if len(hits) != 1:
+                sys.exit(f"{path}: expected 1 version match for {pattern!r}, got {hits!r}")
+            found[path] = hits[0]
+
+        tag = os.environ.get("RELEASE_TAG", "")
+        if tag:
+            found["the release tag"] = tag.removeprefix("v")
+
+        for path, version in found.items():
+            print(f"{version:<12} {path}")
+        if len(set(found.values())) != 1:
+            sys.exit("Version mismatch: every source listed above must agree.")
+        print("All versions agree.")
+        PY
+
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]  # grain doesn't support Python 3.13 yet.
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        # The classifiers claim "Operating System :: OS Independent" and the
+        # docs ship a `make.bat`, so Windows has to be tested rather than
+        # assumed -- but the package is pure Python and its only compiled
+        # dependencies (soundfile, jax, scipy) publish Windows wheels, so a
+        # second full column would mostly re-run the same code. One leg on one
+        # version is the cheap way to keep the claim honest.
+        include:
+          - os: windows-latest
+            python-version: "3.13"
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+    - name: Install uv and Python ${{ matrix.python-version }}
+      uses: astral-sh/setup-uv@v8.3.1
       with:
         python-version: ${{ matrix.python-version }}
+        enable-cache: true
 
+    # The `all` extra is `progress` (tqdm) plus `bagz` under the markers
+    # describing where bagz publishes wheels, so one command gives the Linux
+    # x86-64 runners the string-leaf and windowed-LUFS-cache coverage and lets
+    # macOS, Windows and Python 3.14 prove the package works without bagz.
     - name: Install dependencies
-      run: |
-        sudo apt-get install libsndfile-dev
-        python -m pip install --upgrade pip
-        pip install ".[dev]"
-        pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
-        pip install git+https://github.com/boris-kuz/jaxloudnorm.git
+      run: uv sync --extra all
 
     - name: Run tests
-      run: |
-        python -m pytest tests
+      # PYTHONWARNDEFAULTENCODING turns locale-dependent text I/O into an
+      # EncodingWarning, which pyproject.toml escalates to an error. Without it
+      # the Windows leg is the only thing that catches an unencoded open().
+      env:
+        PYTHONWARNDEFAULTENCODING: "1"
+      run: uv run pytest
 
-  build_docs:
-    permissions:
-      contents: write
+  test_lowest_direct:
+    # Resolve every declared dependency to its lowest allowed version and run
+    # the suite. Without this, the floors in pyproject.toml are aspirational:
+    # the normal job always installs the newest compatible release, so a floor
+    # that is too low (or fictional) is never exercised.
     runs-on: ubuntu-latest
-    needs: test
+    timeout-minutes: 30
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Install uv and Python
+      uses: astral-sh/setup-uv@v8.3.1
       with:
-        python-version: 3.11
+        python-version: "3.11"
+        enable-cache: true
+
+    - name: Install dependencies (lowest allowed versions)
+      run: |
+        uv sync --extra bagz --extra progress --resolution lowest-direct
+
+    - name: Run tests
+      run: uv run --no-sync pytest
+
+  test_wheel:
+    # Every leg of `test` runs against an editable `src/` checkout, which tests
+    # the repository rather than the artifact. This job builds the sdist and the
+    # wheel, installs the wheel into a throwaway environment, and runs the suite
+    # from a staging directory outside the repository -- so a file missing from
+    # the distribution fails here instead of on a user's machine.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Install uv and Python
+      uses: astral-sh/setup-uv@v8.3.1
+      with:
+        python-version: "3.13"
+        enable-cache: true
+
+    - name: Build the sdist and wheel
+      run: |
+        uv build --out-dir "$RUNNER_TEMP/dist"
+        ls -l "$RUNNER_TEMP/dist"
+
+    # The suite is deliberately not shipped in the sdist (see the policy comment
+    # in pyproject.toml), so stage it from the checkout. Staging it *outside*
+    # the repository is the point: run from the repo root and `src/audiotree`
+    # shadows the installed package on `sys.path`, and the job proves nothing.
+    - name: Run the suite against the installed wheel
+      run: |
+        stage="$RUNNER_TEMP/wheel-check"
+        mkdir -p "$stage"
+        # pyproject.toml comes along for its [tool.pytest.ini_options] only;
+        # `src/` deliberately does not.
+        cp -R tests examples docs pyproject.toml "$stage/"
+        cd "$stage"
+        uv venv
+        # `--group dev` reads the staged pyproject.toml, so the test-time
+        # dependencies cannot drift away from what the other jobs use.
+        uv pip install "$RUNNER_TEMP"/dist/*.whl --group dev
+        # Doctests of the *installed* modules, then the unit suite and examples.
+        uv run --no-project pytest --doctest-modules --pyargs audiotree
+        uv run --no-project pytest tests examples
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v8.3.1
+      with:
+        python-version: "3.11"
+
+    - name: Run pre-commit
+      run: uvx pre-commit run --all-files
+
+  build_docs:
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Install uv and Python
+      uses: astral-sh/setup-uv@v8.3.1
+      with:
+        python-version: "3.11"
+        enable-cache: true
 
     - name: Install dependencies
       run: |
-        sudo apt-get install libsndfile-dev
-        python -m pip install --upgrade pip
-        pip install ".[dev]"
-        pip install git+https://github.com/DBraun/argbind.git@improve.subclasses
-        pip install git+https://github.com/boris-kuz/jaxloudnorm.git
-        pip install furo
+        uv sync
+
+    - name: Run doctests
+      run: uv run make -C docs doctest
 
     - name: Build Docs
-      run: |
-        cd docs
-        make html
+      run: uv run make -C docs html
 
-    - name: Deploy Docs to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v4
+    - name: Upload Pages artifact
+      uses: actions/upload-pages-artifact@v5
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./docs/build/html
+        path: docs/build/html
+
+  deploy_docs:
+    # Deploy the built docs to GitHub Pages (requires Settings -> Pages ->
+    # Source = "GitHub Actions"). Only on main; PRs build but don't deploy.
+    needs: build_docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v5
 
   publish:
-    needs: [test, build_docs]
+    needs: [version, test, test_lowest_direct, test_wheel, lint, build_docs]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'release' && github.event.action == 'published'
-    
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/audiotree
+
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v8.3.1
       with:
-        python-version: 3.11
-
-    - name: Install build dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install build
+        python-version: "3.11"
 
     - name: Build package
+      run: uv build
+
+    # The `version` job already refused a tag that disagrees with the sources.
+    # This is the last gate, on the thing actually being uploaded: the filenames
+    # carry the version the backend derived, so a stale build directory or a
+    # checkout of the wrong ref cannot slip past.
+    - name: Assert the built artifacts carry the release version
+      env:
+        RELEASE_TAG: ${{ github.event.release.tag_name }}
       run: |
-        python -m build
+        version="${RELEASE_TAG#v}"
+        for artifact in "audiotree-$version.tar.gz" "audiotree-$version-py3-none-any.whl"; do
+          if [ ! -f "dist/$artifact" ]; then
+            echo "::error::dist/$artifact is missing; uv build produced: $(ls dist)"
+            exit 1
+          fi
+        done
+        ls -l dist
 
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
