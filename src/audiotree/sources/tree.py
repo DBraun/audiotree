@@ -160,8 +160,8 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
                 f"truncated or the manifest does not describe it."
             )
 
-    # String leaves live in bagz files, which cannot be opened everywhere (bagz
-    # ships manylinux x86-64 wheels only). The type, safe_join and existence
+    # String leaves live in bagz files, whose dependency may be
+    # absent. The type, safe_join and existence
     # checks need no bagz, so they run unconditionally; the record-count check
     # needs the file opened, so it runs only where bagz is importable.
     try:

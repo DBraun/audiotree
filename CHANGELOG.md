@@ -6,7 +6,10 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- Install Bagz 0.3.8+ as a base dependency on macOS and Linux, replacing the
+  `bagz` extra. The `all` extra now adds only progress reporting.
 
 ## [1.0.0] - 2026-08-11
 

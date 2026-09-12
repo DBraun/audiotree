@@ -23,7 +23,7 @@ from audiotree.tree_writer import TreeWriter
 
 requires_bagz = pytest.mark.skipif(
     importlib.util.find_spec("bagz") is None,
-    reason="bagz not installed (Linux-only wheels)",
+    reason="bagz not installed",
 )
 
 
@@ -821,10 +821,9 @@ def test_load_into_memory_pickle_roundtrip():
 def test_excluding_string_leaves_works_without_bagz(tmp_path, monkeypatch):
     """Excluding every string leaf must make a dataset readable without bagz.
 
-    bagz publishes manylinux x86-64 wheels only, and `require_bagz` used to be
-    called before the exclusion filter — so `exclude_prefixes=["caption"]` still
-    raised ImportError and a Linux-written dataset could not be opened at all
-    elsewhere, not even to read its waveforms.
+    Bagz may be absent, but `require_bagz` used to run before the exclusion
+    filter, so `exclude_prefixes=["caption"]` still raised ImportError when
+    bagz was absent, even when reading only waveforms.
     """
     import builtins
 
@@ -857,7 +856,7 @@ def test_excluding_string_leaves_works_without_bagz(tmp_path, monkeypatch):
     monkeypatch.setattr(builtins, "__import__", no_bagz)
 
     # Without the exclusion, the string leaf still needs bagz.
-    with pytest.raises(ImportError, match="audiotree\\[bagz\\]"):
+    with pytest.raises(ImportError, match="pip install.*bagz"):
         TreeDataSource(data_dir)[0]
 
     # Excluding it makes the rest of the dataset readable.
@@ -1100,9 +1099,8 @@ def test_in_progress_dataset_is_readable_after_flush(tmp_path):
 def test_string_leaf_manifest_gaps_refused_at_construction(tmp_path, file_value, match):
     """String leaves were never validated: bad ones passed construction.
 
-    The type, safe_join and existence checks need no bagz (which has no macOS
-    wheel), so they run everywhere -- unlike the record-count check, which is
-    gated behind bagz being importable.
+    The type, safe_join and existence checks need no bagz, so they run
+    everywhere. The record-count check requires bagz to be importable.
     """
     data_dir = tmp_path / "ds"
     with TreeWriter(data_dir, expected_samples=2) as w:
@@ -1246,9 +1244,8 @@ class _StubBagzReader:
 def stub_bagz(monkeypatch):
     """Stand in for bagz so string-leaf tests run everywhere.
 
-    bagz publishes manylinux x86-64 wheels only. What these tests exercise is
-    which branch ``__getitem__`` takes, not the container format, so a stub
-    keeps the coverage on macOS and aarch64 instead of skipping it there.
+    These tests exercise which branch ``__getitem__`` takes, so a stub
+    keeps the coverage in environments without the bagz dependency.
     """
     module = types.ModuleType("bagz")
     module.Writer = _StubBagzWriter

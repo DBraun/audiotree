@@ -27,7 +27,7 @@ from audiotree.sources.windowed import _build_slot_index
 
 requires_bagz = pytest.mark.skipif(
     importlib.util.find_spec("bagz") is None,
-    reason="bagz not installed (Linux-only wheels)",
+    reason="bagz not installed",
 )
 
 
@@ -419,7 +419,7 @@ def test_save_window_lufs_temp_file_keeps_bagz_extension(tmp_path, monkeypatch):
     # bagz selects compression from the file extension, so the atomic-write
     # temp file must end in ".bagz" — a ".tmp" suffix would write uncompressed
     # records that the renamed lufs.bagz then fails to decompress. Stubbed so
-    # the contract is enforced even where bagz has no wheel (macOS, Windows).
+    # the contract is enforced even when the bagz dependency is absent.
     import audiotree.sources.windowed as windowed_mod
 
     writer_paths = []

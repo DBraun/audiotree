@@ -87,10 +87,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
         enable-cache: true
 
-    # The `all` extra is `progress` (tqdm) plus `bagz` under the markers
-    # describing where bagz publishes wheels, so one command gives the Linux
-    # x86-64 runners the string-leaf and windowed-LUFS-cache coverage and lets
-    # macOS, Windows and Python 3.14 prove the package works without bagz.
+    # Bagz is a base dependency on macOS and Linux; Windows exercises the
+    # package without it. The `all` extra adds progress reporting via tqdm.
     - name: Install dependencies
       run: uv sync --extra all
 
@@ -121,7 +119,7 @@ jobs:
 
     - name: Install dependencies (lowest allowed versions)
       run: |
-        uv sync --extra bagz --extra progress --resolution lowest-direct
+        uv sync --extra all --resolution lowest-direct
 
     - name: Run tests
       run: uv run --no-sync pytest

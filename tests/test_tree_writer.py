@@ -14,7 +14,7 @@ from audiotree.tree_writer import TreeWriter
 
 requires_bagz = pytest.mark.skipif(
     importlib.util.find_spec("bagz") is None,
-    reason="bagz not installed (Linux-only wheels)",
+    reason="bagz not installed",
 )
 
 

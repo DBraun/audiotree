@@ -50,6 +50,7 @@ dependencies = [
     # fallback decoder raises. It arrives transitively via librosa, but a
     # direct import needs a direct declaration.
     "audioread>=3.0",
+    "bagz>=0.3.8; sys_platform == 'darwin' or sys_platform == 'linux'",
     "einops>=0.8.1",
     "flax>=0.12.3",  # earlier 0.12.x break against every jax we allow
     # Upper-bounded on principle: grain is 0.x, so a minor release may break
@@ -67,24 +68,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# bagz publishes manylinux x86-64 wheels only (no macOS, no Linux aarch64, and
-# nothing for Python 3.14), so a hard dependency made `pip install audiotree`
-# unsatisfiable on platforms this package otherwise supports. It is imported
-# lazily via `audiotree._bagz.require_bagz`, and is needed only for string
-# leaves in TreeWriter/TreeDataSource and for the windowed-LUFS cache.
-bagz = ["bagz>=0.2.0"]
 # `tqdm` is imported lazily by AudioWriter when `show_progress=True`. It was
 # imported but declared nowhere, so the flag was a silent no-op in every
 # environment that had not installed tqdm for some other reason.
 progress = ["tqdm>=4.66"]
-# `all` deliberately does *not* pull the `bagz` extra verbatim: `pip install
-# audiotree[bagz]` is an explicit request that should fail loudly where bagz has
-# no wheel, but `[all]` is a convenience and must stay installable everywhere.
-# Hence the same requirement under the markers describing where bagz publishes.
-all = [
-    "audiotree[progress]",
-    "bagz>=0.2.0; sys_platform == 'linux' and platform_machine == 'x86_64' and python_version < '3.14'",
-]
+all = ["audiotree[progress]"]
 
 [project.urls]
 Homepage = "https://github.com/DBraun/audiotree"

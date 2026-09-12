@@ -20,13 +20,11 @@ tested examples, and the API reference; start there.
 pip install audiotree
 ```
 
-JAX, Flax, Grain, NumPy, librosa, and soundfile come with it. Two extras:
-`audiotree[bagz]` adds [Bagz](https://github.com/google/bagz) record files, which
-back string leaves in `TreeWriter`/`TreeDataSource` and the windowed-LUFS cache
-(an extra rather than a dependency because bagz publishes manylinux x86-64 wheels
-only, and a hard dependency made `pip install audiotree` unsatisfiable
-elsewhere); `audiotree[progress]` adds tqdm for `AudioWriter(show_progress=True)`.
-`audiotree[all]` is both, wherever bagz has a wheel.
+JAX, Flax, Grain, NumPy, librosa, and soundfile come with it.
+On macOS and Linux, [Bagz](https://github.com/google/bagz) is also installed for
+string leaves in `TreeWriter`/`TreeDataSource` and the windowed-LUFS cache.
+`audiotree[progress]` (or `audiotree[all]`) adds tqdm for
+`AudioWriter(show_progress=True)`.
 
 ## Quickstart
 

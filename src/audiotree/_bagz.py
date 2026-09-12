@@ -1,8 +1,7 @@
-"""Optional ``bagz`` dependency, resolved lazily.
+"""Platform-dependent ``bagz`` dependency, resolved lazily.
 
-``bagz`` publishes manylinux x86-64 wheels only — no macOS, no Linux aarch64,
-and nothing for Python 3.14 — so it is an optional extra (``audiotree[bagz]``)
-rather than a hard requirement, and must not be imported at module scope.
+``bagz`` is installed by default on macOS and Linux. Resolve it lazily so
+other platforms can use features that do not need record storage.
 audiotree works fine without it as long as no feature that stores bagz records
 (string leaves in TreeWriter/TreeDataSource, windowed-LUFS caches) is used.
 Call :func:`require_bagz` at the point of use — and only for leaves that are
@@ -23,9 +22,9 @@ def require_bagz(purpose: str):
     except ImportError as e:
         raise ImportError(
             f"The 'bagz' package is required for {purpose}, but it is not "
-            "installed. Install it with `pip install audiotree[bagz]`. Note "
-            "that bagz publishes manylinux x86-64 wheels only, so on macOS, "
-            "Linux aarch64, or Python 3.14 you may need to build it from "
-            "source — or exclude the string leaves that need it."
+            "installed. Install it with `pip install 'bagz>=0.3.8'`. "
+            "Bagz 0.3.8+ provides wheels for Linux x86-64 and macOS Apple "
+            "Silicon; other platforms may need a source build, or you can "
+            "exclude the string leaves that need it."
         ) from e
     return bagz
