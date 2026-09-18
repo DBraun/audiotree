@@ -648,9 +648,8 @@ def test_filter_matching_nothing_raises():
 def test_non_scalar_tag_value_reports_the_tag():
     """A container-valued tag cell fails with an actionable error, not a numpy one.
 
-    ``AudioWriter`` accepts any tag value, and the reader's ``value != ""``
-    check used to raise "truth value of an array is ambiguous" -- naming neither
-    the tag nor the manifest, so the file looked permanently unreadable.
+    The writer now rejects non-scalar tags, but legacy or externally supplied
+    manifests must still fail with a message naming the offending tag.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
@@ -659,9 +658,14 @@ def test_non_scalar_tag_value_reports_the_tag():
             AudioTree.create(
                 np.zeros((1, 1, 8000), dtype=np.float32), sample_rate=8000
             ),
-            tags={"embedding": np.array([1.0, 2.0, 3.0])},
+            tags={"embedding": 1.0},
         )
         writer.save_manifest()
+        manifest_path = output_dir / "manifest.npz"
+        with np.load(manifest_path, allow_pickle=False) as archive:
+            columns = dict(archive)
+        columns["tags_embedding"] = np.array([[1.0, 2.0, 3.0]])
+        np.savez(manifest_path, **columns)
 
         with pytest.raises(ValueError, match="non-scalar value for tag 'embedding'"):
             AudioDataSource(output_dir)
