@@ -310,20 +310,20 @@ def _spawn_numpy_rngs(
 
 
 def merge_pytree(tree1, tree2):
-    """Order matters!"""
-
-    def is_leaf(leaf: dict):
-        if not isinstance(leaf, dict):
-            return False
-        values = list(leaf.values())
-        while isinstance(values, list) and values:
-            values = values[0]
-        return not values or isinstance(values, AudioTree)
-
-    def _combine(x, y):
-        return {**x, **y}
-
-    return jax.tree.map(_combine, tree1, tree2, is_leaf=is_leaf)
+    """Merge nested containers, with the second tree winning leaf collisions."""
+    # Out-of-scope AudioTrees become None, including inside lists of trees.
+    # Those placeholders must not overwrite the original elements.
+    if tree2 is None:
+        return tree1
+    if isinstance(tree1, dict) and isinstance(tree2, dict):
+        result = dict(tree1)
+        for key, value in tree2.items():
+            result[key] = merge_pytree(tree1[key], value) if key in tree1 else value
+        return result
+    if isinstance(tree1, (list, tuple)) and type(tree1) is type(tree2):
+        if len(tree1) == len(tree2):
+            return type(tree1)(merge_pytree(x, y) for x, y in zip(tree1, tree2))
+    return tree2
 
 
 class _ConstantOutputKey:
@@ -393,14 +393,6 @@ class BaseTransformMixIn:
                 f"{type(old_tree).__name__}, not a dict."
             )
 
-        def is_leaf(x):
-            if not isinstance(x, dict):
-                return False
-            values = list(x.values())
-            while isinstance(values, list) and values:
-                values = values[0]
-            return not values or isinstance(values, AudioTree)
-
         def contains_audiotree(value) -> bool:
             if isinstance(value, AudioTree):
                 return True
@@ -410,7 +402,7 @@ class BaseTransformMixIn:
 
         # Use output_key to rename the nodes in the tree
         def rename_node(path: KeyPath, leaf):
-            full_path = [k.key for k in path]
+            full_path = [k.key if isinstance(k, DictKey) else k.idx for k in path]
             renamed = {}
             sources = {}  # output name -> the input key that produced it
             for k, v in leaf.items():
@@ -440,8 +432,25 @@ class BaseTransformMixIn:
                 sources[name] = k
             return renamed
 
-        # Rename the deepest keys in the new tree using the `output_key` function.
-        new_tree = map_with_path(rename_node, new_tree, is_leaf=is_leaf)
+        def rename_tree(path, node):
+            # Inspect container types, never the truth value of an array or
+            # the first sorted key. Labels and nested dictionaries may sit
+            # alongside direct AudioTree children in the same dictionary.
+            if isinstance(node, dict):
+                nested = {
+                    key: rename_tree(path + (DictKey(key),), value)
+                    for key, value in node.items()
+                    if value is not None and not contains_audiotree(value)
+                }
+                return {**nested, **rename_node(path, node)}
+            if isinstance(node, (list, tuple)):
+                return type(node)(
+                    rename_tree(path + (SequenceKey(i),), value)
+                    for i, value in enumerate(node)
+                )
+            return node
+
+        new_tree = rename_tree((), new_tree)
 
         # Merge the trees. Order matters: on a key collision the second argument
         # wins, and the only key that can collide is the one the user explicitly

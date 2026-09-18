@@ -316,8 +316,9 @@ Combine scope with output_key to create new keys:
 
     from audiotree.transforms import volume_norm
 
-    batch = {"src": audio1, "target": audio2}
+    batch = {"a_labels": np.arange(audio1.batch_size), "src": audio1, "target": audio2}
 
+    # Array labels are preserved regardless of where their key sorts.
     # Transform 'src' and output to 'src_modified'
     transform = volume_norm(
         min_db=-20,
@@ -335,7 +336,7 @@ Combine scope with output_key to create new keys:
 
 .. testoutput::
 
-    ['modified', 'src', 'target']
+    ['a_labels', 'modified', 'src', 'target']
 
 Complete Training Pipeline
 ---------------------------

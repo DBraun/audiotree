@@ -493,6 +493,26 @@ def _const(value):
 
 
 @pytest.mark.parametrize("backend", ["numpy", "jax"])
+@pytest.mark.parametrize("label_key", ["a_labels", "z_labels"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_output_key_with_array_labels(backend, label_key, nested):
+    invert_phase, make_rng = _backend(backend)
+    labels = np.array([1, 2])
+    if backend == "jax":
+        import jax.numpy as jnp
+
+        labels = jnp.asarray(labels)
+    batch = {label_key: labels, "dry": _const(1.0)}
+    element = {"group": batch} if nested else batch
+    scope = ["group.dry"] if nested else ["dry"]
+    result = invert_phase(scope=scope, output_key="wet").random_map(element, make_rng())
+    result = result["group"] if nested else result
+    np.testing.assert_array_equal(result[label_key], labels)
+    np.testing.assert_allclose(result["dry"].waveform, 1.0)
+    np.testing.assert_allclose(result["wet"].waveform, -1.0)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
 @pytest.mark.parametrize("order", [("dry", "wet"), ("wet", "dry")])
 def test_output_key_with_out_of_scope_first_key(backend, order):
     """B1: an out-of-scope alphabetically-first key must not crash `_post_process`.

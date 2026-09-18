@@ -8,6 +8,8 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Make `output_key` transforms independent of label key ordering, including
+  array labels alongside audio and nested dictionaries.
 - Reject non-scalar tags before writing audio, rather than producing a manifest
   that `AudioDataSource` cannot read. Use `extras` for array-valued annotations.
 - Reject array-valued manifest columns whose shapes change at `write()` time,
