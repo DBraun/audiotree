@@ -480,6 +480,8 @@ AudioWriter records every filled per-item field in the manifest automatically:
 
 The scalar tags are snapshotted by each ``write()`` call. You can reuse the
 dictionary for later batches. Store array-valued annotations in ``extras``.
+Array-valued fields are also copied into the manifest entries at write time,
+so reusing a NumPy feature buffer does not change earlier records.
 
 The manifest will contain:
 

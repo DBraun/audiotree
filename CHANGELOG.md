@@ -8,6 +8,8 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Snapshot array-valued manifest fields in `AudioWriter` so reusing NumPy
+  buffers cannot change previously written labels or features.
 - Snapshot the `AudioWriter.write(tags=...)` dictionary so
   reusing or modifying tags cannot rewrite labels on earlier records.
 - Update cached `lufs_windows` in both `volume_change` backends even when

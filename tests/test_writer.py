@@ -1913,6 +1913,22 @@ def test_same_kind_values_across_writes_still_pass_the_kind_check(tmp_path):
     assert list(data["extras_label"]) == ["warmup", "warmup", "a", "b"]
 
 
+@pytest.mark.parametrize("field", ["codes", "latents", "extras"])
+def test_write_snapshots_array_fields(tmp_path, field):
+    buffer = np.arange(4, dtype=np.float32).reshape(2, 2)
+    original = buffer.copy()
+    kwargs = {field: buffer} if field != "extras" else {"extras": {"embedding": buffer}}
+    tree = AudioTree.create(np.zeros((2, 1, 16), np.float32), 8000, **kwargs)
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        writer.write(tree)
+        buffer[:] += 10
+        writer.write(tree)
+        buffer[:] = -1
+    loaded = AudioTree.from_manifest(tmp_path / "manifest.npz")
+    actual = loaded.extras["embedding"] if field == "extras" else getattr(loaded, field)
+    np.testing.assert_array_equal(actual, np.concatenate([original, original + 10]))
+
+
 def test_write_snapshots_mutable_tags(tmp_path):
     tree = AudioTree.create(np.zeros((2, 1, 16), dtype=np.float32), 8000)
     tags = {"split": "train", "version": 1}

@@ -99,13 +99,15 @@ def _column_value(name: str, value: Any, batch_index: int) -> Any:
             f"array-likes with one row per batch item."
         )
     if array.ndim == 0:
-        return array
+        return array.copy()
     if batch_index >= len(array):
         raise ValueError(
             f"Manifest column {name!r} has {len(array)} rows, too few for batch "
             f"index {batch_index}. Every per-item column must cover the batch."
         )
-    return array[batch_index]
+    # NumPy rows can be views into a reusable caller buffer. Manifest entries
+    # outlive write(), so retain the accepted values rather than that view.
+    return array[batch_index].copy()
 
 
 class AudioWriter:
