@@ -1970,6 +1970,42 @@ def test_write_snapshots_array_fields(tmp_path, field):
     np.testing.assert_array_equal(actual, np.concatenate([original, original + 10]))
 
 
+@pytest.mark.parametrize("value", [np.array([1, 2]), [1, 2], {"x": 1}, 1j])
+def test_write_rejects_non_scalar_tags_before_audio(tmp_path, value):
+    tree = AudioTree.create(np.zeros((1, 1, 16), np.float32), 8000)
+    with AudioWriter(tmp_path) as writer:
+        with pytest.raises(ValueError, match="Tag 'score'.*scalar"):
+            writer.write(tree, tags={"score": value})
+        assert writer.index == 0
+        assert not list(tmp_path.glob("*.wav"))
+        writer.write(tree, tags={"score": 1.0})
+    assert AudioDataSource(tmp_path).get_entry(0)["tags"] == {"score": 1.0}
+
+
+def test_write_scalar_tags_roundtrip(tmp_path):
+    tags = {
+        "string": "train",
+        "bytes": b"train",
+        "integer": np.int64(7),
+        "float": np.float32(0.5),
+        "boolean": np.bool_(True),
+        "absent": None,
+        "zero_dim": np.array(3),
+    }
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        writer.write(AudioTree.create(np.zeros((1, 1, 16)), 8000), tags=tags)
+        tags["zero_dim"][...] = 99
+    actual = AudioDataSource(tmp_path).get_entry(0)["tags"]
+    assert actual == {
+        "string": "train",
+        "bytes": b"train",
+        "integer": 7,
+        "float": 0.5,
+        "boolean": True,
+        "zero_dim": 3,
+    }
+
+
 def test_write_snapshots_mutable_tags(tmp_path):
     tree = AudioTree.create(np.zeros((2, 1, 16), dtype=np.float32), 8000)
     tags = {"split": "train", "version": 1}

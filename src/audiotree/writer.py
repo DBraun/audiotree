@@ -313,7 +313,9 @@ class AudioWriter:
         Args:
             tree: AudioTree containing one or more audio items in batch dimension
             tags: Optional dictionary of custom metadata to include in manifest.
-                Scalar tags are snapshotted at write time.
+                Values must be scalar strings, bytes, numbers, booleans, or
+                None. Scalar tags are snapshotted at write time; put arrays
+                in AudioTree extras instead.
 
         Returns:
             List of Path objects for all written files
@@ -448,6 +450,22 @@ class AudioWriter:
         # Tags hold scalar values. Snapshot the mapping once per batch so
         # reusing it cannot change records already accepted by the writer.
         tags = dict(tags) if tags is not None else None
+        for name, value in (tags or {}).items():
+            if isinstance(value, np.ndarray) and value.ndim == 0:
+                value = value.item()
+                tags[name] = value
+            if value is not None and _manifest._scalar_kind(value) not in (
+                "str",
+                "bytes",
+                "int",
+                "float",
+                "bool",
+            ):
+                raise ValueError(
+                    f"Tag {name!r} must be a scalar string, bytes, integer, "
+                    "float, boolean, or None. Store array-valued information "
+                    "as AudioTree extras instead; this batch was not written."
+                )
         for i in range(batch_size):
             # Generate filename
             # todo: need a way to pass more kwargs to this formatter

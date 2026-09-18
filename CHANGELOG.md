@@ -8,6 +8,8 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Reject non-scalar tags before writing audio, rather than producing a manifest
+  that `AudioDataSource` cannot read. Use `extras` for array-valued annotations.
 - Reject array-valued manifest columns whose shapes change at `write()` time,
   before writing the offending batch's audio, instead of failing at `close()`.
 - Snapshot array-valued manifest fields in `AudioWriter` so reusing NumPy
