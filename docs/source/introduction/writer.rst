@@ -482,6 +482,9 @@ The scalar tags are snapshotted by each ``write()`` call. You can reuse the
 dictionary for later batches. Store array-valued annotations in ``extras``.
 Array-valued fields are also copied into the manifest entries at write time,
 so reusing a NumPy feature buffer does not change earlier records.
+Each array-valued column must keep the same per-item shape across writes.
+A shape change raises at ``write()`` before that batch's audio is written;
+earlier batches remain valid and a corrected batch can be retried.
 
 The manifest will contain:
 

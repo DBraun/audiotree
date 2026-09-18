@@ -246,6 +246,7 @@ class AudioWriter:
         # drift (int rows, then a str row) is rejected at the offending write;
         # see _check_entry_kinds.
         self._column_kinds: Dict[str, str] = {}
+        self._column_shapes: Dict[str, Tuple[int, ...]] = {}
         self.manifest_every = manifest_every
         self._manifest_index = 0  # self.index as of the last manifest write
 
@@ -443,6 +444,7 @@ class AudioWriter:
         entries: List[Dict] = []
         subtypes: List[Optional[str]] = []
         column_kinds = dict(self._column_kinds)
+        column_shapes = dict(self._column_shapes)
         # Tags hold scalar values. Snapshot the mapping once per batch so
         # reusing it cannot change records already accepted by the writer.
         tags = dict(tags) if tags is not None else None
@@ -457,7 +459,7 @@ class AudioWriter:
             entry = self._create_manifest_entry(
                 tree, i, filename, tags, subtype, timestamp, index=self.index + i
             )
-            self._check_entry_kinds(entry, column_kinds)
+            self._check_entry_kinds(entry, column_kinds, column_shapes)
             entries.append(entry)
             subtypes.append(subtype)
             paths.append(filepath)
@@ -506,6 +508,7 @@ class AudioWriter:
         self.manifest_data.extend(entries)
         self.index += batch_size
         self._column_kinds = column_kinds
+        self._column_shapes = column_shapes
         if self._expected_fields is None:
             self._expected_fields = present_fields
         if self._expected_extras_keys is None:
@@ -635,7 +638,12 @@ class AudioWriter:
 
         return entry
 
-    def _check_entry_kinds(self, entry: Dict, column_kinds: Dict[str, str]) -> None:
+    def _check_entry_kinds(
+        self,
+        entry: Dict,
+        column_kinds: Dict[str, str],
+        column_shapes: Dict[str, Tuple[int, ...]],
+    ) -> None:
         """Pin each column's value kind at its first value, rejecting drift here.
 
         A column whose values change logical kind across writes (int rows, then
@@ -652,6 +660,8 @@ class AudioWriter:
                 :meth:`write` passes a scratch copy of ``self._column_kinds``
                 and commits it only when the whole batch lands, so a rejected
                 batch pins nothing.
+            column_shapes: Scratch mapping of array column shapes, committed
+                alongside kinds only after the batch succeeds.
 
         Raises:
             ValueError: If a value's kind differs from the kind established by
@@ -671,6 +681,14 @@ class AudioWriter:
             if value is None:
                 # A missing value (masked subtype, absent tag) fixes no kind.
                 continue
+            if isinstance(value, np.ndarray):
+                expected_shape = column_shapes.setdefault(column, value.shape)
+                if value.shape != expected_shape:
+                    raise ValueError(
+                        f"Manifest column {column!r} has shape {value.shape}, "
+                        f"expected {expected_shape}. Every row of a column must "
+                        "have the same shape; this batch was not written."
+                    )
             kind = _manifest._value_kind(value)
             established = column_kinds.setdefault(column, kind)
             if kind != established:

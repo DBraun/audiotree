@@ -1914,6 +1914,47 @@ def test_same_kind_values_across_writes_still_pass_the_kind_check(tmp_path):
 
 
 @pytest.mark.parametrize("field", ["codes", "latents", "extras"])
+def test_write_rejects_array_shape_drift_before_audio(tmp_path, field):
+    def tree(width):
+        values = np.zeros((1, width), np.float32)
+        kwargs = (
+            {field: values} if field != "extras" else {"extras": {"embedding": values}}
+        )
+        return AudioTree.create(np.zeros((1, 1, 16), np.float32), 8000, **kwargs)
+
+    with AudioWriter(tmp_path) as writer:
+        writer.write(tree(2))
+        with pytest.raises(ValueError, match="shape.*expected"):
+            writer.write(tree(3))
+        assert writer.index == 1
+        assert not (tmp_path / "audio_0001.wav").exists()
+        writer.write(tree(2))
+    loaded = AudioTree.from_manifest(tmp_path / "manifest.npz")
+    assert loaded.batch_size == 2
+    actual = loaded.extras["embedding"] if field == "extras" else getattr(loaded, field)
+    assert actual.shape == (2, 2)
+
+
+def test_rejected_batch_does_not_pin_array_shapes(tmp_path):
+    writer = AudioWriter(tmp_path)
+    bad = AudioTree.create(
+        np.zeros((2, 1, 16), np.float32),
+        8000,
+        extras={"a": np.zeros((2, 2)), "z": np.zeros((1, 2))},
+    )
+    with pytest.raises(ValueError, match="too few"):
+        writer.write(bad)
+    assert not list(tmp_path.glob("*.wav"))
+    good = bad.replace(extras={"a": np.zeros((2, 3)), "z": np.zeros((2, 3))})
+    writer.write(good)
+    writer.close()
+    assert AudioTree.from_manifest(tmp_path / "manifest.npz").extras["a"].shape == (
+        2,
+        3,
+    )
+
+
+@pytest.mark.parametrize("field", ["codes", "latents", "extras"])
 def test_write_snapshots_array_fields(tmp_path, field):
     buffer = np.arange(4, dtype=np.float32).reshape(2, 2)
     original = buffer.copy()
