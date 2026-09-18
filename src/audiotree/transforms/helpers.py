@@ -683,7 +683,7 @@ def _trim_jax(audio_tree: AudioTree, length: float, mode: str = "wrap") -> Audio
     """JAX implementation of trim/pad."""
     waveform = audio_tree.waveform
     T = waveform.shape[-1]
-    target_T = int(length * audio_tree.sample_rate)
+    target_T = round(length * audio_tree.sample_rate)
 
     if T == target_T:
         return audio_tree
@@ -704,7 +704,7 @@ def _trim_np(audio_tree: AudioTree, length: float, mode: str = "wrap") -> AudioT
     """NumPy implementation of trim/pad."""
     waveform = audio_tree.waveform
     T = waveform.shape[-1]
-    target_T = int(length * audio_tree.sample_rate)
+    target_T = round(length * audio_tree.sample_rate)
 
     if T == target_T:
         return audio_tree

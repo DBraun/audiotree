@@ -104,6 +104,18 @@ with only ``lufs_windows`` still gets updated window measurements:
     None
     [[-24.0, -14.0]]
 
+``trim`` rounds the requested duration to the nearest sample, matching
+``AudioTree.from_file(duration=...)``:
+
+.. testcode::
+
+    clip = AudioTree.create(jnp.zeros((1, 1, 44100)), 44100)
+    print(jax_transforms.trim(length=0.7).map(clip).samples)
+
+.. testoutput::
+
+    30870
+
 Pair this with :func:`grain.experimental.device_put` (see
 :ref:`streaming-device-put`) to stream host batches onto the accelerator and
 augment them in the same jitted step that trains your model.

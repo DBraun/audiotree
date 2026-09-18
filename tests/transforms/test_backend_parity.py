@@ -84,6 +84,25 @@ def _apply(transform, audio_tree: AudioTree, seed: int, backend: str) -> AudioTr
 
 
 @pytest.mark.parametrize("backend", ["np", "jax"])
+@pytest.mark.parametrize("input_samples", [100, 44100])
+def test_trim_matches_file_duration_rounding(tmp_path, backend, input_samples):
+    import soundfile
+
+    waveform = np.full((1, 1, input_samples), 0.25, np.float32)
+    path = tmp_path / "audio.wav"
+    soundfile.write(path, waveform[0].T, 44100, subtype="FLOAT")
+    loaded = AudioTree.from_file(path, duration=0.7)
+    xp = np if backend == "np" else jnp
+    module = np_transforms if backend == "np" else jax_transforms
+    tree = AudioTree.create(xp.asarray(waveform), 44100)
+    trimmed = module.trim(length=0.7, mode="constant").map(tree)
+    assert trimmed.samples == loaded.samples == 30870
+    expected = np.zeros((1, 1, 30870), np.float32)
+    expected[..., : min(input_samples, 30870)] = 0.25
+    np.testing.assert_array_equal(trimmed.waveform, expected)
+
+
+@pytest.mark.parametrize("backend", ["np", "jax"])
 @pytest.mark.parametrize("with_lufs", [False, True])
 @pytest.mark.parametrize("with_windows", [False, True])
 def test_volume_change_updates_independent_loudness_caches(
