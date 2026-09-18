@@ -133,6 +133,41 @@ def test_write_round_trip(tmp_path):
     np.testing.assert_allclose(reloaded.waveform[0], waveform[0], atol=1e-3)
 
 
+@pytest.mark.parametrize("sample_rate", [None, 44100])
+@pytest.mark.parametrize("pad_mode", [None, "constant", "wrap"])
+@pytest.mark.parametrize("duration", [0.7, 100.75 / 44100])
+def test_from_file_reads_available_final_sample(
+    tmp_path, sample_rate, pad_mode, duration
+):
+    import soundfile
+
+    path = tmp_path / "source.wav"
+    data = np.arange(44100, dtype=np.float32) / 44100
+    soundfile.write(path, data, 44100, subtype="FLOAT")
+    tree = AudioTree.from_file(
+        path,
+        sample_rate=sample_rate,
+        duration=duration,
+        offset=0.25,
+        pad_mode=pad_mode,
+    )
+    start = 11025
+    count = round(duration * 44100)
+    np.testing.assert_array_equal(tree.waveform[0, 0], data[start : start + count])
+
+
+def test_from_file_reads_enough_source_frames_before_resampling(tmp_path):
+    import soundfile
+
+    path = tmp_path / "source.wav"
+    soundfile.write(path, np.full(8000, 0.25, np.float32), 8000, subtype="FLOAT")
+    # This duration is less than one source frame but covers four output
+    # samples. Truncating the source read returns no audio at all.
+    tree = AudioTree.from_file(path, sample_rate=44100, duration=0.0001)
+    assert tree.samples == 4
+    assert np.all(np.asarray(tree.waveform) > 0)
+
+
 def test_from_file_pads_duration_without_sample_rate(tmp_path):
     """from_file honors ``duration`` even when ``sample_rate`` is None.
 

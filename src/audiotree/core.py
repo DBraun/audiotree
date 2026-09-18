@@ -1438,8 +1438,22 @@ class AudioTree:
         """
         audio_path = Path(audio_path)
 
+        read_duration = duration
+        if duration is not None and duration > 0:
+            # librosa truncates duration * native_rate before decoding. Read
+            # enough whole source frames to cover the requested duration, then
+            # trim to the rounded output length below. nextafter prevents the
+            # frame-count-to-seconds conversion from rounding down again.
+            native_rate = librosa.get_samplerate(str(audio_path))
+            source_frames = np.ceil(duration * native_rate)
+            read_duration = float(np.nextafter(source_frames / native_rate, np.inf))
+
         data, sample_rate = librosa.load(
-            str(audio_path), sr=sample_rate, offset=offset, duration=duration, mono=mono
+            str(audio_path),
+            sr=sample_rate,
+            offset=offset,
+            duration=read_duration,
+            mono=mono,
         )
 
         if offset > 0 and data.shape[-1] == 0:

@@ -8,6 +8,9 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Read enough source frames for `AudioTree.from_file(duration=...)` before
+  resampling and trimming, avoiding artificial padding or short reads when
+  duration-to-frame conversion rounds down despite more audio being available.
 - Reject negative and non-finite `trim` durations instead of treating negative
   values as slice endpoints. Zero duration remains valid.
 - Round `trim` durations to the nearest sample, matching `AudioTree.from_file`

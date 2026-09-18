@@ -131,6 +131,20 @@ into a batch-of-1 tree:
     ['audio.wav']
     [[0. 0. 0. 0.]]
 
+Durations are rounded to the nearest output sample. The loader reads enough
+whole source frames before resampling, so available audio is not replaced by
+padding due to duration rounding. Padding still applies when the file ends
+before the requested duration; ``pad_mode=None`` leaves those reads short.
+
+.. testcode::
+
+    excerpt = AudioTree.from_file("audio.wav", duration=0.7, pad_mode=None)
+    print(excerpt.samples)
+
+.. testoutput::
+
+    30870
+
 Manipulating AudioTree Objects
 ------------------------------
 
