@@ -105,7 +105,8 @@ with only ``lufs_windows`` still gets updated window measurements:
     [[-24.0, -14.0]]
 
 ``trim`` rounds the requested duration to the nearest sample, matching
-``AudioTree.from_file(duration=...)``:
+``AudioTree.from_file(duration=...)``. Durations must be finite and non-negative;
+invalid durations raise ``ValueError``, and zero produces an empty waveform:
 
 .. testcode::
 

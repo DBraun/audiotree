@@ -84,6 +84,25 @@ def _apply(transform, audio_tree: AudioTree, seed: int, backend: str) -> AudioTr
 
 
 @pytest.mark.parametrize("backend", ["np", "jax"])
+@pytest.mark.parametrize("length", [-0.1, -1e-12, np.nan, np.inf, -np.inf])
+def test_trim_rejects_invalid_duration(backend, length):
+    xp = np if backend == "np" else jnp
+    module = np_transforms if backend == "np" else jax_transforms
+    tree = AudioTree.create(xp.ones((1, 1, 16)), 8000)
+    with pytest.raises(ValueError, match="trim length must be finite and non-negative"):
+        module.trim(length=length).map(tree)
+    np.testing.assert_array_equal(tree.waveform, np.ones((1, 1, 16)))
+
+
+@pytest.mark.parametrize("backend", ["np", "jax"])
+def test_trim_zero_duration_is_valid(backend):
+    xp = np if backend == "np" else jnp
+    module = np_transforms if backend == "np" else jax_transforms
+    tree = AudioTree.create(xp.ones((1, 1, 16)), 8000)
+    assert module.trim(length=0).map(tree).waveform.shape == (1, 1, 0)
+
+
+@pytest.mark.parametrize("backend", ["np", "jax"])
 @pytest.mark.parametrize("input_samples", [100, 44100])
 def test_trim_matches_file_duration_rounding(tmp_path, backend, input_samples):
     import soundfile

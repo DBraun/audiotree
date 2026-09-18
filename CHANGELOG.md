@@ -8,6 +8,8 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Reject negative and non-finite `trim` durations instead of treating negative
+  values as slice endpoints. Zero duration remains valid.
 - Round `trim` durations to the nearest sample, matching `AudioTree.from_file`
   and avoiding one-sample mismatches such as 0.7 seconds at 44.1 kHz.
 - Make `output_key` transforms independent of label key ordering, including

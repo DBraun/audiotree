@@ -126,7 +126,7 @@ def trim(audio_tree: AudioTree, length: float = 1.0, mode: str = "wrap") -> Audi
 
     Args:
         audio_tree: Input audio
-        length: Target length in seconds
+        length: Finite, non-negative target length in seconds (rounded to samples).
         mode: Padding mode - "wrap" (circular) or "constant" (zero padding)
 
     Returns:

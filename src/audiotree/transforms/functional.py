@@ -150,7 +150,7 @@ def trim(
 
     Args:
         audio_tree: Input audio
-        length: Target length in seconds
+        length: Finite, non-negative target length in seconds (rounded to samples).
         mode: Padding mode if audio needs to be lengthened
             - "wrap": Circular shift (default). Audio wraps around.
             - "constant": Zero padding.

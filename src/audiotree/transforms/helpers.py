@@ -679,11 +679,20 @@ def _roll_np(
 # =============================================================================
 
 
+def _trim_target_samples(length: float, sample_rate: int) -> int:
+    """Validate trim duration before converting it to a slice or pad length."""
+    if not np.isfinite(length) or length < 0:
+        raise ValueError(
+            f"trim length must be finite and non-negative, got {length!r}."
+        )
+    return round(length * sample_rate)
+
+
 def _trim_jax(audio_tree: AudioTree, length: float, mode: str = "wrap") -> AudioTree:
     """JAX implementation of trim/pad."""
     waveform = audio_tree.waveform
     T = waveform.shape[-1]
-    target_T = round(length * audio_tree.sample_rate)
+    target_T = _trim_target_samples(length, audio_tree.sample_rate)
 
     if T == target_T:
         return audio_tree
@@ -704,7 +713,7 @@ def _trim_np(audio_tree: AudioTree, length: float, mode: str = "wrap") -> AudioT
     """NumPy implementation of trim/pad."""
     waveform = audio_tree.waveform
     T = waveform.shape[-1]
-    target_T = round(length * audio_tree.sample_rate)
+    target_T = _trim_target_samples(length, audio_tree.sample_rate)
 
     if T == target_T:
         return audio_tree
