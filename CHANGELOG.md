@@ -6,6 +6,15 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Reject mixed channel counts or sample lengths when loading manifest-only
+  entries with `AudioTree.from_manifest()`, instead of silently assigning the
+  first item's shape to every waveform. Filter to a common shape or use
+  `AudioDataSource` to read individual items.
+- Fix `flatten_mini_batches()` for token-only trees with label fields and for
+  trees with zero-width array leaves, preserving batch sizes and feature shapes.
+
 ### Changed
 
 - Install Bagz 0.3.8+ as a base dependency on macOS and Linux, replacing the

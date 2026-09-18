@@ -340,6 +340,64 @@ def test_batch_axis_ops_work_on_token_only_tree():
     assert mini.flatten_mini_batches().codes.shape == (4, 2, 10)
 
 
+@pytest.mark.parametrize("backend", [np, jnp], ids=["numpy", "jax"])
+@pytest.mark.parametrize("field", ["codes", "latents"])
+def test_token_mini_batches_with_labels_roundtrip(backend, field):
+    payload = backend.arange(80).reshape(4, 2, 10)
+    tree = AudioTree.create(
+        None,
+        16000,
+        **{field: payload},
+        pitch=backend.arange(4),
+        filepath=[f"{i}.wav" for i in range(4)],
+    )
+    restored = tree.reshape_mini_batches(2).flatten_mini_batches()
+    np.testing.assert_array_equal(getattr(restored, field), payload)
+    np.testing.assert_array_equal(restored.pitch, tree.pitch)
+    assert restored.filepath == tree.filepath
+    assert restored.backend == tree.backend
+
+
+@pytest.mark.parametrize("backend", [np, jnp], ids=["numpy", "jax"])
+@pytest.mark.parametrize("batch_size", [0, 4])
+def test_mini_batches_with_zero_width_extras_roundtrip(backend, batch_size):
+    tree = AudioTree.create(
+        backend.zeros((batch_size, 1, 8)),
+        16000,
+        extras={"features": backend.zeros((batch_size, 0))},
+    )
+    restored = tree.reshape_mini_batches(2).flatten_mini_batches()
+    assert restored.waveform.shape == tree.waveform.shape
+    assert restored.extras["features"].shape == (batch_size, 0)
+    assert restored.backend == tree.backend
+
+
+def test_flatten_mini_batches_keeps_waveform_rank_authoritative():
+    tree = AudioTree.create(
+        np.zeros((4, 1, 8)), 16000, codes=np.zeros((4, 2, 3, 10))
+    )
+    with pytest.raises(ValueError, match="at least 4 dimensions"):
+        tree.flatten_mini_batches()
+
+
+@pytest.mark.parametrize("second_shape", [(1, 200), (2, 100)])
+def test_from_manifest_rejects_mixed_synthetic_shapes(tmp_path, second_shape):
+    from audiotree import AudioWriter
+    from audiotree.sources import AudioDataSource
+
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        for channels, samples in [(1, 100), second_shape]:
+            writer.write(AudioTree.create(np.zeros((1, channels, samples)), 8000))
+    manifest = tmp_path / "manifest.npz"
+    with pytest.raises(ValueError, match="different waveform shapes"):
+        AudioTree.from_manifest(manifest)
+    selected = AudioTree.from_manifest(manifest, filter_fn=lambda e: e["index"] == 1)
+    assert selected.waveform.shape == (1, *second_shape)
+    source = AudioDataSource(manifest)
+    assert source[0].waveform.shape == (1, 1, 100)
+    assert source[1].waveform.shape == (1, *second_shape)
+
+
 def test_create_rejects_provenance_list_of_wrong_length():
     """A per-item filepath/source list must match the batch, or provenance
     silently misaligns (fewer strings than items). A scalar still broadcasts and

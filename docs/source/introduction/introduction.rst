@@ -430,6 +430,21 @@ and :meth:`~audiotree.AudioTree.flatten_mini_batches` removes it again:
     (4, 3, 1, 44100)
     (12, 1, 44100)
 
+Token-only trees also preserve their labels through this round-trip:
+
+.. testcode::
+
+    tokens = AudioTree.create(
+        None, 16000, codes=np.zeros((4, 2, 10), dtype=np.int32),
+        pitch=np.arange(4), extras={"features": np.zeros((4, 0))},
+    )
+    restored = tokens.reshape_mini_batches(2).flatten_mini_batches()
+    print(restored.codes.shape, restored.pitch.shape, restored.extras["features"].shape)
+
+.. testoutput::
+
+    (4, 2, 10) (4,) (4, 0)
+
 .. note::
    AudioTree methods operate on mini-batched trees directly. Methods like
    :meth:`~audiotree.AudioTree.replace_lufs`,

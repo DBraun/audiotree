@@ -795,6 +795,11 @@ predicate (evaluated per manifest entry) selects a subset at load time:
    ``source`` provenance columns — so ``loaded.filepath`` and ``loaded.source``
    match what you wrote.
 
+   Selected items must have matching waveform shapes to form one batch. For
+   manifest-only datasets, differing channel counts or sample lengths raise
+   ``ValueError``. Use ``filter_fn`` to select a common shape, or read individual
+   items with ``AudioDataSource``.
+
 .. _on_disk_formats:
 
 On-Disk Format Versioning

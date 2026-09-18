@@ -1595,7 +1595,8 @@ class AudioTree:
         Raises:
             ValueError: If the manifest is unreadable, holds no entries, names an
                 audio file outside ``audio_dir``, or ``filter_fn`` matches
-                nothing.
+                nothing, or selected manifest-only entries have different
+                channel counts or sample lengths and cannot form one batch.
 
         Example:
             First, write a small manifest with :class:`~audiotree.AudioWriter`
@@ -1666,8 +1667,8 @@ class AudioTree:
                 )
             return np.stack(values)
 
-        # Every item of a manifest shares one sample rate, and a manifest-only
-        # write shares one shape, so the first selected entry describes them all.
+        # The writer enforces a shared sample rate, but permits different
+        # shapes across writes. Validate synthetic shapes before batching.
         first = entries[0]
         sample_rate = int(first["sample_rate"])
         channels = int(first["channels"])
@@ -1700,6 +1701,15 @@ class AudioTree:
 
             waveform = np.stack(waveform, axis=0)  # (batch, channels, samples)
         else:
+            for entry in entries:
+                shape = (int(entry["channels"]), int(entry["samples"]))
+                if shape != (channels, samples):
+                    raise ValueError(
+                        "Selected manifest-only entries have different waveform "
+                        f"shapes: {(channels, samples)} and {shape}. "
+                        "Use filter_fn to select a common shape, or "
+                        "AudioDataSource to read items individually."
+                    )
             # No audio files - create zeros
             waveform = np.zeros((len(entries), channels, samples), dtype=np.float32)
 
@@ -2240,9 +2250,12 @@ class AudioTree:
         # Assuming the waveform has shape (num_mini_batches, mini_batch_size, C, T)
         # We want to reshape to (num_mini_batches * mini_batch_size, C, T)
 
-        # Read the rank from whichever leaf is present (waveform first, then
-        # codes / latents for a token-only tree).
-        leaf = next(self._array_leaves(), None)
+        # The waveform defines audio geometry when present. Otherwise use the
+        # highest-rank array field so per-item labels cannot hide mini-batched
+        # payloads. _array_leaves derives its fields from the dataclass schema.
+        leaf = self.waveform
+        if leaf is None:
+            leaf = max(self._array_leaves(), key=lambda x: x.ndim, default=None)
         shape = () if leaf is None else leaf.shape
 
         # We expect at least 4 dimensions for mini-batched data
@@ -2263,7 +2276,11 @@ class AudioTree:
                 if isinstance(x, list) and x and isinstance(x[0], list):
                     return [s for sub in x for s in sub]
                 return x
-            return x.reshape(-1, *x.shape[2:]) if hasattr(x, "shape") else x
+            return (
+                x.reshape(x.shape[0] * x.shape[1], *x.shape[2:])
+                if hasattr(x, "shape")
+                else x
+            )
 
         return tree_util.tree_map(flatten_leaf, self, is_leaf=_is_string_leaf)
 
