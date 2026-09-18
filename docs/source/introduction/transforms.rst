@@ -85,6 +85,25 @@ transforms such as ``trim`` and ``resample`` need no key and compose the same wa
 
     (8, 2, 8000)
 
+``volume_change`` shifts each available loudness cache independently. A tree
+with only ``lufs_windows`` still gets updated window measurements:
+
+.. testcode::
+
+    windowed = AudioTree.create(
+        jnp.full((1, 1, 16), 0.1), 16000,
+        lufs_windows=jnp.array([[-30.0, -20.0]]),
+    )
+    gain = jax_transforms.volume_change(min_db=6, max_db=6)
+    louder = jax.jit(gain.random_map)(windowed, jax.random.key(0))
+    print(louder.lufs)
+    print(louder.lufs_windows.tolist())
+
+.. testoutput::
+
+    None
+    [[-24.0, -14.0]]
+
 Pair this with :func:`grain.experimental.device_put` (see
 :ref:`streaming-device-put`) to stream host batches onto the accelerator and
 augment them in the same jitted step that trains your model.

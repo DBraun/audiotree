@@ -83,6 +83,37 @@ def _apply(transform, audio_tree: AudioTree, seed: int, backend: str) -> AudioTr
     return transform.map(audio_tree)
 
 
+@pytest.mark.parametrize("backend", ["np", "jax"])
+@pytest.mark.parametrize("with_lufs", [False, True])
+@pytest.mark.parametrize("with_windows", [False, True])
+def test_volume_change_updates_independent_loudness_caches(
+    backend, with_lufs, with_windows
+):
+    xp = np if backend == "np" else jnp
+    module = np_transforms if backend == "np" else jax_transforms
+    tree = AudioTree.create(
+        xp.full((2, 1, 16), 0.1),
+        8000,
+        lufs=xp.array([-30.0, -20.0]) if with_lufs else None,
+        lufs_windows=xp.array([[-30.0, -np.inf], [-20.0, -25.0]])
+        if with_windows
+        else None,
+    )
+    out = _apply(module.volume_change(min_db=6, max_db=6), tree, 0, backend)
+    np.testing.assert_allclose(out.waveform, tree.waveform * 10 ** (6 / 20), rtol=1e-6)
+    if with_lufs:
+        np.testing.assert_allclose(out.lufs, tree.lufs + 6)
+    else:
+        assert out.lufs is None
+    if with_windows:
+        np.testing.assert_allclose(out.lufs_windows, tree.lufs_windows + 6)
+        np.testing.assert_array_equal(
+            tree.lufs_windows, [[-30.0, -np.inf], [-20.0, -25.0]]
+        )
+    else:
+        assert out.lufs_windows is None
+
+
 def _run_both(name: str, kwargs: dict, waveform: np.ndarray, seed: int = 0, **pair_kw):
     """Apply ``name(**kwargs)`` from each backend to the same input."""
     np_out = _apply(

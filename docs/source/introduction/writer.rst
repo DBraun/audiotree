@@ -473,8 +473,13 @@ AudioWriter records every filled per-item field in the manifest automatically:
     )
 
     # Write with custom tags
+    tags = {"dataset": "train", "version": 2}
     with AudioWriter("output_meta") as writer:
-        writer.write(meta_tree, tags={"dataset": "train", "version": 2})
+        writer.write(meta_tree, tags=tags)
+        tags["dataset"] = "test"  # Does not change the already-written records.
+
+The scalar tags are snapshotted by each ``write()`` call. You can reuse the
+dictionary for later batches. Store array-valued annotations in ``extras``.
 
 The manifest will contain:
 

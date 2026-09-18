@@ -309,7 +309,8 @@ class AudioWriter:
 
         Args:
             tree: AudioTree containing one or more audio items in batch dimension
-            tags: Optional dictionary of custom metadata to include in manifest
+            tags: Optional dictionary of custom metadata to include in manifest.
+                Scalar tags are snapshotted at write time.
 
         Returns:
             List of Path objects for all written files
@@ -440,6 +441,9 @@ class AudioWriter:
         entries: List[Dict] = []
         subtypes: List[Optional[str]] = []
         column_kinds = dict(self._column_kinds)
+        # Tags hold scalar values. Snapshot the mapping once per batch so
+        # reusing it cannot change records already accepted by the writer.
+        tags = dict(tags) if tags is not None else None
         for i in range(batch_size):
             # Generate filename
             # todo: need a way to pass more kwargs to this formatter

@@ -100,9 +100,10 @@ def volume_change(
     if audio_tree.lufs is not None:
         audio_tree = audio_tree.replace(
             lufs=shift_lufs(audio_tree.lufs, gain_db, xp=jnp),
-            lufs_windows=shift_lufs_windows(audio_tree.lufs_windows, gain_db, xp=jnp),
         )
-    return audio_tree
+    return audio_tree.replace(
+        lufs_windows=shift_lufs_windows(audio_tree.lufs_windows, gain_db, xp=jnp),
+    )
 
 
 @random_transform

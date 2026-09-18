@@ -8,6 +8,10 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Snapshot the `AudioWriter.write(tags=...)` dictionary so
+  reusing or modifying tags cannot rewrite labels on earlier records.
+- Update cached `lufs_windows` in both `volume_change` backends even when
+  integrated `lufs` is absent.
 - Reject mixed channel counts or sample lengths when loading manifest-only
   entries with `AudioTree.from_manifest()`, instead of silently assigning the
   first item's shape to every waveform. Filter to a common shape or use

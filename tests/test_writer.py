@@ -1913,6 +1913,25 @@ def test_same_kind_values_across_writes_still_pass_the_kind_check(tmp_path):
     assert list(data["extras_label"]) == ["warmup", "warmup", "a", "b"]
 
 
+def test_write_snapshots_mutable_tags(tmp_path):
+    tree = AudioTree.create(np.zeros((2, 1, 16), dtype=np.float32), 8000)
+    tags = {"split": "train", "version": 1}
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        writer.write(tree, tags=tags)
+        tags["split"] = "test"
+        tags["version"] = 2
+        writer.write(tree, tags=tags)
+        tags.clear()
+
+    entries = _manifest.read_entries(tmp_path / "manifest.npz")
+    assert [entry["tags"] for entry in entries] == [
+        {"split": "train", "version": 1},
+        {"split": "train", "version": 1},
+        {"split": "test", "version": 2},
+        {"split": "test", "version": 2},
+    ]
+
+
 def test_timestamp_is_minted_once_per_write_call(tmp_path):
     """Every entry of one write() shares one timestamp, so timestamps record
     when the batch landed and get_stats() counts batches, not items."""
