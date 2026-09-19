@@ -232,6 +232,8 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
                 f"got {children!r}"
             )
         if node_type == "AudioTree":
+            if not isinstance(node.get("mini_batched", False), bool):
+                fail(f"AudioTree at {where} has a non-boolean mini_batched marker")
             sample_rate = node.get("sample_rate")
             if (
                 not isinstance(sample_rate, int)
@@ -329,7 +331,11 @@ def _reconstruct(node, leaf_values: Dict[str, Any]):
                 # ``_metadata`` field (see ``tree_writer``).
                 children["_metadata" if k == "metadata" else k] = val
         children.setdefault("waveform", None)
-        return AudioTree(sample_rate=node["sample_rate"], **children)
+        return AudioTree(
+            sample_rate=node["sample_rate"],
+            _mini_batched=node.get("mini_batched", False),
+            **children,
+        )
 
     raise ValueError(f"Unknown structure node type: {node_type}")
 
@@ -433,7 +439,12 @@ class TreeDataSource(RandomAccessDataSource):
         with open(self.manifest_path, encoding="utf-8") as f:
             self.manifest = json.load(f)
 
-        _format.check(self.manifest, _format.TREE, source=str(self.manifest_path))
+        _format.check(
+            self.manifest,
+            _format.TREE,
+            source=str(self.manifest_path),
+            reader_version=_format.TREE_READER_VERSION,
+        )
 
         _validate_manifest(self.manifest, self.manifest_path)
 

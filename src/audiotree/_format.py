@@ -39,6 +39,9 @@ LUFS_WINDOWS_CACHE = "audiotree-lufs-windows"
 
 # What this build of audiotree writes, and the newest layout it can read.
 CURRENT_VERSION: Tuple[int, int] = (1, 0)
+# Tree format 1.1 adds required static mini-batch grouping metadata. Other
+# formats, and trees without this metadata, continue to use format 1.0.
+TREE_READER_VERSION: Tuple[int, int] = (1, 1)
 
 # NPZ has no place for scalars alongside per-entry columns, so the AudioWriter
 # manifest stores its header as JSON-encoded 0-d arrays under this prefix. The
@@ -82,13 +85,20 @@ def _as_pair(value, field: str, source: str) -> Tuple[int, int]:
     return (value[0], value[1])
 
 
-def check(manifest: Dict, expected_format: str, *, source: str) -> Tuple[int, int]:
+def check(
+    manifest: Dict,
+    expected_format: str,
+    *,
+    source: str,
+    reader_version: Tuple[int, int] = CURRENT_VERSION,
+) -> Tuple[int, int]:
     """Validate an artifact's header and return its ``(major, minor)`` version.
 
     Args:
         manifest: The parsed header/manifest mapping.
         expected_format: Which format the caller is prepared to read.
         source: Path or description used in error messages.
+        reader_version: Newest layout understood by the calling reader.
 
     Returns:
         The artifact's ``format_version``.
@@ -119,17 +129,17 @@ def check(manifest: Dict, expected_format: str, *, source: str) -> Tuple[int, in
         manifest.get("min_reader_version", [1, 0]), "min_reader_version", source
     )
 
-    if version[0] != CURRENT_VERSION[0]:
+    if version[0] != reader_version[0]:
         raise ValueError(
             f"{source}: this {human} is format_version {version[0]}.{version[1]}, "
-            f"but this audiotree reads {CURRENT_VERSION[0]}.x. "
+            f"but this audiotree reads {reader_version[0]}.x. "
             f"It was written by {manifest.get('producer', 'an unknown version')}."
         )
-    if min_reader > CURRENT_VERSION:
+    if min_reader > reader_version:
         raise ValueError(
             f"{source}: this {human} requires a reader of at least "
             f"{min_reader[0]}.{min_reader[1]}, but this audiotree is "
-            f"{CURRENT_VERSION[0]}.{CURRENT_VERSION[1]}. "
+            f"{reader_version[0]}.{reader_version[1]}. "
             f"It was written by {manifest.get('producer', 'an unknown version')}."
         )
     return version

@@ -18,6 +18,27 @@ requires_bagz = pytest.mark.skipif(
 )
 
 
+def test_mini_batched_tokens_roundtrip_with_version_guard(tmp_path):
+    from audiotree import _format
+    from audiotree.sources import TreeDataSource
+
+    tokens = AudioTree.create(None, 16000, codes=np.arange(40).reshape(4, 10))
+    with TreeWriter(tmp_path, expected_samples=2) as writer:
+        writer.write({"tokens": tokens.reshape_mini_batches(2)})
+    manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["format_version"] == manifest["min_reader_version"] == [1, 1]
+    # A 1.0 reader must refuse, not silently lose grouping metadata.
+    with pytest.raises(ValueError, match="requires a reader of at least 1.1"):
+        _format.check(manifest, _format.TREE, source="test", reader_version=(1, 0))
+    with TreeDataSource(tmp_path) as source:
+        restored = AudioTree.batch([source[0]["tokens"], source[1]["tokens"]])
+    np.testing.assert_array_equal(restored.flatten_mini_batches().codes, tokens.codes)
+    manifest["structure"]["children"]["tokens"]["mini_batched"] = "yes"
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="non-boolean mini_batched"):
+        TreeDataSource(tmp_path)
+
+
 def test_basic_write_audiotree():
     """Write a simple AudioTree, verify files and manifest."""
     with tempfile.TemporaryDirectory() as tmpdir:

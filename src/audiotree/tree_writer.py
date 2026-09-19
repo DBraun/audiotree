@@ -132,11 +132,14 @@ def _serialize_structure(pytree) -> Tuple[Any, List[str], List[str]]:
                 # The dict fields (``extras``, ``_metadata``) take the generic
                 # dict branch below; an empty one becomes an empty dict node.
                 children[child_key] = _walk(value, child_prefix)
-            return {
+            structure = {
                 "type": "AudioTree",
                 "sample_rate": node.sample_rate,
                 "children": children,
             }
+            if node._mini_batched:
+                structure["mini_batched"] = True
+            return structure
 
         # Dict node
         if isinstance(node, dict):
@@ -784,8 +787,24 @@ class TreeWriter:
         on-disk manifest always describes a prefix that is actually readable and
         a reader never observes a half-written file.
         """
+
+        def has_mini_batches(node):
+            return isinstance(node, dict) and (
+                node.get("type") == "AudioTree"
+                and node.get("mini_batched", False)
+                or any(
+                    has_mini_batches(child)
+                    for child in node.get("children", {}).values()
+                )
+            )
+
+        version = (
+            _format.TREE_READER_VERSION if has_mini_batches(self._structure) else (1, 0)
+        )
         manifest = {
-            **_format.header(_format.TREE),
+            **_format.header(
+                _format.TREE, format_version=version, min_reader_version=version
+            ),
             "num_samples": self._current_index,
             "expected_samples": self.expected_samples,
             "created_at": datetime.now().isoformat(),

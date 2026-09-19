@@ -433,6 +433,59 @@ def test_from_manifest_rejects_mixed_synthetic_shapes(tmp_path, second_shape):
     assert source[1].waveform.shape == (1, *second_shape)
 
 
+@pytest.mark.parametrize("backend", [np, jnp], ids=["numpy", "jax"])
+@pytest.mark.parametrize("field", ["codes", "latents"])
+@pytest.mark.parametrize("payload_shape", [(), (10,), (2, 10), (2, 3, 10)])
+def test_token_mini_batches_track_grouping(backend, field, payload_shape):
+    shape = (4, *payload_shape)
+    payload = backend.arange(np.prod(shape)).reshape(shape)
+    tree = AudioTree.create(
+        None,
+        16000,
+        **{field: payload},
+        pitch=backend.arange(4),
+        extras={"names": ["a", "b", "c", "d"]},
+    )
+    with pytest.raises(ValueError, match="not marked as mini-batched"):
+        tree.flatten_mini_batches()
+    mini = tree.reshape_mini_batches(2)
+    with pytest.raises(ValueError, match="already mini-batched"):
+        mini.reshape_mini_batches(1)
+    # Indexing and batching must preserve the static grouping state.
+    restored = AudioTree.batch([mini[1], mini[0]]).flatten_mini_batches()
+    np.testing.assert_array_equal(
+        getattr(restored, field),
+        payload[[2, 3, 0, 1]] if backend is np else payload[jnp.array([2, 3, 0, 1])],
+    )
+    np.testing.assert_array_equal(restored.pitch, [2, 3, 0, 1])
+    assert restored.extras["names"] == ["c", "d", "a", "b"]
+    with pytest.raises(ValueError, match="not marked as mini-batched"):
+        restored.flatten_mini_batches()
+    np.testing.assert_array_equal(
+        getattr(restored.reshape_mini_batches(2).flatten_mini_batches(), field),
+        getattr(restored, field),
+    )
+
+
+def test_token_mini_batch_state_survives_jit_and_scan():
+    tree = AudioTree.create(None, 16000, codes=jnp.arange(40).reshape(4, 10))
+    mini = jax.jit(lambda t: t.reshape_mini_batches(2))(tree)
+
+    @jax.jit
+    def process(grouped):
+        _, result = jax.lax.scan(
+            lambda carry, item: (carry, item.replace(codes=item.codes + 1)),
+            None,
+            grouped,
+        )
+        return result.flatten_mini_batches()
+
+    restored = process(mini)
+    np.testing.assert_array_equal(restored.codes, tree.codes + 1)
+    with pytest.raises(ValueError, match="not marked as mini-batched"):
+        restored.flatten_mini_batches()
+
+
 def test_create_rejects_provenance_list_of_wrong_length():
     """A per-item filepath/source list must match the batch, or provenance
     silently misaligns (fewer strings than items). A scalar still broadcasts and

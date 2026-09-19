@@ -816,6 +816,11 @@ predicate (evaluated per manifest entry) selects a subset at load time:
 On-Disk Format Versioning
 -------------------------
 
+``TreeWriter`` preserves explicit mini-batch grouping. Datasets containing
+grouped AudioTrees use tree format 1.1 and require a 1.1-capable reader so older
+readers cannot silently lose that state. Ordinary datasets still use format
+1.0, and existing 1.0 datasets remain readable.
+
 Pre-rendered datasets outlive the code that wrote them, so all three on-disk
 formats — a ``TreeWriter`` directory, an ``AudioWriter`` NPZ manifest, and the
 windowed-LUFS cache — carry a header (``format``, ``format_version``,

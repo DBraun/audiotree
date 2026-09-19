@@ -8,6 +8,11 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Track mini-batch grouping explicitly as static pytree metadata, allowing
+  token-only trees of any payload rank to reshape and flatten safely. Flattening
+  ungrouped tokens and grouping an already grouped tree now raise. `TreeWriter`
+  preserves this state using tree format 1.1 with a 1.1 reader requirement;
+  ordinary datasets retain format 1.0.
 - Invalidate integrated loudness after circular `roll` in both backends: moving
   audio across analysis blocks can change measured LUFS even at equal energy.
 - Read enough source frames for `AudioTree.from_file(duration=...)` before

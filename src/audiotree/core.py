@@ -495,6 +495,7 @@ class _AudioTreeFields(TypedDict, total=False):
     latents: ArrayLike | None
     extras: dict
     _metadata: dict
+    _mini_batched: bool
 
 
 @struct.dataclass
@@ -566,6 +567,10 @@ class AudioTree:
     # through ``create(filepath=..., source=..., offset=...)``; on disk the
     # node keeps the spelling "metadata" (see ``tree_writer``).
     _metadata: dict = struct.field(pytree_node=True, default_factory=dict)
+    # Codec payload ranks are arbitrary. This static flag records the extra
+    # batch axis introduced by reshape_mini_batches without becoming an array
+    # leaf that gets sliced, scanned, or sent to an accelerator.
+    _mini_batched: bool = struct.field(pytree_node=False, default=False)
 
     def replace(self, **updates: Unpack[_AudioTreeFields]) -> Self:
         """Return a new ``AudioTree`` with the given fields replaced.
@@ -2202,6 +2207,10 @@ class AudioTree:
             (4, 3, 1, 44100)
         """
         _require_batched_rank(self.waveform, "reshape_mini_batches")
+        if self._mini_batched:
+            raise ValueError(
+                "Tree is already mini-batched; flatten_mini_batches() first."
+            )
         B = self.batch_size
 
         if B % mini_batch_size != 0:
@@ -2235,7 +2244,9 @@ class AudioTree:
                 else x
             )
 
-        return tree_util.tree_map(reshape_leaf, self, is_leaf=_is_string_leaf)
+        return tree_util.tree_map(reshape_leaf, self, is_leaf=_is_string_leaf).replace(
+            _mini_batched=True
+        )
 
     def flatten_mini_batches(self) -> Self:
         """Flatten mini-batches back into a single batch dimension.
@@ -2250,7 +2261,9 @@ class AudioTree:
 
         Raises:
             ValueError: If the waveform has fewer than 4 dimensions, i.e. it was
-                never mini-batched.
+                never mini-batched, or a token-only tree was not grouped with
+                :meth:`reshape_mini_batches`. Codec feature ranks alone do not
+                identify mini-batches.
 
         Example:
             >>> x = AudioTree(np.zeros((12, 1, 44100)), 44100)
@@ -2264,19 +2277,19 @@ class AudioTree:
         # Assuming the waveform has shape (num_mini_batches, mini_batch_size, C, T)
         # We want to reshape to (num_mini_batches * mini_batch_size, C, T)
 
-        # The waveform defines audio geometry when present. Otherwise use the
-        # highest-rank array field so per-item labels cannot hide mini-batched
-        # payloads. _array_leaves derives its fields from the dataclass schema.
-        leaf = self.waveform
-        if leaf is None:
-            leaf = max(self._array_leaves(), key=lambda x: x.ndim, default=None)
-        shape = () if leaf is None else leaf.shape
-
-        # We expect at least 4 dimensions for mini-batched data
-        if len(shape) < 4:
+        # Waveform geometry is unambiguous, including manually built rank-4
+        # trees. Token ranks are codec-defined, so require explicit grouping
+        # history rather than guessing from their feature dimensions.
+        if self.waveform is None and not self._mini_batched:
+            raise ValueError(
+                "Token-only tree is not marked as mini-batched. Call "
+                "reshape_mini_batches() before flatten_mini_batches(); "
+                "codec feature axes cannot identify a mini-batch axis."
+            )
+        if self.waveform is not None and self.waveform.ndim < 4:
             raise ValueError(
                 f"Expected at least 4 dimensions for mini-batched data, got "
-                f"{len(shape)}. Shape: {shape}"
+                f"{self.waveform.ndim}. Shape: {self.waveform.shape}"
             )
 
         # Flatten the first two dimensions
@@ -2296,7 +2309,9 @@ class AudioTree:
                 else x
             )
 
-        return tree_util.tree_map(flatten_leaf, self, is_leaf=_is_string_leaf)
+        return tree_util.tree_map(flatten_leaf, self, is_leaf=_is_string_leaf).replace(
+            _mini_batched=False
+        )
 
     def filter(self, predicate: Callable[[Self], bool]) -> Self:
         """Keep only the batch items for which ``predicate`` is true.
@@ -2422,7 +2437,7 @@ AudioTree.replace = AudioTree._typed_replace
 # Order is declaration order, which is also the pytree flatten order and
 # therefore the on-disk leaf order that TreeWriter records -- do not sort.
 
-#: Fields that are pytree nodes (i.e. everything but the static ``sample_rate``).
+#: Fields that are pytree nodes (excluding static rate and grouping metadata).
 PYTREE_FIELDS: tuple = tuple(
     f.name for f in dataclasses.fields(AudioTree) if f.metadata.get("pytree_node", True)
 )

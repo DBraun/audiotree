@@ -444,12 +444,15 @@ and :meth:`~audiotree.AudioTree.flatten_mini_batches` removes it again:
     (4, 3, 1, 44100)
     (12, 1, 44100)
 
-Token-only trees also preserve their labels through this round-trip:
+Token-only trees also preserve their labels through this round-trip. Payload
+shapes are codec-defined: always group them with ``reshape_mini_batches`` before
+flattening. Grouping is tracked as static pytree metadata, including through
+indexing and JAX transformations; feature rank is never used to guess it.
 
 .. testcode::
 
     tokens = AudioTree.create(
-        None, 16000, codes=np.zeros((4, 2, 10), dtype=np.int32),
+        None, 16000, codes=np.zeros((4, 10), dtype=np.int32),
         pitch=np.arange(4), extras={"features": np.zeros((4, 0))},
     )
     restored = tokens.reshape_mini_batches(2).flatten_mini_batches()
@@ -457,7 +460,7 @@ Token-only trees also preserve their labels through this round-trip:
 
 .. testoutput::
 
-    (4, 2, 10) (4,) (4, 0)
+    (4, 10) (4,) (4, 0)
 
 .. note::
    AudioTree methods operate on mini-batched trees directly. Methods like
