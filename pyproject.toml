@@ -57,7 +57,10 @@ dependencies = [
     # us. Nothing here rides its private API any more -- the one class that did
     # (transforms.Batch) is gone -- so this can be relaxed once grain is 1.x.
     "grain>=0.2.15,<0.3",
-    "jax>=0.10.0",  # funless `@jax.jit(...)`, which flax.nnx.jit also requires
+    # Flax 0.12.9 imports HiPrimitive, which JAX 0.11.2 no longer exports. Revisit this
+    # cap once a Flax release includes https://github.com/google/flax/pull/5566.
+    "jax>=0.11.1,<0.11.2",
+    "jaxlib>=0.11.1,<0.11.2",
     "jaxloudnorm>=0.3.2",
     "librosa>=0.11.0",
     "librosax>=0.1.2",

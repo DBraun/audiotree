@@ -8,6 +8,9 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Constrain JAX and jaxlib to 0.11.1 while released Flax still imports the removed
+  `HiPrimitive` API, keeping NNX mini-batch processing and examples usable
+  in fresh installations.
 - Reject grouped token-only trees in `filter()` and grouped inputs to per-item
   random transforms with a "flatten first" error. Rank-3 audio inside JAX scan
   or vmap remains supported despite retaining static grouping metadata.
