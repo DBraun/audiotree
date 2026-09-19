@@ -84,6 +84,28 @@ def _apply(transform, audio_tree: AudioTree, seed: int, backend: str) -> AudioTr
 
 
 @pytest.mark.parametrize("backend", ["np", "jax"])
+@pytest.mark.parametrize("prob", [1.0, 0.5])
+def test_circular_roll_invalidates_measurably_changed_loudness(backend, prob):
+    sr = 16000
+    time = np.arange(2 * sr) / sr
+    waveform = (0.2 * np.sin(2 * np.pi * 1000 * time) * (time < 0.5)).astype(np.float32)
+    original = AudioTree.create(waveform, sr).replace_lufs()
+    tree = jax.device_put(original) if backend == "jax" else original
+    module = jax_transforms if backend == "jax" else np_transforms
+    out = _apply(
+        module.roll(min_seconds=0.25, max_seconds=0.25, prob=prob), tree, 0, backend
+    )
+    assert out.lufs is None
+    assert out.lufs_windows is None
+    if prob == 1.0:
+        measured = out.replace(waveform=np.asarray(out.waveform)).replace_lufs()
+        assert abs(float(measured.lufs[0] - original.lufs[0])) > 0.5
+        normalized = out.normalize_lufs(-20)
+        assert normalized.lufs is not None
+        np.testing.assert_allclose(normalized.lufs, -20, atol=1e-5)
+
+
+@pytest.mark.parametrize("backend", ["np", "jax"])
 @pytest.mark.parametrize("length", [-0.1, -1e-12, np.nan, np.inf, -np.inf])
 def test_trim_rejects_invalid_duration(backend, length):
     xp = np if backend == "np" else jnp

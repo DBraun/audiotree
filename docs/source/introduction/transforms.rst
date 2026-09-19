@@ -117,6 +117,10 @@ invalid durations raise ``ValueError``, and zero produces an empty waveform:
 
     30870
 
+Both ``roll`` modes clear integrated and windowed loudness caches. A circular
+shift preserves samples but can change measured LUFS by moving audio across
+analysis blocks. Subsequent loudness normalization remeasures the shifted audio.
+
 Pair this with :func:`grain.experimental.device_put` (see
 :ref:`streaming-device-put`) to stream host batches onto the accelerator and
 augment them in the same jitted step that trains your model.

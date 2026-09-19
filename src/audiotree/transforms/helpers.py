@@ -620,15 +620,10 @@ def _roll_jax(
             raise ValueError(f"Unknown mode: {mode}. Use 'wrap' or 'constant'.")
 
     rolled_audio = roll_single_item(audio_tree.waveform, roll_amounts)
-    # "wrap" reorders existing samples (integrated loudness preserved); "constant"
-    # zeros out part of the signal, changing it. Either way, rolling moves samples
-    # across window boundaries, so ``lufs_windows`` (and ``codes``/``latents``,
-    # which describe the unrolled waveform) are invalidated below.
-    keep = () if mode == "constant" else ("lufs",)
+    # Even a circular shift changes alignment with loudness analysis blocks
+    # and filter boundaries. Preserve neither integrated nor windowed LUFS.
     metadata = _invalidate_offset(audio_tree._metadata)
-    return audio_tree._invalidate_derived(
-        keep=keep, waveform=rolled_audio, _metadata=metadata
-    )
+    return audio_tree._invalidate_derived(waveform=rolled_audio, _metadata=metadata)
 
 
 def _roll_np(
@@ -663,15 +658,9 @@ def _roll_np(
         else:
             raise ValueError(f"Unknown mode: {mode}. Use 'wrap' or 'constant'.")
 
-    # "wrap" reorders existing samples (integrated loudness preserved); "constant"
-    # zeros out part of the signal, changing it. Either way, rolling moves samples
-    # across window boundaries, so ``lufs_windows`` (and ``codes``/``latents``,
-    # which describe the unrolled waveform) are invalidated below.
-    keep = () if mode == "constant" else ("lufs",)
+    # See the JAX path: circular shifts do not preserve measured loudness.
     metadata = _invalidate_offset(audio_tree._metadata)
-    return audio_tree._invalidate_derived(
-        keep=keep, waveform=result, _metadata=metadata
-    )
+    return audio_tree._invalidate_derived(waveform=result, _metadata=metadata)
 
 
 # =============================================================================

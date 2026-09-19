@@ -8,6 +8,8 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Invalidate integrated loudness after circular `roll` in both backends: moving
+  audio across analysis blocks can change measured LUFS even at equal energy.
 - Read enough source frames for `AudioTree.from_file(duration=...)` before
   resampling and trimming, avoiding artificial padding or short reads when
   duration-to-frame conversion rounds down despite more audio being available.

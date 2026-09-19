@@ -635,7 +635,7 @@ def test_trim_invalidates_loudness():
 
 
 def test_roll_loudness_invalidation():
-    """Constant-mode roll invalidates loudness; wrap-mode preserves it."""
+    """Both roll modes invalidate integrated loudness."""
     waveform = np.random.randn(1, 2, 10000).astype(np.float32) * 0.1
     audio_tree = AudioTree(waveform=waveform, sample_rate=10000).replace_lufs()
     rng = np.random.default_rng(0)
@@ -643,7 +643,7 @@ def test_roll_loudness_invalidation():
     wrapped = roll(min_seconds=0.1, max_seconds=0.1, mode="wrap").random_map(
         audio_tree, rng
     )
-    assert wrapped.lufs is not None
+    assert wrapped.lufs is None
 
     constant = roll(min_seconds=0.1, max_seconds=0.1, mode="constant").random_map(
         audio_tree, rng
