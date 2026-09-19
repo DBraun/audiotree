@@ -408,9 +408,7 @@ def test_mini_batches_with_zero_width_extras_roundtrip(backend, batch_size):
 
 
 def test_flatten_mini_batches_keeps_waveform_rank_authoritative():
-    tree = AudioTree.create(
-        np.zeros((4, 1, 8)), 16000, codes=np.zeros((4, 2, 3, 10))
-    )
+    tree = AudioTree.create(np.zeros((4, 1, 8)), 16000, codes=np.zeros((4, 2, 3, 10)))
     with pytest.raises(ValueError, match="at least 4 dimensions"):
         tree.flatten_mini_batches()
 
