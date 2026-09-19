@@ -10,7 +10,7 @@ from jax.tree_util import DictKey, SequenceKey
 import numpy as np
 
 from audiotree import AudioTree
-from audiotree.core import ARRAY_FIELDS
+from audiotree.core import ARRAY_FIELDS, _require_single_batch
 
 # jax types its pytree key classes (DictKey, SequenceKey, ...) as ``Any``, so they
 # cannot appear directly in a type expression; ``KeyPath`` is the path of key
@@ -511,7 +511,20 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
             rng: jax.random.PRNGKey (for JAX transforms) or np.random.Generator (for numpy transforms)
         Returns:
             Any: transformed element
+        Raises:
+            ValueError: If an in-scope AudioTree has multiple batch axes.
+                Flatten it first, or apply the transform to rank-3 audio
+                inside scan/vmap.
         """
+        # Per-item draws and probability masks require one active batch axis.
+        # Validate before preprocessing or consuming RNG state, and only for
+        # selected AudioTrees (labels and out-of-scope subtrees pass through).
+        for path, leaf in jax.tree_util.tree_flatten_with_path(
+            element, is_leaf=lambda value: isinstance(value, AudioTree)
+        )[0]:
+            if isinstance(leaf, AudioTree) and _is_in_scope(self.scope, path):
+                _require_single_batch(leaf, f"{type(self).__name__}.random_map")
+
         # Detect if we're using numpy or JAX based on rng type
         if isinstance(rng, np.random.Generator):
             return self._random_map_numpy(element, rng)

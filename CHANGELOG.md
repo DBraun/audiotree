@@ -8,6 +8,9 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Reject grouped token-only trees in `filter()` and grouped inputs to per-item
+  random transforms with a "flatten first" error. Rank-3 audio inside JAX scan
+  or vmap remains supported despite retaining static grouping metadata.
 - Track mini-batch grouping explicitly as static pytree metadata, allowing
   token-only trees of any payload rank to reshape and flatten safely. Flattening
   ungrouped tokens and grouping an already grouped tree now raise. `TreeWriter`

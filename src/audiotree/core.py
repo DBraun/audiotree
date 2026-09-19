@@ -453,6 +453,22 @@ def _require_batched_rank(waveform, operation: str) -> None:
     )
 
 
+def _require_single_batch(tree: AudioTree, operation: str) -> None:
+    """Require one active batch axis, including for token-only trees.
+
+    Waveform rank takes precedence: scan/vmap removes the outer array axis
+    while retaining static metadata, so rank-3 audio inside a mapped body is
+    an ordinary batch. Without a waveform we cannot infer codec feature ranks;
+    a marked token tree must be explicitly flattened before per-item work.
+    """
+    _require_batched_rank(tree.waveform, operation)
+    if tree.waveform is None and tree._mini_batched:
+        raise ValueError(
+            f"{operation} needs one batch axis, but this token-only tree is "
+            "mini-batched. Call flatten_mini_batches() first."
+        )
+
+
 def _leading_axis_size(*candidates) -> Optional[int]:
     """Batch size implied by the first non-``None`` array in *candidates*.
 
@@ -2017,7 +2033,7 @@ class AudioTree:
         # pass the batch-of-1 check and reach soundfile, whose "Invalid shape"
         # complaint is about the transposed array and names neither the tree's
         # rank nor the fix.
-        _require_batched_rank(self.waveform, "AudioTree.write")
+        _require_single_batch(self, "AudioTree.write")
         if self.batch_size != 1:
             raise ValueError(
                 f"AudioTree.write requires batch_size == 1, got {self.batch_size}. "
@@ -2331,9 +2347,9 @@ class AudioTree:
             tree without calling ``predicate``, so chained filters compose.
 
         Raises:
-            ValueError: If the tree is mini-batched (rank 4). Dropping items
+            ValueError: If the tree is mini-batched. Dropping items
                 independently within each mini-batch would leave the
-                mini-batches ragged, so there is no rank-4 answer; flatten,
+                mini-batches ragged, so there is no grouped answer; flatten,
                 filter, and reshape again.
 
         Example:
@@ -2343,7 +2359,7 @@ class AudioTree:
             >>> loud.batch_size
             1
         """
-        _require_batched_rank(self.waveform, "AudioTree.filter")
+        _require_single_batch(self, "AudioTree.filter")
         B = self.batch_size
         # An already-empty tree (the documented result of a filter that kept
         # nothing) has no items for the predicate to see; skip straight to the

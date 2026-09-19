@@ -467,6 +467,29 @@ def test_token_mini_batches_track_grouping(backend, field, payload_shape):
     )
 
 
+@pytest.mark.parametrize("backend", [np, jnp], ids=["numpy", "jax"])
+def test_filter_rejects_grouped_tokens_before_calling_predicate(backend):
+    tree = AudioTree.create(None, 16000, codes=backend.arange(4).reshape(4, 1))
+    mini = tree.reshape_mini_batches(2)
+    seen = []
+    with pytest.raises(ValueError, match="AudioTree.filter.*mini-batched"):
+        mini.filter(lambda item: seen.append(item) or True)
+    assert not seen
+    restored = mini.flatten_mini_batches().filter(
+        lambda item: bool(item.codes[0, 0] % 2)
+    )
+    np.testing.assert_array_equal(restored.codes[:, 0], [1, 3])
+
+
+def test_filter_accepts_rank_three_audio_with_static_grouping_flag():
+    # Like the waveform a scan/vmap body receives: the outer axis is removed
+    # from arrays while static pytree metadata is retained.
+    mini = AudioTree.create(np.ones((4, 1, 8)), 16000).reshape_mini_batches(2)
+    body_tree = jax.tree.map(lambda value: value[0], mini)
+    assert body_tree._mini_batched
+    assert body_tree.filter(lambda item: True).waveform.shape == (2, 1, 8)
+
+
 def test_token_mini_batch_state_survives_jit_and_scan():
     tree = AudioTree.create(None, 16000, codes=jnp.arange(40).reshape(4, 10))
     mini = jax.jit(lambda t: t.reshape_mini_batches(2))(tree)

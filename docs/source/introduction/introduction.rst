@@ -556,8 +556,8 @@ predicate:
     [-15.65 -12.15  -9.65  -7.69  -6.11  -4.75  -3.61  -2.56  -1.65]
 
 The predicate is called with one batch item at a time, so ``filter`` requires a
-rank-3 tree; on a mini-batched one it raises ``ValueError`` rather than filtering
-whole mini-batches. Call
+single batch axis (rank-3 audio, or ungrouped tokens); on a mini-batched tree it
+raises ``ValueError`` rather than filtering whole mini-batches. Call
 :meth:`~audiotree.AudioTree.flatten_mini_batches` first.
 
 Processing Mini-Batches with nnx.scan

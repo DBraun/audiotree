@@ -121,6 +121,24 @@ Both ``roll`` modes clear integrated and windowed loudness caches. A circular
 shift preserves samples but can change measured LUFS by moving audio across
 analysis blocks. Subsequent loudness normalization remeasures the shifted audio.
 
+Per-item random transforms require a single batch axis. Flatten grouped inputs
+before applying them, or call them inside a ``scan``/``vmap`` body that receives
+rank-3 audio. Grouped token-only inputs must be flattened explicitly: their
+feature ranks cannot identify which axes a mapped body has removed. Scope is
+respected, so grouped inputs outside the selected scope pass through unchanged.
+
+.. testcode::
+
+    grouped = AudioTree.create(jnp.ones((6, 1, 16)), 16000).reshape_mini_batches(2)
+    gain = jax_transforms.volume_change(min_db=6, max_db=6)
+    keys = jax.random.split(jax.random.key(0), 3)
+    augmented = jax.jit(jax.vmap(gain.random_map))(grouped, keys)
+    print(augmented.flatten_mini_batches().waveform.shape)
+
+.. testoutput::
+
+    (6, 1, 16)
+
 Pair this with :func:`grain.experimental.device_put` (see
 :ref:`streaming-device-put`) to stream host batches onto the accelerator and
 augment them in the same jitted step that trains your model.

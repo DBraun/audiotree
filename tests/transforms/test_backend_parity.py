@@ -84,6 +84,76 @@ def _apply(transform, audio_tree: AudioTree, seed: int, backend: str) -> AudioTr
 
 
 @pytest.mark.parametrize("backend", ["np", "jax"])
+@pytest.mark.parametrize("mini_batch_size", [2, 3])
+def test_random_transform_rejects_grouped_audio(backend, mini_batch_size):
+    xp = np if backend == "np" else jnp
+    module = np_transforms if backend == "np" else jax_transforms
+    mini = AudioTree.create(xp.ones((6, 1, 16)), 16000).reshape_mini_batches(
+        mini_batch_size
+    )
+    transform = module.volume_change(min_db=1, max_db=2)
+    with pytest.raises(ValueError, match="flatten_mini_batches"):
+        _apply(transform, mini, 0, backend)
+    out = _apply(transform, mini.flatten_mini_batches(), 0, backend)
+    assert out.waveform.shape == (6, 1, 16)
+    # An out-of-scope grouped input must remain a no-op.
+    out = _apply(module.volume_change(scope=[]), mini, 0, backend)
+    np.testing.assert_array_equal(out.waveform, mini.waveform)
+
+
+@pytest.mark.parametrize("backend", ["np", "jax"])
+def test_random_transform_rejects_grouped_tokens(backend):
+    @np_transforms.random_transform
+    def increment(audio_tree, rng):
+        return audio_tree.replace(codes=audio_tree.codes + 1)
+
+    xp = np if backend == "np" else jnp
+    tokens = AudioTree.create(None, 16000, codes=xp.arange(12).reshape(6, 2))
+    grouped = tokens.reshape_mini_batches(2)
+    with pytest.raises(ValueError, match="token-only tree is mini-batched"):
+        _apply(increment(), grouped, 0, backend)
+    out = _apply(increment(), grouped.flatten_mini_batches(), 0, backend)
+    np.testing.assert_array_equal(out.codes, tokens.codes + 1)
+
+
+def test_grouped_transform_rejection_does_not_consume_numpy_rng():
+    grouped = AudioTree.create(np.ones((6, 1, 16)), 16000).reshape_mini_batches(2)
+    rng = np.random.default_rng(0)
+    state = rng.bit_generator.state
+    with pytest.raises(ValueError, match="flatten_mini_batches"):
+        np_transforms.volume_change().random_map(grouped, rng)
+    assert rng.bit_generator.state == state
+
+
+def test_random_transform_works_inside_jitted_scan_and_vmap():
+    mini = AudioTree.create(jnp.ones((6, 1, 16)), 16000).reshape_mini_batches(2)
+    gain = jax_transforms.volume_change(min_db=6, max_db=6, prob=0.5)
+    keys = jax.random.split(jax.random.key(0), 3)
+
+    @jax.jit
+    def scanned(grouped, rngs):
+        _, result = jax.lax.scan(
+            lambda carry, pair: (carry, gain.random_map(pair[0], pair[1])),
+            None,
+            (grouped, rngs),
+        )
+        return result.flatten_mini_batches()
+
+    @jax.jit
+    def mapped(grouped, rngs):
+        return jax.vmap(gain.random_map)(grouped, rngs).flatten_mini_batches()
+
+    expected = jnp.concatenate(
+        [
+            gain.random_map(AudioTree.create(jnp.ones((2, 1, 16)), 16000), key).waveform
+            for key in keys
+        ]
+    )
+    np.testing.assert_allclose(scanned(mini, keys).waveform, expected)
+    np.testing.assert_allclose(mapped(mini, keys).waveform, expected)
+
+
+@pytest.mark.parametrize("backend", ["np", "jax"])
 @pytest.mark.parametrize("prob", [1.0, 0.5])
 def test_circular_roll_invalidates_measurably_changed_loudness(backend, prob):
     sr = 16000
