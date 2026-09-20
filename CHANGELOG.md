@@ -6,6 +6,13 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## [Unreleased]
 
+### Changed
+
+- Require Python 3.12 or newer to match JAX 0.11.1, and run CI on supported
+  Python versions. This also fixes universal dependency resolution in `uv sync`.
+- Raise the dependency minimums to audioread 3.0.1, which builds on Python 3.12,
+  and Flax 0.12.9, which supports the JAX 0.11.1 NNX API.
+
 ### Fixed
 
 - Constrain JAX and jaxlib to 0.11.1 while released Flax still imports the removed

@@ -16,6 +16,8 @@ tested examples, and the API reference; start there.
 
 ## Install
 
+Requires Python 3.12 or newer.
+
 ```bash
 pip install audiotree
 ```
