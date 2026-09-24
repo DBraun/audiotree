@@ -51,15 +51,12 @@ dependencies = [
     "audioread>=3.0.1",  # 3.0.0's build imports imp, removed in Python 3.12
     "bagz>=0.3.8; sys_platform == 'darwin' or sys_platform == 'linux'",
     "einops>=0.8.1",
-    "flax>=0.12.9",  # supports the JAX 0.11.1 experimental hijax API
+    "flax>=0.12.10",
     # Upper-bounded on principle: grain is 0.x, so a minor release may break
     # us. Nothing here rides its private API any more -- the one class that did
     # (transforms.Batch) is gone -- so this can be relaxed once grain is 1.x.
     "grain>=0.2.15,<0.3",
-    # Flax 0.12.9 imports HiPrimitive, which JAX 0.11.2 no longer exports. Revisit this
-    # cap once a Flax release includes https://github.com/google/flax/pull/5566.
-    "jax>=0.11.1,<0.11.2",
-    "jaxlib>=0.11.1,<0.11.2",
+    "jax>=0.11.1",
     "jaxloudnorm>=0.3.2",
     "librosa>=0.11.0",
     "librosax>=0.1.2",

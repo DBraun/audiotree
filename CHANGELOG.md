@@ -26,15 +26,13 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 - Require Python 3.12 or newer to match JAX 0.11.1, and run CI on supported
   Python versions. This also fixes universal dependency resolution in `uv sync`.
 - Raise the dependency minimums to audioread 3.0.1, which builds on Python 3.12,
-  and Flax 0.12.9, which supports the JAX 0.11.1 NNX API.
+  JAX 0.11.1, and Flax 0.12.10, which supports the JAX 0.11 NNX API without the
+  `HiPrimitive` import that JAX 0.11.2 removed.
 
 ### Fixed
 
 - Resample float16 and bfloat16 waveforms with soxr by computing in float32,
   instead of failing with a soxr dtype error.
-- Constrain JAX and jaxlib to 0.11.1 while released Flax still imports the removed
-  `HiPrimitive` API, keeping NNX mini-batch processing and examples usable
-  in fresh installations.
 - Reject grouped token-only trees in `filter()` and grouped inputs to per-item
   random transforms with a "flatten first" error. Rank-3 audio inside JAX scan
   or vmap remains supported despite retaining static grouping metadata.
