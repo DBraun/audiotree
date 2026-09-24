@@ -315,6 +315,81 @@ To change the sample rate of audio, use the :meth:`~audiotree.AudioTree.resample
     48000
     (1, 2, 48000)
 
+.. _choosing-a-resampling-engine:
+
+Choosing a resampling engine
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A target sample rate and an output shape do not by themselves determine the
+preprocessing. ``resample`` has two engines, and they are different filters:
+
+- ``"soxr"`` runs librosa's soxr resampler on the CPU.
+- ``"jax"`` runs a JAX port of Julius's ``ResampleFrac`` sinc filter, eagerly or
+  under ``jax.jit``, on any device.
+
+The default, ``engine=None``, follows the waveform's array library. A NumPy
+waveform goes to ``"soxr"`` and a JAX waveform to ``"jax"``. That default is
+easy to change by accident. ``jax.jit`` converts its inputs to traced JAX
+arrays, so a NumPy tree that resamples with soxr in a CPU data loader resamples
+with the JAX filter once the same code runs inside a jitted function. The rate
+and shape are the same in both cases, but the samples are not.
+
+Pass ``engine=`` to make that choice explicit. ``engine="jax"`` runs the JAX
+algorithm on a NumPy tree and hands back NumPy, so a CPU pipeline can match
+resampling done inside ``jax.jit``:
+
+.. testcode::
+
+    import jax
+
+    rng = np.random.default_rng(0)
+    audio = AudioTree(rng.standard_normal((1, 2, 4_410)).astype(np.float32), 44_100)
+
+    soxr_out = audio.resample(48_000)  # default engine for NumPy: soxr
+    jax_out = audio.resample(48_000, engine="jax")
+    jit_out = jax.jit(lambda a: a.resample(48_000))(audio)  # traced: JAX engine
+
+    # Same rate and shape either way...
+    print(soxr_out.sample_rate == jax_out.sample_rate == jit_out.sample_rate)
+    print(soxr_out.waveform.shape == jax_out.waveform.shape == jit_out.waveform.shape)
+    # ...but a different algorithm, so different samples.
+    print(np.array_equal(soxr_out.waveform, jax_out.waveform))
+    # Choosing the JAX engine eagerly reproduces what jit does.
+    print(type(jax_out.waveform).__name__)
+    print(np.allclose(jax_out.waveform, jit_out.waveform, atol=1e-6))
+
+.. testoutput::
+
+    True
+    True
+    False
+    ndarray
+    True
+
+``"soxr"`` cannot run on a traced waveform, so asking for it inside
+``jax.jit`` (or ``vmap``/``grad``) raises instead of quietly substituting the
+JAX filter:
+
+.. testcode::
+
+    try:
+        jax.jit(lambda a: a.resample(48_000, engine="soxr"))(audio)
+    except ValueError as err:
+        print("cannot run on a traced waveform" in str(err))
+
+.. testoutput::
+
+    True
+
+``zeros``, ``rolloff``, and ``full=True`` configure the JAX filter only.
+Combining them with ``"soxr"``, whether requested explicitly or chosen by
+default for a NumPy tree, raises rather than ignoring them. ``output_length``
+works with both engines.
+
+Fixing the engine fixes the algorithm, not the exact floats. The same engine
+can still differ in the last bits across dtypes, devices, and library or XLA
+versions. Pin your environment if you need byte-level reproducibility.
+
 Converting Channels
 ~~~~~~~~~~~~~~~~~~~
 

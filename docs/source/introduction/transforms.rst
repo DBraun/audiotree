@@ -168,7 +168,9 @@ augment them in the same jitted step that trains your model.
      JAX. On band-limited content they agree to about ``8.5e-5`` absolute; on
      broadband noise only to ~24 dB SNR, essentially all of it in the
      anti-aliasing filter's transition band, where the two filter designs roll
-     off differently.
+     off differently. Pass ``resample(sample_rate=..., engine="jax")`` to run
+     the JAX filter in a NumPy pipeline too; see
+     :ref:`choosing-a-resampling-engine`.
    - ``volume_norm`` measures with the exact IIR K-weighting meter on NumPy
      and ``jaxloudnorm``'s FIR-approximated K-weighting on JAX. Measured
      loudness differs by up to 0.031 dB, so the output differs from the other

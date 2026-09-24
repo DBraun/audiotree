@@ -434,6 +434,88 @@ def _resolve_lufs_engine(
     return engine
 
 
+# Defaults for the JAX resampling engine's filter. ``AudioTree.resample`` takes
+# ``None`` for these so that an explicit value can be told apart from the
+# default and rejected when the soxr engine, which has no such knobs, runs.
+_RESAMPLE_ZEROS = 24
+_RESAMPLE_ROLLOFF = 0.945
+
+
+def _resolve_resample_engine(
+    engine: Optional[str],
+    waveform,
+    *,
+    zeros: Optional[int],
+    rolloff: Optional[float],
+    full: bool,
+) -> str:
+    """Pick the resampling kernel for ``AudioTree.resample(engine=...)``.
+
+    ``engine=None`` follows the waveform's array library (NumPy to ``"soxr"``,
+    JAX to ``"jax"``), which is the historical behavior. Everything that can
+    make a request contradictory is checked here, before any work and at every
+    rate, so an error does not depend on whether this call happened to be a
+    no-op.
+    """
+    requested = engine
+    if engine is None:
+        engine = "soxr" if isinstance(waveform, np.ndarray) else "jax"
+    elif engine not in ("soxr", "jax"):
+        raise ValueError(f"engine must be None, 'soxr', or 'jax', got {engine!r}.")
+    if engine == "soxr":
+        if isinstance(waveform, jax.core.Tracer):
+            raise ValueError(
+                "engine='soxr' resamples on the CPU through librosa/soxr and "
+                "cannot run on a traced waveform (inside jax.jit, vmap, grad, "
+                "or scan). Use engine='jax', or resample outside the traced "
+                "function."
+            )
+        jax_only = [
+            name
+            for name, is_set in (
+                ("zeros", zeros is not None),
+                ("rolloff", rolloff is not None),
+                ("full", full),
+            )
+            if is_set
+        ]
+        if jax_only:
+            why = (
+                "engine='soxr' was requested"
+                if requested == "soxr"
+                else "engine=None picks 'soxr' for a NumPy waveform"
+            )
+            raise ValueError(
+                f"{', '.join(jax_only)} only apply to the JAX resampling engine, "
+                f"but {why} and soxr has no such option. Pass engine='jax' to "
+                f"use them, or drop them to resample with soxr."
+            )
+    return engine
+
+
+def _resample_soxr(waveform, old_sr: int, new_sr: int, output_length: int):
+    """Resample along the last axis with librosa (soxr) on the host.
+
+    Accepts a NumPy or a concrete JAX array and returns the same kind, in the
+    input's dtype. soxr only computes in float32/float64, so other float
+    dtypes (float16, bfloat16) are computed in float32.
+    """
+    host = np.asarray(waveform)
+    compute_dtype = host.dtype if host.dtype in (np.float32, np.float64) else np.float32
+    out = librosa.resample(
+        host.astype(compute_dtype, copy=False),
+        orig_sr=old_sr,
+        target_sr=new_sr,
+        axis=-1,
+    )
+    out = librosa.util.fix_length(out, size=output_length, axis=-1)
+    out = out.astype(host.dtype, copy=False)
+    if isinstance(waveform, np.ndarray):
+        return out
+    devices = waveform.devices()
+    return jax.device_put(out, devices.pop()) if len(devices) == 1 else jnp.asarray(out)
+
+
 def _require_batched_rank(waveform, operation: str) -> None:
     """Reject a mini-batched waveform for an *operation* that needs one batch axis.
 
@@ -2056,35 +2138,63 @@ class AudioTree:
         self,
         sample_rate: int,
         *,
-        zeros: int = 24,
-        rolloff: float = 0.945,
+        engine: Optional[Literal["soxr", "jax"]] = None,
+        zeros: Optional[int] = None,
+        rolloff: Optional[float] = None,
         output_length: Optional[int] = None,
         full: bool = False,
     ) -> Self:
         """
-        Resample the AudioTree's ``waveform`` to a new sample rate. NumPy-backed
-        waveforms are resampled on CPU with `librosa`_ (soxr); JAX-backed waveforms
-        use a JAX port of ``ResampleFrac`` from the PyTorch library `Julius`_. The
-        two backends are not bit-identical.
+        Resample the AudioTree's ``waveform`` to a new sample rate.
+
+        Two resampling algorithms are available, and ``engine=`` picks one:
+
+        * ``"soxr"`` -- `librosa`_'s default soxr resampler, on the CPU. It
+          cannot run on a traced waveform, so it is unavailable inside
+          ``jax.jit``/``vmap``/``grad``.
+        * ``"jax"`` -- a JAX port of ``ResampleFrac`` from the PyTorch library
+          `Julius`_ (a windowed-sinc polyphase filter). It runs eagerly or under
+          ``jax.jit`` on any device, and on a NumPy waveform too.
+
+        The two are different filters, so their outputs differ by a small but
+        nonzero amount even at the same rate and length. The sample rate and
+        output shape therefore do not determine the preprocessing on their own.
+        Pass ``engine="jax"`` when a CPU data pipeline has to match resampling
+        that happens inside a jitted function (``jax.jit`` turns NumPy inputs
+        into traced JAX arrays, so the default engine there is always
+        ``"jax"``). Choosing an engine fixes the algorithm, not the bits:
+        results can still vary slightly across dtypes, devices, and XLA
+        versions.
 
         .. _librosa: https://librosa.org/
         .. _Julius: https://github.com/adefossez/julius/blob/main/julius/resample.py
 
         Args:
             sample_rate (int): The new sample rate of audio data, such as 44100 Hz.
-            zeros (int, optional): number of zero crossing to keep in the sinc filter.
-                JAX backend only.
-            rolloff (float): use a lowpass filter that is ``rolloff * sample_rate / 2``,
-                to ensure sufficient margin due to the imperfection of the FIR filter used.
-                Lowering this value will reduce antialiasing, but will reduce some of the
-                highest frequencies. JAX backend only.
-            output_length (None or int): This can be set to the desired output length (last dimension).
-                Allowed values are between 0 and ``ceil(length * sample_rate / old_sr)``. When ``None`` (default) is
-                specified, the floored output length will be used. In order to select the largest possible
-                size, use the `full` argument.
-            full (bool): return the longest possible output from the input. This can be useful
-                if you chain resampling operations, and want to give the ``output_length`` only
-                for the last one, while passing ``full=True`` to all the other ones. JAX backend only.
+            engine: *Which* algorithm to run: ``"soxr"``, ``"jax"``, or ``None``
+                (default). ``None`` follows the waveform's own array library,
+                NumPy waveform to ``"soxr"`` and JAX waveform to ``"jax"``. The
+                returned waveform always matches the input's array library and
+                dtype, whichever engine ran. ``"jax"`` on a NumPy float64
+                waveform computes in float32 unless ``jax_enable_x64`` is set.
+            zeros (int, optional): number of zero crossings to keep in the sinc
+                filter. Defaults to 24. ``"jax"`` engine only.
+            rolloff (float, optional): use a lowpass filter that is
+                ``rolloff * min(old_sr, new_sr) / 2``, to ensure sufficient
+                margin due to the imperfection of the FIR filter used. Lowering
+                this value will reduce antialiasing, but will reduce some of the
+                highest frequencies. Defaults to 0.945. ``"jax"`` engine only.
+            output_length (None or int): This can be set to the desired output
+                length (last dimension). Allowed values are between 0 and
+                ``ceil(length * sample_rate / old_sr)``. When ``None`` (default)
+                is specified, the floored output length is used for both
+                engines. In order to select the largest possible size, use the
+                ``full`` argument.
+            full (bool): return the longest possible output from the input.
+                This can be useful if you chain resampling operations, and want
+                to give the ``output_length`` only for the last one, while
+                passing ``full=True`` to all the other ones. ``"jax"`` engine
+                only.
 
         Changing the sample rate changes the audio's length and its samples, so
         every derived field (``lufs``, ``lufs_windows``, ``codes``, ``latents``)
@@ -2094,6 +2204,15 @@ class AudioTree:
         Returns:
             AudioTree: A new ``AudioTree`` resampled to ``sample_rate`` (the original is unchanged).
 
+        Raises:
+            ValueError: If ``engine`` is not ``None``, ``"soxr"``, or ``"jax"``;
+                if ``engine="soxr"`` is requested on a traced waveform; if
+                ``zeros``, ``rolloff``, or ``full=True`` is passed when the
+                engine is ``"soxr"`` (explicitly, or by default on a NumPy
+                waveform); or if ``output_length`` is out of range. These are
+                checked at every rate, including a no-op resample to the
+                current rate.
+
         Example:
             >>> audio = AudioTree.create(jnp.zeros((44100,)), 44100)  # 1 s at 44.1 kHz
             >>> resampled = audio.resample(22050)
@@ -2101,43 +2220,49 @@ class AudioTree:
             (1, 1, 22050)
             >>> resampled.sample_rate
             22050
+            >>> cpu = AudioTree.create(np.zeros((44100,), np.float32), 44100)
+            >>> type(cpu.resample(22050, engine="jax").waveform).__name__
+            'ndarray'
         """
+        engine = _resolve_resample_engine(
+            engine, self.waveform, zeros=zeros, rolloff=rolloff, full=full
+        )
         if sample_rate == self.sample_rate:
             return self
-        if isinstance(self.waveform, np.ndarray):
-            # CPU backend: librosa (soxr). ``zeros``, ``rolloff``, and ``full``
-            # are JAX-only knobs and do not apply here. librosa resamples along
-            # the time axis directly, so no 3-D flattening is needed.
-            waveform = librosa.resample(
-                self.waveform,
-                orig_sr=self.sample_rate,
-                target_sr=sample_rate,
-                axis=-1,
-            ).astype(self.waveform.dtype)
-            # Pin the output length to what the JAX/Julius backend produces
-            # (``floor(T * new / old)``) so the two backends agree on shape;
-            # soxr's length can differ by a sample. ``output_length`` overrides.
+        if engine == "soxr":
+            # librosa resamples along the time axis directly, so no 3-D
+            # flattening is needed. The length is pinned to what the JAX engine
+            # produces (``floor(T * new / old)``) so the two agree on shape;
+            # soxr's own length can differ by a sample.
+            length = self.waveform.shape[-1]
+            max_output_length = -(-sample_rate * length // self.sample_rate)
             if output_length is None:
-                output_length = (
-                    self.waveform.shape[-1] * sample_rate // self.sample_rate
+                output_length = sample_rate * length // self.sample_rate
+            elif output_length < 0 or output_length > max_output_length:
+                raise ValueError(
+                    f"output_length must be between 0 and {max_output_length}"
                 )
-            waveform = librosa.util.fix_length(waveform, size=output_length, axis=-1)
+            waveform = _resample_soxr(
+                self.waveform, self.sample_rate, sample_rate, output_length
+            )
         else:
-            # JAX backend: the Julius port. Its kernel is strictly 3-D, so
-            # flatten any leading axes (e.g. after reshape_mini_batches) and
-            # restore them afterwards.
+            # The Julius port's kernel is strictly 3-D, so flatten any leading
+            # axes (e.g. after reshape_mini_batches) and restore them afterwards.
             leading_shape = self.waveform.shape[:-2]
             flat = self.waveform.reshape(-1, *self.waveform.shape[-2:])
             waveform = resample(
-                flat,
+                jnp.asarray(flat),
                 self.sample_rate,
                 sample_rate,
-                zeros=zeros,
-                rolloff=rolloff,
+                zeros=_RESAMPLE_ZEROS if zeros is None else zeros,
+                rolloff=_RESAMPLE_ROLLOFF if rolloff is None else rolloff,
                 output_length=output_length,
                 full=full,
             )
             waveform = waveform.reshape(*leading_shape, *waveform.shape[-2:])
+            if isinstance(self.waveform, np.ndarray):
+                # Hand back the input's array library, like replace_lufs does.
+                waveform = np.asarray(waveform).astype(self.waveform.dtype)
         return self._invalidate_derived(waveform=waveform, sample_rate=sample_rate)
 
     def split(self, n_splits: int) -> List[Self]:

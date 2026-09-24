@@ -6,8 +6,23 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## [Unreleased]
 
+### Added
+
+- Add `AudioTree.resample(engine=...)` to choose the resampling algorithm
+  explicitly: `"soxr"` (librosa, CPU) or `"jax"` (the Julius port, eager or
+  jitted). The default `None` keeps the previous behavior of following the
+  waveform's array library. `engine="jax"` on a NumPy tree matches resampling
+  done inside `jax.jit`, which previously required a JAX input. Results keep the
+  input's array library and dtype. `engine="soxr"` on a traced waveform raises.
+  The NumPy and JAX `resample` transforms accept `engine` too.
+
 ### Changed
 
+- `AudioTree.resample` raises when `zeros`, `rolloff`, or `full=True` is passed
+  and soxr runs (including the default for NumPy waveforms), instead of silently
+  ignoring these JAX-only options. Pass `engine="jax"` to use them. soxr now
+  also rejects an `output_length` outside the documented
+  `[0, ceil(T * new_sr / old_sr)]` range, matching the JAX engine.
 - Require Python 3.12 or newer to match JAX 0.11.1, and run CI on supported
   Python versions. This also fixes universal dependency resolution in `uv sync`.
 - Raise the dependency minimums to audioread 3.0.1, which builds on Python 3.12,
@@ -15,6 +30,8 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Resample float16 and bfloat16 waveforms with soxr by computing in float32,
+  instead of failing with a soxr dtype error.
 - Constrain JAX and jaxlib to 0.11.1 while released Flax still imports the removed
   `HiPrimitive` API, keeping NNX mini-batch processing and examples usable
   in fresh installations.

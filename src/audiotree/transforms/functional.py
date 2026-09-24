@@ -205,15 +205,23 @@ def stereo(audio_tree: AudioTree) -> AudioTree:
 
 
 @map_transform
-def resample(audio_tree: AudioTree, sample_rate: int | None = None) -> AudioTree:
+def resample(
+    audio_tree: AudioTree,
+    sample_rate: int | None = None,
+    engine: str | None = None,
+) -> AudioTree:
     """Resample audio to a new sample rate.
 
-    Wraps :meth:`~audiotree.core.AudioTree.resample`: NumPy-backed waveforms
-    resample on CPU via librosa, JAX-backed waveforms use the JAX/Julius port.
+    Wraps :meth:`~audiotree.core.AudioTree.resample`. By default NumPy-backed
+    waveforms resample on CPU via librosa (soxr) and JAX-backed waveforms use
+    the JAX/Julius port; pass ``engine="jax"`` to run the JAX algorithm in a
+    CPU data pipeline, e.g. to match resampling done inside ``jax.jit``.
 
     Args:
         audio_tree: Input audio
         sample_rate: Target sample rate in Hz (e.g. 16000). Required.
+        engine: ``None`` (follow the waveform's array library), ``"soxr"``, or
+            ``"jax"``. See :meth:`~audiotree.core.AudioTree.resample`.
 
     Returns:
         AudioTree resampled to ``sample_rate``
@@ -226,7 +234,7 @@ def resample(audio_tree: AudioTree, sample_rate: int | None = None) -> AudioTree
         raise ValueError(
             "resample requires a target sample_rate, e.g., resample(sample_rate=16000)."
         )
-    return audio_tree.resample(sample_rate)
+    return audio_tree.resample(sample_rate, engine=engine)
 
 
 @map_transform

@@ -1416,6 +1416,10 @@ def _encoded_tree(sample_rate: int = 16000, channels: int = 2) -> AudioTree:
     "operation",
     [
         pytest.param(lambda tree: tree.resample(8000), id="resample"),
+        pytest.param(lambda tree: tree.resample(8000, engine="jax"), id="resample_jax"),
+        pytest.param(
+            lambda tree: tree.resample(8000, engine="soxr"), id="resample_soxr"
+        ),
         pytest.param(lambda tree: tree.to_mono(), id="to_mono"),
         pytest.param(lambda tree: tree.to_mono("left"), id="to_mono_left"),
         pytest.param(lambda tree: tree.to_mono().to_stereo(), id="to_stereo"),
