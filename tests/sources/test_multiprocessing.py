@@ -32,9 +32,16 @@ def test_corrupt_file_error_survives_multiprocessing(tmp_path):
     dataset = create_audio_dataset(filepaths=[path], num_epochs=1)
     options = grain.MultiprocessingOptions(num_workers=1, per_worker_buffer_size=1)
     dataset = dataset.to_iter_dataset().mp_prefetch(options=options)
-    with pytest.raises(AudioReadError, match=r"bad\.wav") as caught:
+    with pytest.raises((AudioReadError, RuntimeError)) as caught:
         next(iter(dataset))
-    assert caught.value.file_path == str(path)
+    error = caught.value
+    if isinstance(error, AudioReadError):
+        assert error.file_path == str(path)
+    else:
+        # Grain 0.2.15 forwards worker tracebacks as text in a RuntimeError.
+        assert str(error).startswith("Grain worker 0 failed with the following error:")
+        assert "audiotree.sources.core.AudioReadError:" in str(error)
+    assert f"Failed to read audio file '{path}'" in str(error)
 
 
 def _create_test_audio_files(
