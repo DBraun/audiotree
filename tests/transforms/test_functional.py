@@ -5,12 +5,14 @@ from pathlib import Path
 
 import argbind
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 import soundfile as sf
 
 from audiotree import AudioTree
 from audiotree.sources import create_audio_dataset
+from audiotree.transforms import functional as np_transforms
 from audiotree.transforms.codec import (
     AudioCodec,
     LatentAudioCodec,
@@ -29,6 +31,7 @@ from audiotree.transforms.functional import (
     roll,
 )
 from audiotree.transforms.jax.functional import roll as roll_jax
+from audiotree.transforms.jax import functional as jax_transforms
 
 
 def _create_test_audio_file(tmpdir, filename, duration=3.0, sample_rate=44100):
@@ -388,6 +391,29 @@ def _tree(channels: int = 2, samples: int = 16, sample_rate: int = 16000) -> Aud
     values = np.arange(1, channels + 1, dtype=np.float32)
     waveform = np.tile(values[None, :, None], (1, 1, samples))
     return AudioTree(waveform=waveform, sample_rate=sample_rate)
+
+
+@pytest.mark.parametrize("xp, transforms", [(np, np_transforms), (jnp, jax_transforms)])
+def test_trim_pads_only_time_on_mini_batches(xp, transforms):
+    waveform = xp.arange(16, dtype=xp.float32).reshape(4, 1, 4)
+    tree = AudioTree.create(waveform, 8).reshape_mini_batches(2)
+
+    result = transforms.trim(length=0.75, mode="constant").map(tree)
+
+    expected = np.pad(np.asarray(waveform), ((0, 0), (0, 0), (0, 2)))
+    assert result.waveform.shape == (2, 2, 1, 6)
+    np.testing.assert_array_equal(result.flatten_mini_batches().waveform, expected)
+
+
+@pytest.mark.parametrize("xp, transforms", [(np, np_transforms), (jnp, jax_transforms)])
+def test_peak_norm_preserves_float16_silence(xp, transforms):
+    waveform = xp.array([[[0, 0]], [[1e-5, -2e-5]]], dtype=xp.float16)
+    tree = AudioTree.create(waveform, 8)
+
+    result = transforms.peak_norm().map(tree)
+
+    assert result.waveform.dtype == xp.float16
+    np.testing.assert_array_equal(result.waveform, [[[0, 0]], [[0.5, -1]]])
 
 
 class TestSwapStereo:

@@ -92,7 +92,7 @@ apply balanced sampling across groups, and chain augmentations (e.g., :meth:`~au
     print("offset:", batch.offset[:3].round(2))
 
     # `volume_norm` above caused LUFS to be calculated.
-    print("LUFS:", batch.lufs[:3].round(2))
+    print("LUFS:", batch.lufs[:3].round(1))
 
     # The whole pipeline ran on host NumPy arrays; nothing touched a device.
     print("backend:", batch.backend)
@@ -104,7 +104,7 @@ apply balanced sampling across groups, and chain augmentations (e.g., :meth:`~au
     Counter({'speech': 23, 'music': 9})
     filepath: ['...2.wav', '...0.wav', '...1.wav']
     offset: [16.91  0.52 18.89]
-    LUFS: [-16.16 -16.83 -18.4 ]
+    LUFS: [-16.2 -16.8 -18.4]
     backend: numpy
 
 For training in PyTorch, the pipeline above still applies. The loaders and the

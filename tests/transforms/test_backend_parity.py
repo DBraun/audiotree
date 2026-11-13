@@ -172,7 +172,7 @@ def test_circular_roll_invalidates_measurably_changed_loudness(backend, prob):
         assert abs(float(measured.lufs[0] - original.lufs[0])) > 0.5
         normalized = out.normalize_lufs(-20)
         assert normalized.lufs is not None
-        np.testing.assert_allclose(normalized.lufs, -20, atol=1e-5)
+        np.testing.assert_allclose(normalized.lufs, -20, atol=0.1)
 
 
 @pytest.mark.parametrize("backend", ["np", "jax"])
@@ -232,7 +232,7 @@ def test_volume_change_updates_independent_loudness_caches(
     out = _apply(module.volume_change(min_db=6, max_db=6), tree, 0, backend)
     np.testing.assert_allclose(out.waveform, tree.waveform * 10 ** (6 / 20), rtol=1e-6)
     if with_lufs:
-        np.testing.assert_allclose(out.lufs, tree.lufs + 6)
+        np.testing.assert_allclose(out.lufs, out.replace_lufs().lufs)
     else:
         assert out.lufs is None
     if with_windows:
@@ -242,6 +242,35 @@ def test_volume_change_updates_independent_loudness_caches(
         )
     else:
         assert out.lufs_windows is None
+
+
+@pytest.mark.parametrize("backend", ["np", "jax"])
+@pytest.mark.parametrize("name", ["volume_change", "volume_norm"])
+def test_gain_remeasures_integrated_lufs_when_blocks_cross_the_gate(backend, name):
+    sr = 16000
+    tone = np.sin(2 * np.pi * 1000 * np.arange(4 * sr) / sr)
+    waveform = np.concatenate([tone * 0.0006, tone * 0.002]).astype(np.float32)
+    if backend == "jax":
+        waveform = jnp.asarray(waveform)
+    tree = AudioTree.create(waveform, sr).replace_lufs()
+    gain = -6.0
+    target = gain if name == "volume_change" else float(tree.lufs[0]) + gain
+    module = np_transforms if backend == "np" else jax_transforms
+    out = _apply(getattr(module, name)(min_db=target, max_db=target), tree, 0, backend)
+
+    np.testing.assert_allclose(out.lufs, out.replace_lufs().lufs, atol=1e-5)
+    assert abs(float(out.lufs[0] - tree.lufs[0]) - gain) > 1.0
+    np.testing.assert_allclose(out.lufs_windows, tree.lufs_windows + gain, atol=1e-5)
+
+
+@pytest.mark.parametrize("backend", ["np", "jax"])
+def test_fixed_zero_gain_preserves_supplied_measurements(backend):
+    xp = np if backend == "np" else jnp
+    module = np_transforms if backend == "np" else jax_transforms
+    tree = AudioTree.create(
+        xp.ones((1, 1, 16)), 8000, lufs=xp.array([-23.0]), codes=xp.zeros((1, 2))
+    )
+    assert _apply(module.volume_change(), tree, 0, backend) is tree
 
 
 def _run_both(name: str, kwargs: dict, waveform: np.ndarray, seed: int = 0, **pair_kw):

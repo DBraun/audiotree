@@ -286,11 +286,11 @@ such an edit with :meth:`~audiotree.AudioTree.clear_lufs` (shorthand for
     True
     True
 
-The built-in transforms handle this for you:
-:func:`~audiotree.transforms.volume_norm` /
-:func:`~audiotree.transforms.volume_change` shift the cached loudness by the gain
-they apply, phase transforms preserve it under ``keep_lufs=True``, and length- or
-channel-changing transforms invalidate it.
+The gain transforms :func:`~audiotree.transforms.volume_norm` and
+:func:`~audiotree.transforms.volume_change` remeasure a populated integrated
+cache using the waveform's default engine and shift the ungated window values
+by the applied gain. Phase transforms preserve cached loudness under
+``keep_lufs=True``. Length- and channel-changing transforms clear it.
 
 Resampling Audio
 ~~~~~~~~~~~~~~~~

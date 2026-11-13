@@ -85,8 +85,9 @@ transforms such as ``trim`` and ``resample`` need no key and compose the same wa
 
     (8, 2, 8000)
 
-``volume_change`` shifts each available loudness cache independently. A tree
-with only ``lufs_windows`` still gets updated window measurements:
+``volume_change`` remeasures a populated ``lufs`` field because gain can change
+which blocks pass the absolute gate. It shifts the ungated ``lufs_windows`` by
+the applied gain, including on trees without an integrated measurement.
 
 .. testcode::
 

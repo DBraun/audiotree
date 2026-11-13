@@ -452,3 +452,61 @@ def test_transform_passes_engine():
     np.testing.assert_array_equal(
         got.waveform, tree.resample(48_000, engine="jax").waveform
     )
+
+
+@pytest.mark.parametrize("engine", ["soxr", "jax"])
+def test_tree_resample_same_rate_validates_and_honors_output_length(engine):
+    tree = _tones_tree().replace(lufs=np.array([-23.0]))
+    assert tree.resample(tree.sample_rate, engine=engine) is tree
+    out = tree.resample(tree.sample_rate, engine=engine, output_length=3)
+    np.testing.assert_array_equal(out.waveform, tree.waveform[..., :3])
+    assert out.lufs is None
+    with pytest.raises(ValueError, match="output_length must be between"):
+        tree.resample(tree.sample_rate, engine=engine, output_length=-1)
+
+
+def test_tree_resample_same_rate_rejects_conflicting_length_options():
+    tree = _tones_tree()
+    with pytest.raises(ValueError, match="both full=True and output_length"):
+        tree.resample(tree.sample_rate, engine="jax", output_length=1, full=True)
+
+
+@pytest.mark.parametrize("xp", [np, jnp])
+@pytest.mark.parametrize("engine", ["soxr", "jax"])
+@pytest.mark.parametrize(
+    "shape, expected", [((0, 1, 8), (0, 1, 16)), ((2, 1, 0), (2, 1, 0))]
+)
+def test_tree_resample_empty_waveforms(xp, engine, shape, expected):
+    tree = AudioTree.create(xp.zeros(shape, dtype=xp.float32), 8000)
+    out = tree.resample(16000, engine=engine)
+    assert out.waveform.shape == expected
+    assert out.waveform.dtype == tree.waveform.dtype
+    assert isinstance(out.waveform, np.ndarray if xp is np else jax.Array)
+    assert out.sample_rate == 16000
+
+
+@pytest.mark.parametrize("engine", ["soxr", "jax"])
+def test_tree_resample_rejects_integer_pcm(engine):
+    tree = AudioTree.create(np.full((1, 1, 8), 1024, dtype=np.int16), 8000)
+    with pytest.raises(ValueError, match="floating-point waveform"):
+        tree.resample(16000, engine=engine)
+
+
+@pytest.mark.parametrize("kwargs", [{"zeros": 0}, {"rolloff": 0}, {"rolloff": np.nan}])
+def test_jax_resample_validates_filter_parameters(kwargs):
+    tree = _tones_tree()
+    with pytest.raises(ValueError, match=next(iter(kwargs)) + " must be"):
+        tree.resample(48000, engine="jax", **kwargs)
+
+
+def test_jax_resample_rejects_oversized_kernel():
+    tree = AudioTree.create(jnp.ones((1, 1, 8)), 44100)
+    with pytest.raises(ValueError, match="filter would exceed 64 MiB"):
+        tree.resample(44099, engine="jax")
+
+
+def test_jax_resample_accepts_an_eager_integer_scalar_rate():
+    tree = AudioTree.create(jnp.ones((1, 1, 8)), 8000)
+    out = tree.resample(jnp.asarray(16000), engine="jax")
+    assert out.samples == 16
+    assert type(out.sample_rate) is int

@@ -1,7 +1,5 @@
 """Helper functions for transforms with dual numpy/JAX implementations."""
 
-from typing import Tuple
-
 import jax
 from jax import numpy as jnp
 from jax import random
@@ -10,20 +8,12 @@ import librosax
 import numpy as np
 
 from audiotree import AudioTree
-from audiotree.loudness import safe_gain_db, shift_lufs, shift_lufs_windows
+from audiotree.loudness import safe_gain_db, shift_lufs_windows
 
 
 # =============================================================================
 # Backend-agnostic utilities
 # =============================================================================
-
-
-def _db2linear_jax(decibels):
-    return jnp.pow(10.0, decibels / 20.0)
-
-
-def _db2linear_np(decibels):
-    return np.power(10.0, decibels / 20.0)
 
 
 def _check_uniform_range(
@@ -119,22 +109,11 @@ def _volume_norm_jax(
 ) -> AudioTree:
     """JAX implementation of volume normalization."""
     _check_uniform_range("volume_norm", "min_db", "max_db", min_db, max_db)
-    waveform = audio_tree.waveform
-    B = waveform.shape[0]
-
-    target_db = random.uniform(key, shape=(B,), minval=min_db, maxval=max_db)
-    # Silent items (``-inf`` LUFS) get a 0 dB gain and keep their ``-inf``, rather
-    # than being scaled by ``+inf`` into an all-NaN waveform.
-    gain_db = safe_gain_db(audio_tree.lufs, target_db, xp=jnp)
-
-    waveform = waveform * _db2linear_jax(gain_db)[:, None, None]
-    # Route through ``_invalidate_derived`` so the level change also drops any
-    # cached ``codes``/``latents``; the shifted loudness is supplied fresh.
-    return audio_tree._invalidate_derived(
-        waveform=waveform,
-        lufs=shift_lufs(audio_tree.lufs, gain_db, xp=jnp),
-        lufs_windows=shift_lufs_windows(audio_tree.lufs_windows, gain_db, xp=jnp),
+    target_db = random.uniform(
+        key, shape=(audio_tree.batch_size,), minval=min_db, maxval=max_db
     )
+    gain_db = safe_gain_db(audio_tree.lufs, target_db, xp=jnp)
+    return _apply_gain(audio_tree, gain_db, xp=jnp)
 
 
 def _volume_norm_np(
@@ -142,20 +121,11 @@ def _volume_norm_np(
 ) -> AudioTree:
     """NumPy implementation of volume normalization."""
     _check_uniform_range("volume_norm", "min_db", "max_db", min_db, max_db)
-    waveform = audio_tree.waveform
-    B = waveform.shape[0]
-
-    target_db = rng.uniform(min_db, max_db, size=(B,)).astype(np.float32)
-    # See ``_volume_norm_jax``: keep silence silent instead of producing NaN.
-    gain_db = safe_gain_db(audio_tree.lufs, target_db, xp=np)
-
-    waveform = waveform * _db2linear_np(gain_db)[:, None, None]
-    # See ``_volume_norm_jax``: also drops any cached ``codes``/``latents``.
-    return audio_tree._invalidate_derived(
-        waveform=waveform,
-        lufs=shift_lufs(audio_tree.lufs, gain_db, xp=np),
-        lufs_windows=shift_lufs_windows(audio_tree.lufs_windows, gain_db, xp=np),
+    target_db = rng.uniform(min_db, max_db, size=(audio_tree.batch_size,)).astype(
+        np.float32
     )
+    gain_db = safe_gain_db(audio_tree.lufs, target_db, xp=np)
+    return _apply_gain(audio_tree, gain_db, xp=np)
 
 
 # =============================================================================
@@ -165,43 +135,39 @@ def _volume_norm_np(
 
 def _volume_change_jax(
     audio_tree: AudioTree, key: jax.Array, min_db: float, max_db: float
-) -> Tuple[AudioTree, jnp.ndarray]:
+) -> AudioTree:
     """JAX implementation of volume change."""
     _check_uniform_range("volume_change", "min_db", "max_db", min_db, max_db)
-    waveform = audio_tree.waveform
-    B = waveform.shape[0]
-
-    gain_db = random.uniform(key, shape=(B,), minval=min_db, maxval=max_db)
-
-    waveform = waveform * _db2linear_jax(gain_db)[:, None, None]
-    # ``lufs``/``lufs_windows`` are kept because the caller shifts them by the
-    # returned ``gain_db``; ``codes``/``latents`` describe the old level.
-    return (
-        audio_tree._invalidate_derived(
-            keep=("lufs", "lufs_windows"), waveform=waveform
-        ),
-        gain_db,
+    if min_db == max_db == 0:
+        return audio_tree
+    gain_db = random.uniform(
+        key, shape=(audio_tree.batch_size,), minval=min_db, maxval=max_db
     )
+    return _apply_gain(audio_tree, gain_db, xp=jnp)
 
 
 def _volume_change_np(
     audio_tree: AudioTree, rng: np.random.Generator, min_db: float, max_db: float
-) -> Tuple[AudioTree, np.ndarray]:
+) -> AudioTree:
     """NumPy implementation of volume change."""
     _check_uniform_range("volume_change", "min_db", "max_db", min_db, max_db)
-    waveform = audio_tree.waveform
-    B = waveform.shape[0]
-
-    gain_db = rng.uniform(min_db, max_db, size=(B,)).astype(np.float32)
-
-    waveform = waveform * _db2linear_np(gain_db)[:, None, None]
-    # See ``_volume_change_jax``: lufs is kept for the caller's shift.
-    return (
-        audio_tree._invalidate_derived(
-            keep=("lufs", "lufs_windows"), waveform=waveform
-        ),
-        gain_db,
+    if min_db == max_db == 0:
+        return audio_tree
+    gain_db = rng.uniform(min_db, max_db, size=(audio_tree.batch_size,)).astype(
+        np.float32
     )
+    return _apply_gain(audio_tree, gain_db, xp=np)
+
+
+def _apply_gain(audio_tree: AudioTree, gain_db, *, xp) -> AudioTree:
+    waveform = audio_tree.waveform * xp.power(10.0, gain_db / 20.0)[:, None, None]
+    changed = audio_tree._invalidate_derived(
+        waveform=waveform,
+        lufs_windows=shift_lufs_windows(audio_tree.lufs_windows, gain_db, xp=xp),
+    )
+    if audio_tree.lufs is not None:
+        return changed._remeasure_integrated_lufs()
+    return changed
 
 
 # =============================================================================
@@ -241,7 +207,7 @@ def _peak_norm_jax(audio_tree: AudioTree) -> AudioTree:
     waveform = audio_tree.waveform
     peaks = jnp.max(jnp.absolute(waveform), axis=[-2, -1])
     peaks = jnp.expand_dims(peaks, [-2, -1])
-    peaks = jnp.maximum(peaks, 1e-8)
+    peaks = jnp.where(peaks == 0, 1.0, jnp.maximum(peaks, 1e-8))
     waveform = waveform / peaks
     # A level change: every derived field (lufs and codes/latents) is stale.
     return audio_tree._invalidate_derived(waveform=waveform)
@@ -252,7 +218,7 @@ def _peak_norm_np(audio_tree: AudioTree) -> AudioTree:
     waveform = audio_tree.waveform
     peaks = np.max(np.absolute(waveform), axis=(-2, -1))
     peaks = np.expand_dims(peaks, (-2, -1))
-    peaks = np.maximum(peaks, 1e-8)
+    peaks = np.where(peaks == 0, 1.0, np.maximum(peaks, 1e-8))
     waveform = waveform / peaks
     # A level change: every derived field (lufs and codes/latents) is stale.
     return audio_tree._invalidate_derived(waveform=waveform)
@@ -688,7 +654,7 @@ def _trim_jax(audio_tree: AudioTree, length: float, mode: str = "wrap") -> Audio
     elif T < target_T:
         waveform = jnp.pad(
             waveform,
-            pad_width=((0, 0), (0, 0), (0, target_T - T)),
+            pad_width=((0, 0),) * (waveform.ndim - 1) + ((0, target_T - T),),
             mode=mode,
         )
     else:
@@ -709,7 +675,7 @@ def _trim_np(audio_tree: AudioTree, length: float, mode: str = "wrap") -> AudioT
     elif T < target_T:
         waveform = np.pad(
             waveform,
-            pad_width=((0, 0), (0, 0), (0, target_T - T)),
+            pad_width=((0, 0),) * (waveform.ndim - 1) + ((0, target_T - T),),
             mode=mode,
         )
     else:

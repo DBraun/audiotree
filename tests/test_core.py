@@ -1027,16 +1027,41 @@ def test_replace_lufs_device_and_engine_are_independent():
 
 
 def test_normalize_lufs_shifts_windows():
-    """normalize_lufs retargets ``lufs`` and shifts ``lufs_windows`` by the same gain."""
+    """normalize_lufs measures integrated LUFS and shifts the window values."""
     sr = 44100
     tree = AudioTree.create(_tone(sr, 2.0), sr).replace_lufs()
     before = np.asarray(tree.lufs_windows[0])
     gain = -18.0 - float(tree.lufs[0])
     normalized = tree.normalize_lufs(-18.0)
-    np.testing.assert_allclose(float(normalized.lufs[0]), -18.0, atol=1e-4)
+    np.testing.assert_allclose(normalized.lufs, normalized.replace_lufs().lufs)
+    np.testing.assert_allclose(float(normalized.lufs[0]), -18.0, atol=0.1)
     np.testing.assert_allclose(
         np.asarray(normalized.lufs_windows[0]), before + gain, atol=1e-3
     )
+
+
+@pytest.mark.parametrize("backend", [np, jnp])
+def test_normalize_lufs_remeasures_when_gain_changes_gating(backend):
+    sr = 16000
+    tone = _tone(sr, 1.0, amplitude=1.0)
+    waveform = np.concatenate([tone * 0.0015, np.tile(tone * 0.00017, 12)])
+    tree = AudioTree.create(backend.asarray(waveform), sr).replace_lufs(
+        lufs_window_sec=0.5, lufs_hop_sec=0.25
+    )
+    out = tree.normalize_lufs(-23.0)
+    np.testing.assert_allclose(out.lufs, out.replace_lufs().lufs, atol=1e-5)
+    assert abs(float(out.lufs[0]) + 23.0) > 1.0
+    np.testing.assert_allclose(
+        out.lufs_windows, tree.lufs_windows + (-23.0 - tree.lufs[0]), atol=1e-5
+    )
+
+
+@pytest.mark.parametrize("shape", [(1, 1, 0), (1, 6, 8000)])
+def test_normalize_lufs_clears_supplied_measurement_if_unmeasurable(shape):
+    tree = AudioTree.create(np.ones(shape, np.float32), 8000, lufs=np.array([-29.0]))
+    out = tree.normalize_lufs(-23.0)
+    np.testing.assert_allclose(out.waveform, tree.waveform * 10 ** (6 / 20))
+    assert out.lufs is None
 
 
 @pytest.mark.parametrize("backend", ["numpy", "jax"])
@@ -1066,7 +1091,7 @@ def test_normalize_lufs_mixed_batch_only_skips_the_silent_item():
 
     out = tree.normalize_lufs(-18.0)
     assert not np.isnan(np.asarray(out.waveform)).any()
-    np.testing.assert_allclose(float(out.lufs[0]), -18.0, atol=1e-4)
+    np.testing.assert_allclose(float(out.lufs[0]), -18.0, atol=0.1)
     assert float(out.lufs[1]) == -np.inf
     assert np.all(np.asarray(out.waveform[1]) == 0.0)
 
@@ -1079,10 +1104,13 @@ def test_normalize_lufs_max_gain_db_caps_amplification():
     assert np.isfinite(before) and before < -18.0  # quiet, but measurable
 
     uncapped = tree.normalize_lufs(-18.0)
-    np.testing.assert_allclose(float(uncapped.lufs[0]), -18.0, atol=1e-4)
+    np.testing.assert_allclose(float(uncapped.lufs[0]), -18.0, atol=0.1)
 
     capped = tree.normalize_lufs(-18.0, max_gain_db=6.0)
-    np.testing.assert_allclose(float(capped.lufs[0]), before + 6.0, atol=1e-4)
+    np.testing.assert_allclose(float(capped.lufs[0]), before + 6.0, atol=0.1)
+    np.testing.assert_allclose(
+        capped.waveform, tree.waveform * 10 ** (6 / 20), rtol=1e-6
+    )
 
 
 def test_replace_lufs_windows_numpy_jax_agree():
@@ -1444,12 +1472,12 @@ def test_length_rate_channel_changes_invalidate_every_derived_field(operation):
 
 
 def test_normalize_lufs_keeps_loudness_but_drops_codec_fields():
-    """A gain has a closed form for LUFS and none for codec tokens."""
+    """A gain can be measured again but invalidates codec tokens."""
     tree = _encoded_tree()
     out = tree.normalize_lufs(-18.0)
 
-    # Loudness is shifted, not discarded...
-    np.testing.assert_allclose(float(out.lufs[0]), -18.0, atol=1e-4)
+    # The updated integrated measurement and window values are populated.
+    np.testing.assert_allclose(float(out.lufs[0]), -18.0, atol=0.1)
     assert out.lufs_windows is not None
     # ...but the tokens described the audio at its old level.
     assert out.codes is None

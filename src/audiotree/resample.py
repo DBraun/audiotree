@@ -2,7 +2,7 @@
 # Copyright 2020 Alexandre Défossez. Licensed under the MIT license; the full
 # notice is bundled at LICENSES/julius-MIT.txt.
 """
-Differentiable, Pytorch based resampling.
+Differentiable JAX resampling adapted from PyTorch.
 Implementation of Julius O. Smith algorithm for resampling.
 See https://ccrma.stanford.edu/~jos/resample/ for details.
 This implementation is specially optimized for when new_sr / old_sr is a fraction
@@ -14,6 +14,7 @@ is optimized for the case mentioned before, while resampy is slower but more gen
 """
 
 import math
+import operator
 from functools import lru_cache
 from typing import Optional
 
@@ -21,6 +22,9 @@ import numpy as np
 from einops import rearrange
 from jax import lax
 from jax import numpy as jnp
+
+
+_MAX_KERNEL_BYTES = 64 * 1024**2
 
 
 @lru_cache(maxsize=32)
@@ -40,7 +44,17 @@ def _sinc_kernels(
         and ``width`` is the padding needed on each side of the input.
     """
     sr = min(new_sr, old_sr) * rolloff
-    width = math.ceil(zeros * old_sr / sr)
+    half_width = zeros * old_sr / sr if sr else math.inf
+    if not math.isfinite(half_width) or (
+        new_sr * (2 * math.ceil(half_width) + old_sr) * np.dtype(np.float64).itemsize
+        > _MAX_KERNEL_BYTES
+    ):
+        raise ValueError(
+            "The JAX resampling filter would exceed 64 MiB for the reduced "
+            f"ratio {new_sr}/{old_sr}. Use engine='soxr' outside JAX tracing "
+            "or choose a simpler rate ratio."
+        )
+    width = math.ceil(half_width)
     idx = np.arange(-width, width + old_sr, dtype=np.float64)
 
     t = (-np.arange(new_sr, dtype=np.float64)[:, None] / new_sr + idx / old_sr) * sr
@@ -52,6 +66,41 @@ def _sinc_kernels(
     kernels = kernels.reshape((new_sr, 1, -1))
     kernels.setflags(write=False)  # cached and shared; never mutate in place
     return kernels, width
+
+
+def _resample_output_length(old_sr, new_sr, length, output_length, full) -> int:
+    try:
+        old_sr, new_sr = operator.index(old_sr), operator.index(new_sr)
+    except TypeError as exc:
+        raise ValueError("old_sr and new_sr should be integers") from exc
+    if old_sr <= 0 or new_sr <= 0:
+        raise ValueError(
+            f"old_sr and new_sr should be positive, got {old_sr} and {new_sr}"
+        )
+    max_output_length = -(-new_sr * length // old_sr)
+    if output_length is None:
+        return max_output_length if full else new_sr * length // old_sr
+    if full:
+        raise ValueError("You cannot pass both full=True and output_length")
+    try:
+        output_length = operator.index(output_length)
+    except TypeError as exc:
+        raise ValueError("output_length must be an integer") from exc
+    if not 0 <= output_length <= max_output_length:
+        raise ValueError(f"output_length must be between 0 and {max_output_length}")
+    return output_length
+
+
+def _validate_resample_filter(zeros, rolloff) -> None:
+    if not isinstance(zeros, (int, np.integer)) or zeros <= 0:
+        raise ValueError(f"zeros must be a positive integer, got {zeros!r}")
+    if not 0 < rolloff <= 1:
+        raise ValueError(f"rolloff must be in (0, 1], got {rolloff!r}")
+
+
+def _require_float_waveform(waveform) -> None:
+    if not jnp.issubdtype(waveform.dtype, jnp.floating):
+        raise ValueError("Resampling requires a real floating-point waveform.")
 
 
 def resample(
@@ -67,11 +116,11 @@ def resample(
     https://github.com/adefossez/julius/blob/main/julius/resample.py
 
     Args:
-        x (jnp.ndarray): Input array shaped `[B, C, T]`. The output keeps its dtype.
+        x (jnp.ndarray): Floating-point input shaped `[B, C, T]`. The output keeps its dtype.
         old_sr (int): sample rate of the input signal x.
         new_sr (int): sample rate of the output.
         zeros (int): number of zero crossing to keep in the sinc filter.
-        rolloff (float): use a lowpass filter that is `rolloff * new_sr / 2`,
+        rolloff (float): use a lowpass filter that is `rolloff * min(old_sr, new_sr) / 2`,
             to ensure sufficient margin due to the imperfection of the FIR filter used.
             Lowering this value will reduce anti-aliasing, but will reduce some of the
             highest frequencies.
@@ -86,8 +135,8 @@ def resample(
 
     Raises:
         ValueError: If the rates are not positive integers, `x` is not 3-D, or
-            `output_length`/`full` are out of range or contradictory. These are
-            checked identically at every rate, including `old_sr == new_sr`.
+            `output_length`/`full` are out of range or contradictory, or the
+            requested filter is invalid or would exceed 64 MiB.
 
     Shape:
 
@@ -99,37 +148,27 @@ def resample(
         for this implementation to be fast.
     """
 
-    if not isinstance(old_sr, int) or not isinstance(new_sr, int):
-        raise ValueError("old_sr and new_sr should be integers")
-    if old_sr <= 0 or new_sr <= 0:
-        raise ValueError(
-            f"old_sr and new_sr should be positive, got {old_sr} and {new_sr}"
-        )
     if x.ndim != 3:
         raise ValueError(
             f"resample expects a [B, C, T] array, got shape {tuple(x.shape)}"
         )
 
-    batch_size, c, length = x.shape
-
-    # Integer arithmetic, on the unreduced rates, so the output length never
-    # depends on how `new_sr * length / old_sr` happens to round.
-    max_output_length = -(-new_sr * length // old_sr)
-    default_output_length = new_sr * length // old_sr
-
-    # Validated before the equal-rate short circuit below, so that a bad
-    # `output_length` is an error at every rate rather than only at some of them.
-    if output_length is None:
-        applied_output_length = max_output_length if full else default_output_length
-    elif full:
-        raise ValueError("You cannot pass both full=True and output_length")
-    elif output_length < 0 or output_length > max_output_length:
-        raise ValueError(f"output_length must be between 0 and {max_output_length}")
-    else:
-        applied_output_length = output_length
-
+    output_length = _resample_output_length(
+        old_sr, new_sr, x.shape[-1], output_length, full
+    )
+    _validate_resample_filter(zeros, rolloff)
     if new_sr == old_sr:
-        return x[..., :applied_output_length]
+        return x[..., :output_length]
+    _require_float_waveform(x)
+    if x.size == 0 or output_length == 0:
+        return jnp.zeros_like(x, shape=(*x.shape[:-1], output_length))
+    return _resample_jax(x, old_sr, new_sr, zeros, rolloff, output_length)
+
+
+def _resample_jax(x, old_sr, new_sr, zeros, rolloff, output_length):
+    batch_size, c, _ = x.shape
+    old_sr, new_sr = operator.index(old_sr), operator.index(new_sr)
+    zeros = int(zeros)
 
     gcd = math.gcd(old_sr, new_sr)
     old_sr = old_sr // gcd
@@ -152,4 +191,4 @@ def resample(
     )
     y = rearrange(y, "(b c) w t -> b c (t w)", b=batch_size, c=c)
 
-    return y[..., :applied_output_length]
+    return y[..., :output_length]

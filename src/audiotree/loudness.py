@@ -53,9 +53,8 @@ def safe_gain_db(lufs, target_lufs, max_gain_db=None, *, xp=np):
     Such items get a gain of ``0.0`` (left untouched) rather than being turned
     into an all-``NaN`` waveform.
 
-    The resulting loudness is always ``lufs + gain_db``: ``target_lufs`` for a
-    normally-measured item, the (unchanged) non-finite value for a silent one,
-    and ``lufs + max_gain_db`` when the gain is capped.
+    The result is a gain estimate. The absolute gate can change which blocks
+    contribute to integrated loudness after that gain is applied.
 
     Args:
         lufs: Measured integrated loudness, shaped ``(*batch,)``.
@@ -68,25 +67,10 @@ def safe_gain_db(lufs, target_lufs, max_gain_db=None, *, xp=np):
     Returns:
         The ``(*batch,)`` gain in dB, finite for every item.
     """
-    gain_db = xp.where(xp.isfinite(lufs), target_lufs - lufs, 0.0)
+    gain_db = target_lufs - lufs
     if max_gain_db is not None:
         gain_db = xp.minimum(gain_db, max_gain_db)
-    return gain_db
-
-
-def shift_lufs(lufs, gain_db, *, xp=np):
-    """Apply a per-item dB gain to a measured loudness.
-
-    Adding the gain rather than assigning the target is what keeps a skipped
-    (non-finite) or capped item honest: ``-inf + 0.0`` stays ``-inf``.
-
-    The result is normalized to ``float32``, the dtype :meth:`AudioTree.replace_lufs`
-    produces. ``lufs`` is a derived measurement rather than user data, and a
-    float64 leaf would be silently narrowed by JAX under the default x64-off
-    config — which would make the NumPy and JAX backends disagree on a field
-    that is supposed to round-trip through both.
-    """
-    return (lufs + gain_db).astype(xp.float32)
+    return xp.where(xp.isfinite(lufs), gain_db, 0.0)
 
 
 def shift_lufs_windows(lufs_windows, gain_db, *, xp=np):

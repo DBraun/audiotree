@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import dataclasses
 import importlib
+import math
+import operator
 from pathlib import Path
 from typing import (
     Any,
@@ -38,10 +40,14 @@ from .loudness import (
     _windowed_num_windows,
     pad_to_gating_block,
     safe_gain_db,
-    shift_lufs,
     shift_lufs_windows,
 )
-from .resample import resample
+from .resample import (
+    _require_float_waveform,
+    _resample_jax,
+    _resample_output_length,
+    _validate_resample_filter,
+)
 
 if TYPE_CHECKING:
     # An array field that may hold either a NumPy or a JAX array. ``jax`` is
@@ -867,9 +873,7 @@ class AudioTree:
 
         Args:
             keep: Derived field names the caller has itself kept correct, and so
-                does not want cleared -- e.g. :meth:`normalize_lufs` shifts
-                ``lufs``/``lufs_windows`` by the gain it applied rather than
-                discarding them.
+                does not want cleared.
             **updates: Forwarded to :meth:`replace`, and applied *after* the
                 invalidation so a caller can supply a fresh value for a derived
                 field.
@@ -1002,25 +1006,8 @@ class AudioTree:
             lufs_hop_sec = lufs_window_sec
         if lufs_hop_sec <= 0:
             raise ValueError(f"lufs_hop_sec must be positive, got {lufs_hop_sec}.")
-        # Both engines share the 5-channel BS.1770 layouts; the NumPy meter
-        # would otherwise silently compute a value for 6+ channels while the
-        # JAX one raised.
-        if self.num_channels > 5:
-            raise ValueError(
-                f"Audio must have five channels or less (the BS.1770 "
-                f"mono/stereo/5.x layouts), got {self.num_channels}."
-            )
-        # ``engine`` chooses the kernel and ``device`` chooses where it runs; the
-        # output stays in the waveform's own array library so the tree does not go
-        # heterogeneous. Resolved up front so a bad pairing fails before any work.
-        jax_device, platform = _resolve_device(device)
-        input_is_numpy = isinstance(self.waveform, np.ndarray)
-        engine = _resolve_lufs_engine(engine, platform, input_is_numpy)
-
-        # Flatten any leading axes (e.g. after reshape_mini_batches) to a single
-        # batch axis, then restore them on the computed loudness.
         leading_shape = self.waveform.shape[:-2]
-        waveform = self.waveform.reshape(-1, *self.waveform.shape[-2:])
+        compute_waveform, engine = _lufs_input(self.waveform, device, engine)
         ws = _window_samples(lufs_window_sec, self.sample_rate)
         hs = _window_samples(lufs_hop_sec, self.sample_rate)
         if hs < 1:
@@ -1030,18 +1017,12 @@ class AudioTree:
                 f"lufs_hop_sec={lufs_hop_sec} spans {hs} samples at "
                 f"{self.sample_rate} Hz; the hop must span at least 1 sample."
             )
-        num_windows = _windowed_num_windows(waveform.shape[-1], ws, hs)
+        num_windows = _windowed_num_windows(compute_waveform.shape[-1], ws, hs)
+        lufs_array = _measure_integrated_lufs(
+            compute_waveform, self.sample_rate, engine
+        )
 
         if engine == "jax":
-            compute_waveform = (
-                jnp.asarray(waveform)
-                if jax_device is None
-                else jax.device_put(waveform, jax_device)
-            )
-            # ``zeros`` is left to the default so the FIR tap count scales with
-            # the sample rate; a fixed 512 cannot realize the 38 Hz high-pass
-            # much above 16 kHz.
-            lufs_array = _jit_integrated_loudness(compute_waveform, self.sample_rate)
             if num_windows == 0:
                 lufs_windows_array = jnp.zeros(
                     (compute_waveform.shape[0], 0), dtype=jnp.float32
@@ -1054,8 +1035,6 @@ class AudioTree:
                     lufs_hop_sec,
                 )
         else:
-            compute_waveform = np.asarray(waveform)
-            lufs_array = _numpy_integrated_lufs(compute_waveform, self.sample_rate)
             if num_windows == 0:
                 lufs_windows_array = np.zeros(
                     (compute_waveform.shape[0], 0), dtype=np.float32
@@ -1071,7 +1050,7 @@ class AudioTree:
         # Coerce results back to the waveform's array library (a no-op when the
         # kernel already ran there; a device transfer when ``engine`` selected the
         # other one).
-        out_np = np if input_is_numpy else jnp
+        out_np = np if isinstance(self.waveform, np.ndarray) else jnp
         lufs_array = out_np.asarray(lufs_array)
         lufs_windows_array = out_np.asarray(lufs_windows_array)
 
@@ -1079,6 +1058,15 @@ class AudioTree:
             lufs=lufs_array.reshape(leading_shape),
             lufs_windows=lufs_windows_array.reshape(*leading_shape, num_windows),
         )
+
+    def _remeasure_integrated_lufs(self, *, device=None, engine=None) -> Self:
+        """Refresh gated LUFS without recomputing or replacing the window grid."""
+        if self.samples == 0 or self.num_channels > 5:
+            return self.replace(lufs=None)
+        waveform, engine = _lufs_input(self.waveform, device, engine)
+        lufs = _measure_integrated_lufs(waveform, self.sample_rate, engine)
+        xp = np if isinstance(self.waveform, np.ndarray) else jnp
+        return self.replace(lufs=xp.asarray(lufs).reshape(self.waveform.shape[:-2]))
 
     def clear_lufs(self) -> Self:
         """Return a copy with the cached ``lufs`` and ``lufs_windows`` dropped.
@@ -1107,12 +1095,13 @@ class AudioTree:
     ) -> Self:
         """Normalize audio to a target LUFS level.
 
-        Computes the current loudness (if not already set), then scales the audio
-        to achieve the target LUFS. The returned AudioTree has updated
-        ``waveform``, ``lufs``, and ``lufs_windows`` fields (a constant gain shifts
-        every window's LUFS by the same amount). Changing the level invalidates
-        ``codes`` and ``latents``, which describe the
-        audio at its previous level.
+        Computes the current loudness if needed, then applies the gain implied
+        by the target. The result remeasures integrated LUFS because gain can
+        change which blocks pass the absolute gate. In that case measured
+        loudness can differ from the target. A constant gain shifts each ungated
+        window by the same amount. Changing the level invalidates codec fields.
+        When the waveform has no samples or more than five channels, a supplied
+        integrated measurement can guide the gain, and the output clears it.
 
         Items whose loudness is not finite are **passed through unscaled**. Digital
         silence, and any excerpt below the BS.1770 absolute gate, measure ``-inf``
@@ -1125,13 +1114,9 @@ class AudioTree:
             max_gain_db: Optional ceiling on the applied gain, so a very quiet (but
                 still measurable) item is not amplified without bound. ``None`` (the
                 default) applies whatever gain the target implies; a capped item
-                lands at ``lufs + max_gain_db`` rather than at ``target_lufs``.
-            device: Where to compute the loudness when it is not already set,
-                forwarded to :meth:`replace_lufs` (see there). Ignored when
-                ``lufs`` is already populated.
-            engine: Which loudness kernel to use when it is not already set,
-                forwarded to :meth:`replace_lufs` (see there). Ignored when
-                ``lufs`` is already populated.
+                receives at most this gain even if more is needed for the target.
+            device: Where to measure loudness, as in :meth:`replace_lufs`.
+            engine: Which loudness kernel to use, as in :meth:`replace_lufs`.
 
         Returns:
             AudioTree with audio scaled to target LUFS and loudness updated.
@@ -1172,17 +1157,10 @@ class AudioTree:
         linear_gain = linear_gain[..., None, None]
         scaled_waveform = tree.waveform * linear_gain
 
-        # A constant gain shifts every window's LUFS by the same dB as the
-        # integrated value, so both move by ``gain_db`` (kept aligned rather than
-        # left stale). Adding the gain rather than assigning ``target_lufs`` is
-        # what keeps a skipped (non-finite) or capped item honest. ``codes`` and
-        # ``latents`` have no such closed form, so they are invalidated.
         return tree._invalidate_derived(
-            keep=("lufs", "lufs_windows"),
             waveform=scaled_waveform,
-            lufs=shift_lufs(tree.lufs, gain_db, xp=numpy),
             lufs_windows=shift_lufs_windows(tree.lufs_windows, gain_db, xp=numpy),
-        )
+        )._remeasure_integrated_lufs(device=device, engine=engine)
 
     @staticmethod
     def _encode_string(s: str) -> np.ndarray:
@@ -2196,10 +2174,11 @@ class AudioTree:
                 passing ``full=True`` to all the other ones. ``"jax"`` engine
                 only.
 
-        Changing the sample rate changes the audio's length and its samples, so
-        every derived field (``lufs``, ``lufs_windows``, ``codes``, ``latents``)
-        is invalidated. Resampling to the rate the
-        tree already has returns it unchanged, derived fields and all.
+        Changing the rate or trimming with ``output_length`` invalidates every
+        derived field (``lufs``, ``lufs_windows``, ``codes``, ``latents``).
+        A call that keeps both the rate and length returns the original tree.
+        Rate changes require real floating-point samples. The JAX engine
+        rejects requests that would require a sinc filter larger than 64 MiB.
 
         Returns:
             AudioTree: A new ``AudioTree`` resampled to ``sample_rate`` (the original is unchanged).
@@ -2227,21 +2206,33 @@ class AudioTree:
         engine = _resolve_resample_engine(
             engine, self.waveform, zeros=zeros, rolloff=rolloff, full=full
         )
+        if engine == "jax":
+            zeros = _RESAMPLE_ZEROS if zeros is None else zeros
+            rolloff = _RESAMPLE_ROLLOFF if rolloff is None else rolloff
+            _validate_resample_filter(zeros, rolloff)
+        if self.waveform is None:
+            if sample_rate == self.sample_rate and output_length is None:
+                return self
+            raise ValueError("AudioTree.resample needs a waveform.")
+        length = self.waveform.shape[-1]
+        output_length = _resample_output_length(
+            self.sample_rate, sample_rate, length, output_length, full
+        )
+        sample_rate = operator.index(sample_rate)
         if sample_rate == self.sample_rate:
-            return self
-        if engine == "soxr":
-            # librosa resamples along the time axis directly, so no 3-D
-            # flattening is needed. The length is pinned to what the JAX engine
-            # produces (``floor(T * new / old)``) so the two agree on shape;
-            # soxr's own length can differ by a sample.
-            length = self.waveform.shape[-1]
-            max_output_length = -(-sample_rate * length // self.sample_rate)
-            if output_length is None:
-                output_length = sample_rate * length // self.sample_rate
-            elif output_length < 0 or output_length > max_output_length:
-                raise ValueError(
-                    f"output_length must be between 0 and {max_output_length}"
-                )
+            if output_length == length:
+                return self
+            return self._invalidate_derived(waveform=self.waveform[..., :output_length])
+
+        _require_float_waveform(self.waveform)
+        if output_length == 0:
+            waveform = self.waveform[..., :0]
+        elif self.waveform.size == 0:
+            xp = np if isinstance(self.waveform, np.ndarray) else jnp
+            waveform = xp.zeros_like(
+                self.waveform, shape=(*self.waveform.shape[:-1], output_length)
+            )
+        elif engine == "soxr":
             waveform = _resample_soxr(
                 self.waveform, self.sample_rate, sample_rate, output_length
             )
@@ -2250,14 +2241,13 @@ class AudioTree:
             # axes (e.g. after reshape_mini_batches) and restore them afterwards.
             leading_shape = self.waveform.shape[:-2]
             flat = self.waveform.reshape(-1, *self.waveform.shape[-2:])
-            waveform = resample(
+            waveform = _resample_jax(
                 jnp.asarray(flat),
                 self.sample_rate,
                 sample_rate,
-                zeros=_RESAMPLE_ZEROS if zeros is None else zeros,
-                rolloff=_RESAMPLE_ROLLOFF if rolloff is None else rolloff,
-                output_length=output_length,
-                full=full,
+                zeros,
+                rolloff,
+                output_length,
             )
             waveform = waveform.reshape(*leading_shape, *waveform.shape[-2:])
             if isinstance(self.waveform, np.ndarray):
@@ -2634,6 +2624,28 @@ def _batch_audiotrees(audio_trees: Sequence[AudioTree]) -> AudioTree:
     return tree_util.tree_map(
         lambda *xs: _concatenate(xs), *audio_trees, is_leaf=_is_string_leaf
     )
+
+
+def _lufs_input(waveform, device, engine):
+    if waveform.shape[-2] > 5:
+        raise ValueError(
+            "Audio must have five channels or less (the BS.1770 mono/stereo/5.x "
+            f"layouts), got {waveform.shape[-2]}."
+        )
+    jax_device, platform = _resolve_device(device)
+    engine = _resolve_lufs_engine(engine, platform, isinstance(waveform, np.ndarray))
+    flattened = waveform.reshape(math.prod(waveform.shape[:-2]), *waveform.shape[-2:])
+    if engine == "numpy":
+        return np.asarray(flattened), engine
+    if jax_device is not None:
+        return jax.device_put(flattened, jax_device), engine
+    return jnp.asarray(flattened), engine
+
+
+def _measure_integrated_lufs(waveform, sample_rate, engine):
+    if engine == "jax":
+        return _jit_integrated_loudness(waveform, sample_rate)
+    return _numpy_integrated_lufs(waveform, sample_rate)
 
 
 def _numpy_integrated_lufs(waveform: np.ndarray, sample_rate: int) -> np.ndarray:
