@@ -13,7 +13,7 @@ import numpy as np
 import soundfile
 
 from audiotree import AudioTree
-from audiotree.core import ExcerptConfig, _leading_axis_size
+from audiotree.core import ExcerptConfig
 
 if TYPE_CHECKING:
     from audiotree.sources.windowed import WindowConfig
@@ -57,6 +57,9 @@ class AudioReadError(OSError):
     def __init__(self, message: str, file_path: str):
         super().__init__(message)
         self.file_path = file_path
+
+    def __reduce__(self):
+        return type(self), (self.args[0], self.file_path), self.__dict__
 
 
 #: Exceptions that mean "this file could not be read", as opposed to "this
@@ -617,15 +620,24 @@ def _stamp_source(tree: AudioTree | None, group_name: str) -> AudioTree | None:
     if tree is None:
         # A skipped excerpt; grain drops it at to_iter_dataset() anyway.
         return None
-    batch_size = _leading_axis_size(tree.waveform, tree.codes, tree.latents)
+    if tree.waveform is not None:
+        batch_shape = tree.waveform.shape[:-2]
+    else:
+        tokens = tree.codes if tree.codes is not None else tree.latents
+        if tokens is None:
+            raise ValueError("Cannot stamp provenance on an AudioTree with no data.")
+        batch_shape = tokens.shape[: 2 if tree._mini_batched else 1]
+    encoded_source = AudioTree._encode_string(group_name)[0]
     metadata = {
         **tree._metadata,
-        "source": AudioTree._encode_filepaths([group_name] * batch_size),
+        "source": np.broadcast_to(
+            encoded_source, (*batch_shape, encoded_source.size)
+        ).copy(),
     }
     if metadata.get("filepath") is None:
-        metadata["filepath"] = AudioTree._encode_filepaths([""] * batch_size)
+        metadata["filepath"] = np.zeros_like(metadata["source"])
     if metadata.get("offset") is None:
-        metadata["offset"] = np.full((batch_size,), np.nan, dtype=np.float64)
+        metadata["offset"] = np.full(batch_shape, np.nan, dtype=np.float64)
     return tree.replace(_metadata=metadata)
 
 

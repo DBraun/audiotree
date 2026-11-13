@@ -1,6 +1,7 @@
 """Tests for multiprocessing/multithreading with audio datasets."""
 
 import os
+import pickle
 import sys
 import tempfile
 from collections import Counter
@@ -14,6 +15,26 @@ import soundfile as sf
 
 from audiotree import AudioTree
 from audiotree.sources import create_audio_dataset, create_balanced_audio_dataset
+from audiotree.sources.core import AudioReadError
+
+
+def test_audio_read_error_pickle_preserves_message_and_path():
+    error = AudioReadError("Cannot read bad.wav", "bad.wav")
+    restored = pickle.loads(pickle.dumps(error))
+    assert type(restored) is AudioReadError
+    assert str(restored) == str(error)
+    assert restored.file_path == error.file_path
+
+
+def test_corrupt_file_error_survives_multiprocessing(tmp_path):
+    path = tmp_path / "bad.wav"
+    path.write_bytes(b"")
+    dataset = create_audio_dataset(filepaths=[path], num_epochs=1)
+    options = grain.MultiprocessingOptions(num_workers=1, per_worker_buffer_size=1)
+    dataset = dataset.to_iter_dataset().mp_prefetch(options=options)
+    with pytest.raises(AudioReadError, match=r"bad\.wav") as caught:
+        next(iter(dataset))
+    assert caught.value.file_path == str(path)
 
 
 def _create_test_audio_files(

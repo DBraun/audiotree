@@ -6,6 +6,7 @@ import warnings
 from pathlib import Path
 from typing import Dict
 
+import grain
 import numpy as np
 import pytest
 import soundfile as sf
@@ -17,6 +18,21 @@ from audiotree.sources import (
     find_audio_files,
 )
 from audiotree.sources.core import AudioReadError, _derive_group_seed
+
+
+@pytest.mark.parametrize("tokens_only", [False, True])
+def test_prebuilt_group_stamps_each_item_in_a_mini_batch(tokens_only):
+    waveform = None if tokens_only else np.zeros((4, 1, 8), dtype=np.float32)
+    codes = np.arange(4) if tokens_only else None
+    tree = AudioTree.create(waveform, 8000, codes=codes)
+    dataset = grain.MapDataset.source([tree.reshape_mini_batches(2)])
+
+    grouped = create_balanced_audio_dataset(datasets={"group": dataset})[0]
+    assert grouped.source == [["group", "group"], ["group", "group"]]
+    restored = grouped.flatten_mini_batches()
+    assert restored.source == ["group"] * 4
+    assert restored.filepath == [""] * 4
+    np.testing.assert_array_equal(restored.offset, np.full(4, np.nan))
 
 
 def _corrupt_audio_file(directory, name="bad.wav"):
