@@ -2,19 +2,20 @@
 
 import json
 import logging
+import math
 import os
 import time
+import unicodedata
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import jax
-import jax.tree_util
 import numpy as np
 
 from audiotree import _format
-from audiotree._bagz import require_bagz
+from audiotree._bagz import limits_path, require_bagz
 from audiotree._fs import refuse_to_clobber, safe_join, write_json_atomic
 from audiotree.core import PYTREE_FIELDS, AudioTree
 
@@ -45,6 +46,8 @@ _ALLOWED_DTYPES = frozenset(
 
 
 OnOverflow = Literal["error", "trim", "grow"]
+_ArrayLeaf = tuple[str, np.ndarray]
+_StringLeaf = tuple[str, list[str] | list[list[str]], int | None]
 
 #: How much bigger a reallocation makes the memmaps, relative to their current
 #: size. Growing to exactly what the current batch needs would re-mmap every
@@ -66,146 +69,92 @@ def _native_dtype(dtype: np.dtype) -> np.dtype:
     return dtype
 
 
-def _path_to_string(path: Tuple) -> str:
-    """Convert a JAX key path to a dot-separated string.
+def _describe_batch(pytree) -> tuple[Any, list[_ArrayLeaf], list[_StringLeaf], bool]:
+    """Build the on-disk structure and collect each leaf in storage order."""
+    arrays: list[_ArrayLeaf] = []
+    strings: list[_StringLeaf] = []
+    mini_batched = False
 
-    Examples:
-        (GetAttrKey('waveform'),) -> "waveform"
-        (GetAttrKey('extras'), DictKey('mel')) -> "extras.mel"
-        (DictKey('dry'), GetAttrKey('waveform')) -> "dry.waveform"
-    """
-    parts = []
-    for key in path:
-        if isinstance(key, jax.tree_util.GetAttrKey):
-            parts.append(key.name)
-        elif isinstance(key, jax.tree_util.DictKey):
-            parts.append(str(key.key))
-        elif isinstance(key, jax.tree_util.SequenceKey):
-            parts.append(str(key.idx))
-        elif isinstance(key, jax.tree_util.FlattenedIndexKey):
-            parts.append(str(key.key))
-        else:
-            parts.append(str(key))
-    return ".".join(parts)
-
-
-def _serialize_structure(pytree) -> Tuple[Any, List[str], List[str]]:
-    """Walk a pytree to build a JSON-serializable structure and collect leaf names.
-
-    Returns:
-        (structure, array_leaf_names, string_leaf_names) where structure is a
-        JSON-compatible description, array_leaf_names lists dot-separated paths
-        for array leaves, and string_leaf_names lists paths for string leaves.
-    """
-    array_leaf_names: List[str] = []
-    string_leaf_names: List[str] = []
-
-    def _walk(node, prefix: str):
-        # Leaf: numpy or JAX array
+    def walk(node, prefix: str, group_size: int | None = None):
+        nonlocal mini_batched
         if isinstance(node, (np.ndarray, jax.Array)):
-            array_leaf_names.append(prefix)
-            return prefix  # string = leaf reference
+            arrays.append((prefix, np.asarray(node)))
+            return prefix
 
-        # String leaf (single string, batch size 1)
-        if isinstance(node, str):
-            string_leaf_names.append(prefix)
+        if isinstance(node, (str, list)):
+            if group_size is None:
+                values = [node] if isinstance(node, str) else node
+                if not all(isinstance(s, str) for s in values):
+                    raise TypeError(
+                        f"String leaf {prefix!r} needs a str or list of strings."
+                    )
+            else:
+                values = node
+                if not isinstance(values, list) or not all(
+                    isinstance(group, list)
+                    and len(group) == group_size
+                    and all(isinstance(s, str) for s in group)
+                    for group in values
+                ):
+                    raise ValueError(
+                        f"Mini-batched string leaf {prefix!r} needs a list of "
+                        f"groups of {group_size} strings."
+                    )
+            strings.append((prefix, values, group_size))
             return {"type": "string_leaf", "leaf": prefix}
 
-        # List of strings (batch of strings)
-        if isinstance(node, list) and node and all(isinstance(x, str) for x in node):
-            string_leaf_names.append(prefix)
-            return {"type": "string_leaf", "leaf": prefix}
-
-        # AudioTree node
         if isinstance(node, AudioTree):
+            if (
+                not isinstance(node.sample_rate, int)
+                or isinstance(node.sample_rate, bool)
+                or node.sample_rate <= 0
+            ):
+                raise ValueError(
+                    f"AudioTree at {prefix or '<root>'} has sample_rate {node.sample_rate!r}."
+                )
+            reference = node.waveform
+            grouped = reference is not None and reference.ndim >= 4
+            if reference is None and node._mini_batched:
+                reference = node.codes if node.codes is not None else node.latents
+                grouped = reference is not None and reference.ndim >= 2
+            group_size = reference.shape[1] if grouped else None
             children = {}
-            for fname in PYTREE_FIELDS:
-                value = getattr(node, fname)
+            for name in PYTREE_FIELDS:
+                value = getattr(node, name)
                 if value is None:
                     continue
-                # The provenance container's *field* is ``_metadata`` (a
-                # private attribute), but its on-disk spelling stays
-                # ``metadata`` -- the attribute rename must not change the
-                # format. ``TreeDataSource`` maps it back.
-                child_key = "metadata" if fname == "_metadata" else fname
-                child_prefix = f"{prefix}.{child_key}" if prefix else child_key
-                # The dict fields (``extras``, ``_metadata``) take the generic
-                # dict branch below; an empty one becomes an empty dict node.
-                children[child_key] = _walk(value, child_prefix)
+                # The provenance field serializes under its historical name.
+                key = "metadata" if name == "_metadata" else name
+                path = f"{prefix}.{key}" if prefix else key
+                children[key] = walk(value, path, group_size)
             structure = {
                 "type": "AudioTree",
                 "sample_rate": node.sample_rate,
                 "children": children,
             }
             if node._mini_batched:
+                mini_batched = True
                 structure["mini_batched"] = True
             return structure
 
-        # Dict node
         if isinstance(node, dict):
             children = {}
-            for key in sorted(node.keys()):
-                child_prefix = f"{prefix}.{key}" if prefix else str(key)
-                children[str(key)] = _walk(node[key], child_prefix)
+            for key in sorted(node):
+                path = f"{prefix}.{key}" if prefix else str(key)
+                if str(key) in children:
+                    raise ValueError(
+                        f"Pytree keys at {prefix or '<root>'} must have distinct string names."
+                    )
+                children[str(key)] = walk(node[key], path, group_size)
             return {"type": "dict", "children": children}
 
         raise TypeError(
             f"Unsupported pytree node type: {type(node)}. "
-            "Leaves must be numpy/JAX arrays, str, or List[str]."
+            "Leaves must be numpy/JAX arrays, str, or a list of strings."
         )
 
-    structure = _walk(pytree, "")
-    return structure, array_leaf_names, string_leaf_names
-
-
-def _extract_leaves(
-    pytree, array_leaf_names: List[str], string_leaf_names: List[str]
-) -> Tuple[List[np.ndarray], Dict[str, List[str]]]:
-    """Walk a pytree and extract array leaves and string data.
-
-    Returns:
-        (array_leaves, string_data) where array_leaves is a list of numpy arrays
-        in the same order as array_leaf_names, and string_data maps string leaf
-        names to lists of strings.
-    """
-    array_leaves: List[np.ndarray] = []
-    string_data: Dict[str, List[str]] = {}
-
-    def _walk(node, prefix: str):
-        if isinstance(node, (np.ndarray, jax.Array)):
-            array_leaves.append(np.asarray(node))
-            return
-
-        if isinstance(node, str):
-            string_data[prefix] = [node]
-            return
-
-        if isinstance(node, list) and node and all(isinstance(x, str) for x in node):
-            string_data[prefix] = list(node)
-            return
-
-        if isinstance(node, AudioTree):
-            for fname in PYTREE_FIELDS:
-                value = getattr(node, fname)
-                if value is None:
-                    continue
-                # Same field-to-disk spelling as _serialize_structure: the
-                # ``_metadata`` field serializes under ``metadata``.
-                child_key = "metadata" if fname == "_metadata" else fname
-                child_prefix = f"{prefix}.{child_key}" if prefix else child_key
-                _walk(value, child_prefix)
-            return
-
-        if isinstance(node, dict):
-            for key in sorted(node.keys()):
-                child_prefix = f"{prefix}.{key}" if prefix else str(key)
-                _walk(node[key], child_prefix)
-            return
-
-        raise TypeError(f"Unsupported pytree node type: {type(node)}.")
-
-    _walk(pytree, "")
-    return array_leaves, string_data
+    structure = walk(pytree, "")
+    return structure, arrays, strings, mini_batched
 
 
 class TreeWriter:
@@ -215,7 +164,9 @@ class TreeWriter:
     is stored in manifest.json for reconstruction by TreeDataSource.
 
     Accepts AudioTree objects, dicts of arrays, dicts of AudioTrees, or any
-    combination. The schema is inferred from the first write() call.
+    combination. The schema is inferred from the first accepted batch.
+    String leaves have a companion ``limits.<name>.bagz`` file, which stays
+    separate so the dataset can be read before the writer closes.
 
     Args:
         directory: Directory where memmap files will be written
@@ -320,6 +271,7 @@ class TreeWriter:
         self._string_leaf_info: Dict[str, Dict] = {}
         self._bagz_writers: Dict = {}
         self._structure = None
+        self._format_version = _format.CURRENT_VERSION
         self._is_open = False
         self._is_closed = False
 
@@ -382,118 +334,89 @@ class TreeWriter:
             + f". Expected leaves {sorted(expected)}."
         )
 
-    def _leaf_path(self, name: str, extension: str, claimed: Dict[str, str]) -> Path:
-        """Resolve one leaf's output file, refusing collisions and escapes.
-
-        Filenames are dot-joined leaf paths, which is not injective: the leaves
-        ``{"a.b": x}`` and ``{"a": {"b": y}}`` both name ``a.b.bin``, so one
-        silently overwrote the other. And a leaf named ``"../escaped"`` wrote
-        outside the dataset directory entirely, so every filename goes through
-        :func:`~audiotree._fs.safe_join` -- the same check the reader applies to
-        the manifest it reads back.
-        """
-        filename = f"{name}{extension}"
-        if filename in claimed:
-            raise ValueError(
-                f"Leaves {claimed[filename]!r} and {name!r} both map to the file "
-                f"{filename!r}. Leaf filenames are dot-joined pytree paths, so a "
-                f"key containing '.' can collide with a nested one; rename one of "
-                f"them."
-            )
+    def _leaf_path(self, name: str, filename: str, claimed: Dict[str, str]) -> Path:
+        """Resolve a leaf file and reserve its name on case-insensitive volumes."""
         path = safe_join(self.directory, filename, description="leaf file")
-        if path.parent != self.directory.resolve():
+        if (
+            path.parent != self.directory.resolve()
+            or "/" in filename
+            or "\\" in filename
+        ):
             raise ValueError(
                 f"Leaf {name!r} maps to the file {filename!r}, which is not a "
                 f"plain name inside {self.directory}. Leaf keys must not contain "
                 f"path separators."
             )
-        claimed[filename] = name
+        # Normalize Unicode as well as case to catch equivalent names on macOS.
+        key = unicodedata.normalize("NFD", path.name).casefold()
+        if key in claimed:
+            raise ValueError(
+                f"Leaves {claimed[key]!r} and {name!r} both map to the file "
+                f"{filename!r}. Leaf filenames and Bagz limits files must have "
+                f"distinct names on case-insensitive filesystems."
+            )
+        claimed[key] = name
         return path
 
-    def _init_from_pytree(self, pytree, structure, leaf_names, string_leaf_names):
-        """Infer schema from the first pytree and create memmap/bagz files.
-
-        Nothing is recorded on ``self`` until every file is created and
-        mapped. Recording the schema first meant a failure creating a later
-        leaf's file (a leaf key over the filename length limit, a full disk)
-        left the writer with more leaf names than memmaps -- and the commit
-        loop's ``zip`` then silently truncated every subsequent write while
-        reporting success. On failure the files created so far are removed and
-        the writer is poisoned.
-        """
-        array_leaves, _ = _extract_leaves(pytree, leaf_names, string_leaf_names)
-
-        # Resolve and validate every output file *before* creating any of them
-        # or recording any schema, so a pytree the reader could not read back
-        # fails on the first write -- leaving neither half-written files nor a
-        # half-initialized writer -- rather than after hours of rendering.
+    def _initialize_storage(self, structure, arrays, strings, allocation, version):
+        """Allocate storage for the validated first batch and publish its schema."""
         claimed: Dict[str, str] = {}
-        array_paths = []
-        for name, leaf in zip(leaf_names, array_leaves):
-            if leaf.ndim == 0:
-                raise ValueError(
-                    f"Array leaf {name!r} is 0-dimensional; every array leaf "
-                    f"needs a leading batch dimension. Wrap a scalar as "
-                    f"np.asarray([value])."
-                )
-            dtype = _native_dtype(leaf.dtype)
-            if str(dtype) not in _ALLOWED_DTYPES:
-                raise ValueError(
-                    f"Leaf {name!r} has dtype {leaf.dtype!s}, which TreeDataSource "
-                    f"cannot read back. Supported dtypes: "
-                    f"{sorted(_ALLOWED_DTYPES)}. Cast the leaf before writing."
-                )
-            array_paths.append((self._leaf_path(name, ".bin", claimed), dtype))
-        string_paths = [
-            self._leaf_path(name, ".bagz", claimed) for name in string_leaf_names
-        ]
-
-        # Create everything into locals; commit to self only on full success.
         leaf_info: Dict[str, Dict] = {}
-        memmaps: List[np.memmap] = []
+        array_paths = []
+        for name, leaf in arrays:
+            dtype = _native_dtype(leaf.dtype)
+            path = self._leaf_path(name, f"{name}.bin", claimed)
+            array_paths.append((path, dtype, leaf.shape[1:]))
+            leaf_info[name] = {
+                "dtype": str(dtype),
+                "shape_per_sample": list(leaf.shape[1:]),
+                "file": path.name,
+            }
+
         string_leaf_info: Dict[str, Dict] = {}
+        string_paths = []
+        for name, _, group_size in strings:
+            path = self._leaf_path(name, f"{name}.bagz", claimed)
+            sidecar = limits_path(path)
+            self._leaf_path(name, sidecar.name, claimed)
+            string_paths.append((name, path, sidecar))
+            info = {"file": path.name, "limits_placement": "separate"}
+            if group_size is not None:
+                info["group_size"] = group_size
+            string_leaf_info[name] = info
+        if leaf_info.keys() & string_leaf_info.keys():
+            raise ValueError("Array and string leaves cannot share a dot-joined path.")
+
+        if strings:
+            bagz = require_bagz("storing string leaves in TreeWriter")
+            options = bagz.Writer.Options(
+                limits_placement=bagz.LimitsPlacement.SEPARATE
+            )
         bagz_writers: Dict = {}
+        memmaps: List[np.memmap] = []
         created: List[Path] = []
         try:
-            # Create memmaps for array leaves
-            for (path, dtype), name, leaf in zip(array_paths, leaf_names, array_leaves):
-                shape_per_sample = leaf.shape[1:]  # exclude batch dim
-
-                leaf_info[name] = {
-                    "dtype": str(dtype),
-                    "shape_per_sample": list(shape_per_sample),
-                    "file": path.name,
-                }
-
-                full_shape = (self._allocated_samples,) + shape_per_sample
-                # Size the file first, then map it read-write. `mode="w+"` would do
-                # both, but it cannot create a zero-byte mapping -- and
-                # `expected_samples=0` is legal when the writer may grow. numpy 2.2+
-                # pads such a file to one byte itself; the declared floor (2.1.3)
-                # hands `mmap` a length of 0 and gets "cannot mmap an empty file",
-                # so only the lowest-direct CI leg ever saw it. Same `max(..., 1)`
-                # the grow path already applies.
-                nbytes = int(np.prod(full_shape, dtype=np.int64)) * dtype.itemsize
+            for path, dtype, shape_per_sample in array_paths:
+                full_shape = (allocation,) + shape_per_sample
+                nbytes = math.prod(full_shape) * dtype.itemsize
                 with open(path, "wb") as fh:
-                    fh.truncate(max(nbytes, 1))
-                created.append(path)
-                mm = np.memmap(path, dtype=dtype, mode="r+", shape=full_shape)
-                memmaps.append(mm)
-
-            # Create bagz writers for string leaves
-            if string_leaf_names:
-                bagz = require_bagz("storing string leaves in TreeWriter")
-                for name, path in zip(string_leaf_names, string_paths):
-                    string_leaf_info[name] = {"file": path.name}
-                    bagz_writers[name] = bagz.Writer(str(path))
                     created.append(path)
+                    # Zero-sized arrays still need a mappable file on NumPy 2.1.
+                    fh.truncate(max(nbytes, 1))
+                memmaps.append(
+                    np.memmap(path, dtype=dtype, mode="r+", shape=full_shape)
+                )
+
+            for name, path, sidecar in string_paths:
+                created.extend((path, sidecar))
+                bagz_writers[name] = bagz.Writer(str(path), options)
         except BaseException:
             for writer in bagz_writers.values():
                 try:
                     writer.close()
                 except Exception:
                     pass
-            memmaps.clear()  # release the mappings before unlinking (Windows)
+            memmaps.clear()
             for path in created:
                 try:
                     path.unlink(missing_ok=True)
@@ -507,17 +430,15 @@ class TreeWriter:
             raise
 
         self._structure = structure
-        self._leaf_names = leaf_names
-        self._string_leaf_names = string_leaf_names
+        self._format_version = version
+        self._allocated_samples = allocation
+        self._leaf_names = [name for name, _ in arrays]
+        self._string_leaf_names = [name for name, _, _ in strings]
         self._leaf_info = leaf_info
         self._memmaps = memmaps
         self._string_leaf_info = string_leaf_info
         self._bagz_writers = bagz_writers
-
-        # Publish the manifest as soon as the schema is known, so a pre-render
-        # killed partway through leaves a readable prefix rather than a
-        # directory of orphaned .bin files. `flush()` keeps it current.
-        self._write_manifest()
+        self.flush()
 
     def _leaf_file(self, name: str) -> Path:
         """Resolve an already-recorded leaf's file, re-checking containment."""
@@ -590,13 +511,11 @@ class TreeWriter:
             raise
         self._allocated_samples = new_allocated
 
-    def _handle_overflow(self, batch_size: int) -> int:
-        """Apply the ``on_overflow`` policy to a batch that does not fit.
-
-        Returns:
-            How many of the *batch_size* offered samples may be written.
-        """
-        room = max(self._allocated_samples - self._current_index, 0)
+    def _writable_samples(self, batch_size: int) -> int:
+        """Apply the overflow policy before growing or allocating any files."""
+        room = self._allocated_samples - self._current_index
+        if batch_size <= room or self.on_overflow == "grow":
+            return batch_size
         counts = (
             f"{self._current_index} written, {self._allocated_samples} allocated "
             f"(expected_samples={self.expected_samples}), {batch_size} offered"
@@ -607,9 +526,6 @@ class TreeWriter:
                 f"expected_samples, or pass on_overflow='grow' to reallocate as "
                 f"needed or 'trim' to drop the excess."
             )
-        if self.on_overflow == "grow":
-            self._grow(self._current_index + batch_size)
-            return batch_size
         warnings.warn(
             f"TreeWriter is dropping {batch_size - room} of {batch_size} offered "
             f"samples: {counts}. Pass on_overflow='grow' to reallocate instead, "
@@ -618,17 +534,91 @@ class TreeWriter:
         )
         return room
 
+    def _validate_batch(self, arrays, strings):
+        """Check the offered batch and encode all string records before I/O."""
+        for name, leaf in arrays:
+            if leaf.ndim == 0:
+                raise ValueError(
+                    f"Array leaf {name!r} is 0-dimensional; every array leaf "
+                    f"needs a leading batch dimension. Wrap a scalar as "
+                    f"np.asarray([value])."
+                )
+        if arrays:
+            batch_size = arrays[0][1].shape[0]
+        elif strings:
+            batch_size = len(strings[0][1])
+        else:
+            raise ValueError("Pytree has no leaves.")
+
+        for name, leaf in arrays:
+            if leaf.shape[0] != batch_size:
+                raise ValueError(
+                    f"Inconsistent batch sizes: expected {batch_size}, "
+                    f"leaf {name!r} has {leaf.shape[0]}"
+                )
+            dtype = str(_native_dtype(leaf.dtype))
+            if self._structure is None:
+                if dtype not in _ALLOWED_DTYPES:
+                    raise ValueError(
+                        f"Leaf {name!r} has dtype {leaf.dtype!s}, which TreeDataSource "
+                        f"cannot read back. Supported dtypes: "
+                        f"{sorted(_ALLOWED_DTYPES)}. Cast the leaf before writing."
+                    )
+                continue
+            info = self._leaf_info[name]
+            expected_shape = tuple(info["shape_per_sample"])
+            if leaf.shape[1:] != expected_shape:
+                raise ValueError(
+                    f"Shape mismatch for leaf {name!r}: "
+                    f"expected {expected_shape}, got {leaf.shape[1:]}"
+                )
+            expected_dtype = info["dtype"]
+            if dtype != expected_dtype:
+                raise ValueError(
+                    f"Dtype mismatch for leaf {name!r}: expected {expected_dtype}, "
+                    f"got {dtype}. Cast the leaf to {expected_dtype} before writing."
+                )
+
+        encoded = {}
+        for name, values, group_size in strings:
+            if len(values) != batch_size:
+                raise ValueError(
+                    f"Inconsistent batch sizes: expected {batch_size}, "
+                    f"string leaf {name!r} has {len(values)}"
+                )
+            if self._structure is not None:
+                expected_group_size = self._string_leaf_info[name].get("group_size")
+                if group_size != expected_group_size:
+                    raise ValueError(
+                        f"Mini-batch grouping changed for string leaf {name!r}."
+                    )
+            try:
+                if group_size is None:
+                    encoded[name] = [value.encode("utf-8") for value in values]
+                else:
+                    encoded[name] = [
+                        json.dumps(group, ensure_ascii=False).encode("utf-8")
+                        for group in values
+                    ]
+            except UnicodeEncodeError as e:
+                raise ValueError(
+                    f"String leaf {name!r} has a value that is not utf-8 "
+                    f"encodable: {e}. The batch is rejected with nothing written."
+                ) from e
+        return batch_size, encoded
+
     def write(self, pytree) -> int:
         """Write a batch of samples to the memmap and bagz files.
 
         The first call infers the schema from the pytree structure.
         Array leaves must have the same batch size (first dimension).
-        String leaves (``str`` or ``List[str]``) are stored in bagz files.
+        String leaves are stored in Bagz files with separate record limits.
 
         Args:
             pytree: Any JAX-compatible pytree (AudioTree, dict, nested).
                 Array leaves must have a batch dimension. String leaves
-                can be a single ``str`` (batch size 1) or ``List[str]``.
+                can be a single ``str`` (batch size 1) or ``List[str]``. Mini-batched
+                AudioTree extras can also contain a list of string groups.
 
         Returns:
             Number of samples written. This is the batch size unless
@@ -651,96 +641,29 @@ class TreeWriter:
         if not self._is_open:
             raise RuntimeError("Writer is not open. Call open() first.")
 
-        structure, leaf_names, string_leaf_names = _serialize_structure(pytree)
+        structure, arrays, strings, mini_batched = _describe_batch(pytree)
+        if self._structure is not None:
+            self._check_structure_matches(
+                structure,
+                [name for name, _ in arrays],
+                [name for name, _, _ in strings],
+            )
+        batch_size, encoded_string_data = self._validate_batch(arrays, strings)
+        writable = self._writable_samples(batch_size)
+        if batch_size and writable == 0:
+            return 0
+        end_idx = self._current_index + writable
 
-        # Initialize schema on first write, then require every later write to
-        # match it by name -- not just by leaf count.
         if self._structure is None:
-            self._init_from_pytree(pytree, structure, leaf_names, string_leaf_names)
-        else:
-            self._check_structure_matches(structure, leaf_names, string_leaf_names)
-
-        array_leaves, string_data = _extract_leaves(
-            pytree, self._leaf_names, self._string_leaf_names
-        )
-
-        # Determine batch size from first available leaf. A 0-d leaf has no
-        # batch axis to read; ``shape[0]`` on it is a bare IndexError naming
-        # neither the leaf nor the problem.
-        for name, leaf in zip(self._leaf_names, array_leaves):
-            if leaf.ndim == 0:
-                raise ValueError(
-                    f"Array leaf {name!r} is 0-dimensional; every array leaf "
-                    f"needs a leading batch dimension. Wrap a scalar as "
-                    f"np.asarray([value])."
-                )
-        batch_size = None
-        if array_leaves:
-            batch_size = array_leaves[0].shape[0]
-        elif string_data:
-            batch_size = len(next(iter(string_data.values())))
-
-        if batch_size is None:
-            raise ValueError("Pytree has no leaves.")
-
-        # The allocation is a hint, not a cap: `on_overflow` decides whether an
-        # overshooting batch grows the files, raises, or is trimmed away.
-        if self._current_index + batch_size > self._allocated_samples:
-            writable = self._handle_overflow(batch_size)
-            if writable < batch_size:
-                if writable <= 0:
-                    return 0
-                array_leaves = [leaf[:writable] for leaf in array_leaves]
-                string_data = {k: v[:writable] for k, v in string_data.items()}
-                batch_size = writable
-        end_idx = self._current_index + batch_size
-
-        # Validate every leaf -- batch size, per-sample shape, exact dtype, and
-        # (for string leaves) utf-8 encodability -- BEFORE mutating any memmap or
-        # bagz file. A write() must be atomic: either the whole batch commits or
-        # none of it does. Validating and writing in one interleaved pass let a
-        # check that tripped on a later leaf leave earlier ones already written
-        # -- and, for string leaves, orphaned bagz records that positionally
-        # misbind every later label. Exact-dtype matching also closes the gap
-        # where dtype was recorded on the first write but never re-checked, so
-        # numpy's default unsafe cast silently corrupted a later batch's values.
-        for i, leaf in enumerate(array_leaves):
-            name = self._leaf_names[i]
-            if leaf.shape[0] != batch_size:
-                raise ValueError(
-                    f"Inconsistent batch sizes: expected {batch_size}, "
-                    f"leaf '{name}' has {leaf.shape[0]}"
-                )
-            expected_shape = tuple(self._leaf_info[name]["shape_per_sample"])
-            if leaf.shape[1:] != expected_shape:
-                raise ValueError(
-                    f"Shape mismatch for leaf '{name}': "
-                    f"expected {expected_shape}, got {leaf.shape[1:]}"
-                )
-            expected_dtype = self._leaf_info[name]["dtype"]
-            got_dtype = str(_native_dtype(leaf.dtype))
-            if got_dtype != expected_dtype:
-                raise ValueError(
-                    f"Dtype mismatch for leaf '{name}': expected {expected_dtype}, "
-                    f"got {got_dtype}. numpy would cast it into the schema dtype "
-                    f"without warning, silently corrupting values; cast the leaf "
-                    f"to {expected_dtype} before writing."
-                )
-
-        encoded_string_data: Dict[str, List[bytes]] = {}
-        for name, strings in string_data.items():
-            if len(strings) != batch_size:
-                raise ValueError(
-                    f"Inconsistent batch sizes: expected {batch_size}, "
-                    f"string leaf '{name}' has {len(strings)}"
-                )
-            try:
-                encoded_string_data[name] = [s.encode("utf-8") for s in strings]
-            except UnicodeEncodeError as e:
-                raise ValueError(
-                    f"String leaf '{name}' has a value that is not utf-8 "
-                    f"encodable: {e}. The batch is rejected with nothing written."
-                ) from e
+            version = _format.CURRENT_VERSION
+            if strings:
+                version = _format.TREE_STRING_LIMITS_VERSION
+            elif mini_batched:
+                version = _format.TREE_MINI_BATCH_VERSION
+            allocation = max(self._allocated_samples, end_idx)
+            self._initialize_storage(structure, arrays, strings, allocation, version)
+        elif end_idx > self._allocated_samples:
+            self._grow(end_idx)
 
         # Validation passed: commit every leaf. Array writes are positional at
         # _current_index (a failed one is overwritten by the next batch or
@@ -750,11 +673,11 @@ class TreeWriter:
         # and any finalization fail loudly rather than silently producing a
         # dataset whose later string labels are shifted.
         try:
-            for mm, leaf in zip(self._memmaps, array_leaves):
-                mm[self._current_index : end_idx] = leaf
+            for mm, (_, leaf) in zip(self._memmaps, arrays):
+                mm[self._current_index : end_idx] = leaf[:writable]
             for name, records in encoded_string_data.items():
                 writer = self._bagz_writers[name]
-                for record in records:
+                for record in records[:writable]:
                     writer.write(record)
         except BaseException:
             self._broken = (
@@ -766,9 +689,9 @@ class TreeWriter:
             )
             raise
 
-        self._current_index += batch_size
+        self._current_index = end_idx
         if self._pbar is not None:
-            self._pbar.update(batch_size)
+            self._pbar.update(writable)
 
         # Keep the on-disk sample count honest as the render progresses. The
         # manifest is written first with num_samples=0, so without this a
@@ -777,8 +700,8 @@ class TreeWriter:
             self.manifest_interval
             and time.monotonic() - self._manifest_written_at >= self.manifest_interval
         ):
-            self._write_manifest()
-        return batch_size
+            self.flush()
+        return writable
 
     def _write_manifest(self):
         """Write ``manifest.json`` atomically (temp file + rename).
@@ -788,22 +711,11 @@ class TreeWriter:
         a reader never observes a half-written file.
         """
 
-        def has_mini_batches(node):
-            return isinstance(node, dict) and (
-                node.get("type") == "AudioTree"
-                and node.get("mini_batched", False)
-                or any(
-                    has_mini_batches(child)
-                    for child in node.get("children", {}).values()
-                )
-            )
-
-        version = (
-            _format.TREE_READER_VERSION if has_mini_batches(self._structure) else (1, 0)
-        )
         manifest = {
             **_format.header(
-                _format.TREE, format_version=version, min_reader_version=version
+                _format.TREE,
+                format_version=self._format_version,
+                min_reader_version=self._format_version,
             ),
             "num_samples": self._current_index,
             "expected_samples": self.expected_samples,
@@ -817,9 +729,11 @@ class TreeWriter:
         self._manifest_written_at = time.monotonic()
 
     def flush(self):
-        """Flush all memmap files to disk and refresh the manifest."""
+        """Flush array and string files, then publish their readable prefix."""
         for mm in self._memmaps:
             mm.flush()
+        for writer in self._bagz_writers.values():
+            writer.flush()
         if self._structure is not None:
             self._write_manifest()
 
@@ -867,7 +781,7 @@ class TreeWriter:
             )
             # max(..., 1): a zero-size-per-sample leaf needs no bytes, but an
             # empty file cannot be mapped, so never truncate below the one-byte
-            # floor that _init_from_pytree and _grow allocate to.
+            # floor that _initialize_storage and _grow allocate to.
             actual_bytes = max(actual_samples * self._bytes_per_sample(name), 1)
             if filepath.stat().st_size > actual_bytes:
                 os.truncate(filepath, actual_bytes)

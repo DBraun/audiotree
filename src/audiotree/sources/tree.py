@@ -10,7 +10,7 @@ import numpy as np
 from grain.sources import RandomAccessDataSource
 
 from audiotree import _format
-from audiotree._bagz import require_bagz
+from audiotree._bagz import limits_path, require_bagz
 from audiotree._fs import safe_join
 from audiotree.core import AudioTree
 
@@ -44,7 +44,7 @@ _ALLOWED_DTYPES = frozenset(
 # field but reaches ``AudioTree(...)`` twice, so it must be rejected here rather
 # than dying at the first ``__getitem__`` with "multiple values for keyword
 # argument".
-_RECONSTRUCTED_FIELDS = frozenset(["sample_rate"])
+_RECONSTRUCTED_FIELDS = frozenset(["sample_rate", "_mini_batched"])
 
 # Top-level keys ``TreeDataSource.__init__`` reads without a fallback. Missing
 # any of them is a corrupt manifest, and validating them here turns a later raw
@@ -60,6 +60,31 @@ _REQUIRED_KEYS = ("num_samples", "structure", "leaves")
 # internal container. A node holding only these keys -- whichever era wrote it
 # -- reads back with today's semantics.
 _METADATA_CHILDREN = frozenset(["filepath", "source", "offset"])
+
+
+def _open_string_reader(bagz, data_dir: Path, info: Dict):
+    path = safe_join(data_dir, info["file"], description="string leaf")
+    if info.get("limits_placement") == "separate":
+        options = bagz.Reader.Options(limits_placement=bagz.LimitsPlacement.SEPARATE)
+        return bagz.Reader(str(path), options)
+    return bagz.Reader(str(path))
+
+
+def _decode_string_record(record: bytes, info: Dict) -> str | tuple[str, ...]:
+    text = record.decode("utf-8")
+    group_size = info.get("group_size")
+    if group_size is None:
+        return text
+    values = json.loads(text)
+    if (
+        not isinstance(values, list)
+        or len(values) != group_size
+        or not all(isinstance(value, str) for value in values)
+    ):
+        raise ValueError(
+            f"Invalid string group in {info['file']!r}: expected {group_size} strings."
+        )
+    return tuple(values)
 
 
 def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
@@ -175,6 +200,16 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
             )
         if not isinstance(info.get("file"), str):
             fail(f"string leaf {name!r} has a non-string 'file' entry")
+        placement = info.get("limits_placement", "tail")
+        if placement not in ("tail", "separate"):
+            fail(f"string leaf {name!r} has invalid limits_placement {placement!r}")
+        group_size = info.get("group_size")
+        if "group_size" in info and (
+            not isinstance(group_size, int)
+            or isinstance(group_size, bool)
+            or group_size <= 0
+        ):
+            fail(f"string leaf {name!r} has invalid group_size {group_size!r}")
         leaf_path = safe_join(data_dir, info["file"], description="string leaf")
         try:
             leaf_path.stat()
@@ -183,8 +218,24 @@ def _validate_manifest(manifest: Dict, manifest_path: Path) -> None:
                 f"string leaf {name!r} names {info['file']!r}, which cannot be "
                 f"read: {e}"
             )
+        if placement == "separate":
+            sidecar = limits_path(leaf_path)
+            safe_join(
+                data_dir,
+                str(sidecar.relative_to(data_dir.resolve())),
+                description="string leaf limits",
+            )
+            try:
+                sidecar.stat()
+            except OSError as e:
+                fail(
+                    f"string leaf {name!r} has unreadable limits file {sidecar.name!r}: {e}"
+                )
         if bagz is not None:
-            records = len(bagz.Reader(str(leaf_path)))
+            try:
+                records = len(_open_string_reader(bagz, data_dir, info))
+            except (OSError, RuntimeError, ValueError) as e:
+                fail(f"string leaf {name!r} cannot be opened: {e}")
             if records < num_samples:
                 fail(
                     f"string leaf {name!r} declares {num_samples} samples but "
@@ -312,7 +363,10 @@ def _reconstruct(node, leaf_values: Dict[str, Any]):
     node_type = node["type"]
 
     if node_type == "string_leaf":
-        return leaf_values.get(node["leaf"], _EXCLUDED)
+        value = leaf_values.get(node["leaf"], _EXCLUDED)
+        # Group records carry one mini-batch. Restore its outer batch axis
+        # and make a fresh list even when the record was cached in RAM.
+        return [list(value)] if isinstance(value, tuple) else value
 
     if node_type == "dict":
         result = {}
@@ -474,7 +528,7 @@ class TreeDataSource(RandomAccessDataSource):
 
         # In-memory storage (populated eagerly if load_into_memory=True).
         self._in_memory_arrays: Dict[str, np.ndarray] = {}
-        self._in_memory_strings: Dict[str, List[str]] = {}
+        self._in_memory_strings: Dict[str, List[str | tuple[str, ...]]] = {}
 
         # Per-process file handles, opened lazily by _ensure_open and dropped
         # on the way into a pickle. Unused when load_into_memory=True.
@@ -520,11 +574,9 @@ class TreeDataSource(RandomAccessDataSource):
             if _is_excluded(name, self.exclude_prefixes):
                 continue
             bagz = require_bagz(f"reading string leaf {name!r} in TreeDataSource")
-            reader = bagz.Reader(
-                str(safe_join(self.data_dir, info["file"], description="string leaf"))
-            )
+            reader = _open_string_reader(bagz, self.data_dir, info)
             self._in_memory_strings[name] = [
-                reader[i].decode("utf-8") for i in range(self._num_samples)
+                _decode_string_record(reader[i], info) for i in range(self._num_samples)
             ]
 
     def _ensure_open(self):
@@ -576,9 +628,7 @@ class TreeDataSource(RandomAccessDataSource):
             if _is_excluded(name, self.exclude_prefixes):
                 continue
             bagz = require_bagz(f"reading string leaf {name!r} in TreeDataSource")
-            readers[name] = bagz.Reader(
-                str(safe_join(self.data_dir, info["file"], description="string leaf"))
-            )
+            readers[name] = _open_string_reader(bagz, self.data_dir, info)
 
         self._leaf_names = leaf_names
         self._leaf_memmaps = memmaps
@@ -692,7 +742,9 @@ class TreeDataSource(RandomAccessDataSource):
             for name, mm in memmaps.items():
                 leaf_values[name] = np.array(mm[idx])[np.newaxis, ...]
             for name, reader in readers.items():
-                leaf_values[name] = reader[idx].decode("utf-8")
+                leaf_values[name] = _decode_string_record(
+                    reader[idx], self._string_leaf_info[name]
+                )
 
         return _reconstruct(self._structure, leaf_values)
 

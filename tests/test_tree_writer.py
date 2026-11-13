@@ -1066,3 +1066,40 @@ def test_close_is_terminal():
         )
         assert manifest["num_samples"] == 2
         assert (Path(tmpdir) / "x.bin").stat().st_size == 2 * 3 * 4
+
+
+@pytest.mark.parametrize("keys", [("Label", "label"), ("é", "e\u0301")])
+def test_leaf_filenames_cannot_alias_on_case_insensitive_volumes(tmp_path, keys):
+    with TreeWriter(tmp_path, expected_samples=1) as writer:
+        with pytest.raises(ValueError, match="both map to the file"):
+            writer.write({keys[0]: np.array([1]), keys[1]: np.array([2])})
+        assert not list(tmp_path.iterdir())
+
+
+def test_string_leaf_cannot_alias_bagz_sidecar(tmp_path):
+    with TreeWriter(tmp_path, expected_samples=1) as writer:
+        with pytest.raises(ValueError, match="limits.label.bagz"):
+            writer.write({"label": ["first"], "limits.label": ["second"]})
+        assert not list(tmp_path.iterdir())
+
+
+def test_rejected_first_batch_leaves_schema_unset(tmp_path):
+    from audiotree.sources import TreeDataSource
+
+    with TreeWriter(tmp_path, expected_samples=1) as writer:
+        with pytest.raises(ValueError, match="Inconsistent batch sizes"):
+            writer.write({"x": np.zeros((2, 3)), "y": np.zeros((1, 3))})
+        assert not list(tmp_path.iterdir())
+        assert writer.get_stats()["allocated_samples"] == 1
+        assert writer.write({"x": np.ones((1, 5)), "y": np.ones((1, 4))}) == 1
+
+    with TreeDataSource(tmp_path) as source:
+        np.testing.assert_array_equal(source[0]["x"], np.ones((1, 5)))
+        np.testing.assert_array_equal(source[0]["y"], np.ones((1, 4)))
+
+
+def test_invalid_first_string_record_leaves_no_files(tmp_path):
+    with TreeWriter(tmp_path, expected_samples=1) as writer:
+        with pytest.raises(ValueError, match="not utf-8 encodable"):
+            writer.write({"x": np.zeros((1, 3)), "label": ["\ud800"]})
+        assert not list(tmp_path.iterdir())

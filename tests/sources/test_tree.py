@@ -1212,8 +1212,16 @@ def test_in_memory_samples_do_not_alias_the_shared_store(tmp_path):
 class _StubBagzWriter:
     """Length-prefixed records; enough for TreeWriter's use of bagz."""
 
-    def __init__(self, path):
+    Options = types.SimpleNamespace
+
+    def __init__(self, path, options=None):
         self._file = open(path, "wb")
+        if options is not None:
+            path = Path(path)
+            path.with_name(f"limits.{path.name}").touch()
+
+    def flush(self):
+        self._file.flush()
 
     def write(self, record: bytes):
         self._file.write(len(record).to_bytes(8, "little") + record)
@@ -1223,7 +1231,9 @@ class _StubBagzWriter:
 
 
 class _StubBagzReader:
-    def __init__(self, path):
+    Options = types.SimpleNamespace
+
+    def __init__(self, path, options=None):
         data = Path(path).read_bytes()
         self._records = []
         offset = 0
@@ -1249,6 +1259,7 @@ def stub_bagz(monkeypatch):
     """
     module = types.ModuleType("bagz")
     module.Writer = _StubBagzWriter
+    module.LimitsPlacement = types.SimpleNamespace(SEPARATE="separate")
     module.Reader = _StubBagzReader
     monkeypatch.setitem(sys.modules, "bagz", module)
     return module
@@ -1479,3 +1490,87 @@ def test_legacy_metadata_node_with_only_provenance_reads_as_provenance(tmp_path)
     assert source[1].filepath == ["legacy.wav"]
     assert source[1].source == []
     source.close()
+
+
+@requires_bagz
+@pytest.mark.parametrize("periodic", [False, True])
+def test_string_dataset_can_be_read_at_each_manifest_publication(tmp_path, periodic):
+    interval = 1e-9 if periodic else 0
+    with TreeWriter(tmp_path, expected_samples=2, manifest_interval=interval) as writer:
+        writer.write({"label": ["first"], "x": np.array([[1]])})
+        if not periodic:
+            writer.flush()
+        source = TreeDataSource(tmp_path)
+        assert len(source) == 1
+        assert source[0]["label"] == "first"
+
+        writer.write({"label": ["second"], "x": np.array([[2]])})
+        if not periodic:
+            writer.flush()
+        with TreeDataSource(tmp_path, load_into_memory=True) as current:
+            assert len(current) == 2
+            assert current[1]["label"] == "second"
+            np.testing.assert_array_equal(current[1]["x"], [[2]])
+
+    # Even an in-progress source which reopens its handles can still use
+    # the manifest it acquired before close.
+    source.close()
+    assert source[0]["label"] == "first"
+    source.close()
+    with TreeDataSource(tmp_path) as closed:
+        assert len(closed) == 2
+        assert closed[1]["label"] == "second"
+
+
+@requires_bagz
+@pytest.mark.parametrize("load_into_memory", [False, True])
+@pytest.mark.parametrize("with_waveform", [False, True])
+def test_mini_batched_string_extras_roundtrip(
+    tmp_path, load_into_memory, with_waveform
+):
+    from audiotree import _format
+
+    waveform = np.zeros((4, 1, 8), np.float32) if with_waveform else None
+    tree = AudioTree.create(
+        waveform,
+        8000,
+        codes=np.arange(8).reshape(4, 2),
+        extras={"name": ["one", "α", "", "four"]},
+    ).reshape_mini_batches(2)
+    with TreeWriter(tmp_path, expected_samples=2) as writer:
+        writer.write(tree)
+    with TreeDataSource(tmp_path, load_into_memory=load_into_memory) as source:
+        assert source.manifest["min_reader_version"] == [1, 2]
+        with pytest.raises(ValueError, match="requires a reader of at least 1.2"):
+            _format.check(
+                source.manifest, _format.TREE, source="test", reader_version=(1, 1)
+            )
+        first = source[0].flatten_mini_batches()
+        assert first.extras["name"] == ["one", "α"]
+        np.testing.assert_array_equal(first.codes, [[0, 1], [2, 3]])
+        first.extras["name"][0] = "mutated"
+        assert source[0].flatten_mini_batches().extras["name"] == ["one", "α"]
+        assert source[1].flatten_mini_batches().extras["name"] == ["", "four"]
+
+
+@requires_bagz
+def test_legacy_bagz_tail_string_leaf_remains_readable(tmp_path):
+    import bagz
+
+    from audiotree import _format
+
+    with bagz.Writer(str(tmp_path / "label.bagz")) as writer:
+        writer.write(b"legacy")
+    manifest = {
+        **_format.header(_format.TREE),
+        "num_samples": 1,
+        "leaves": {},
+        "string_leaves": {"label": {"file": "label.bagz"}},
+        "structure": {
+            "type": "dict",
+            "children": {"label": {"type": "string_leaf", "leaf": "label"}},
+        },
+    }
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with TreeDataSource(tmp_path) as source:
+        assert source[0]["label"] == "legacy"

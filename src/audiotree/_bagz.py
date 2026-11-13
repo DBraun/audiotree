@@ -9,6 +9,13 @@ actually being read, so ``exclude_prefixes`` can skip string leaves on a
 platform where bagz is unavailable.
 """
 
+from pathlib import Path
+
+
+def limits_path(path: Path) -> Path:
+    """Return the sidecar path Bagz uses for separate record limits."""
+    return path.with_name(f"limits.{path.name}")
+
 
 def require_bagz(purpose: str):
     """Import and return ``bagz``, or raise a clear error naming the feature.

@@ -39,9 +39,10 @@ LUFS_WINDOWS_CACHE = "audiotree-lufs-windows"
 
 # What this build of audiotree writes, and the newest layout it can read.
 CURRENT_VERSION: Tuple[int, int] = (1, 0)
-# Tree format 1.1 adds required static mini-batch grouping metadata. Other
-# formats, and trees without this metadata, continue to use format 1.0.
-TREE_READER_VERSION: Tuple[int, int] = (1, 1)
+# Newer tree formats are only required when the writer uses their features.
+TREE_MINI_BATCH_VERSION: Tuple[int, int] = (1, 1)
+TREE_STRING_LIMITS_VERSION: Tuple[int, int] = (1, 2)
+TREE_READER_VERSION = TREE_STRING_LIMITS_VERSION
 
 # NPZ has no place for scalars alongside per-entry columns, so the AudioWriter
 # manifest stores its header as JSON-encoded 0-d arrays under this prefix. The
