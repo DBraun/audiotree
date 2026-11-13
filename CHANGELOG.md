@@ -31,6 +31,38 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Fixed
 
+- Publish windowed LUFS cache updates atomically. Failed updates leave the
+  previous file-to-record mapping readable. Successful updates retain the
+  previous Bagz payload for readers using the earlier manifest.
+- Reject colliding `TreeWriter` leaf filenames, including case and Unicode
+  aliases and Bagz companion files, and validate the first batch before
+  allocating its files or publishing its schema.
+- Keep string records readable after `TreeWriter.flush()` and periodic
+  manifest refreshes. String datasets now use tree format 1.2 with separate
+  Bagz limits files and support grouped string extras. Older tree formats
+  remain readable.
+- Preserve `bfloat16` feature arrays in `AudioWriter` manifest format 1.1.
+  Reject unrepresentable tags and column values before writing audio, preserve
+  unsigned NumPy scalar tags, and set the writer's sample rate on the first
+  successful nonempty write. `AudioDataSource` returns independent label and
+  feature arrays on each read.
+- Remeasure cached integrated LUFS after gain changes because a gain can move
+  blocks across the absolute gate. Ungated window LUFS still shifts by the
+  applied gain. `normalize_lufs()` reports the measured result, which can
+  differ from the requested target when the gate changes.
+- Validate resampling options before the equal-rate shortcut and honor
+  `output_length` at the current rate. Both engines handle empty waveforms
+  and reject integer PCM for rate changes. The JAX engine rejects invalid
+  filter settings and filters that would exceed 64 MiB.
+- Preserve namedtuple labels during scoped `output_key` transforms, and skip
+  random transforms entirely at `prob=0` while retaining the original fields.
+  Scoped outputs can select sequence members, and probability masks also
+  apply to array leaves in nested extras.
+- Pad along the time axis when `trim()` lengthens grouped audio. Keep silent
+  float16 waveforms finite through `peak_norm()`.
+- Stamp balanced dataset provenance on both leading axes of grouped items,
+  and preserve the file path when Grain forwards `AudioReadError` from a
+  multiprocessing worker.
 - Resample float16 and bfloat16 waveforms with soxr by computing in float32,
   instead of failing with a soxr dtype error.
 - Reject grouped token-only trees in `filter()` and grouped inputs to per-item
