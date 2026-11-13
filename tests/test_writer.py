@@ -1970,7 +1970,9 @@ def test_write_snapshots_array_fields(tmp_path, field):
     np.testing.assert_array_equal(actual, np.concatenate([original, original + 10]))
 
 
-@pytest.mark.parametrize("value", [np.array([1, 2]), [1, 2], {"x": 1}, 1j])
+@pytest.mark.parametrize(
+    "value", [np.array([1, 2]), np.array("x", dtype=object), [1, 2], {"x": 1}, 1j]
+)
 def test_write_rejects_non_scalar_tags_before_audio(tmp_path, value):
     tree = AudioTree.create(np.zeros((1, 1, 16), np.float32), 8000)
     with AudioWriter(tmp_path) as writer:
@@ -1991,10 +1993,15 @@ def test_write_scalar_tags_roundtrip(tmp_path):
         "boolean": np.bool_(True),
         "absent": None,
         "zero_dim": np.array(3),
+        "large_unsigned": np.array(2**63 + 11, dtype=np.uint64),
     }
     with AudioWriter(tmp_path, write_audio=False) as writer:
         writer.write(AudioTree.create(np.zeros((1, 1, 16)), 8000), tags=tags)
         tags["zero_dim"][...] = 99
+        tags["large_unsigned"][...] = 0
+    assert load_manifest(tmp_path / "manifest.npz")["tags_large_unsigned"].dtype == (
+        np.uint64
+    )
     actual = AudioDataSource(tmp_path).get_entry(0)["tags"]
     assert actual == {
         "string": "train",
@@ -2003,7 +2010,113 @@ def test_write_scalar_tags_roundtrip(tmp_path):
         "float": 0.5,
         "boolean": True,
         "zero_dim": 3,
+        "large_unsigned": 2**63 + 11,
     }
+
+
+@pytest.mark.parametrize(
+    ("tags", "message"),
+    [
+        ({"score": "good\x00"}, "tags_score.*NUL"),
+        ({"score": b"good\x00"}, "tags_score.*NUL"),
+        ({"score": 2**63}, "tags_score.*int64 range"),
+        ({1: "good"}, "Tag name.*must be a string"),
+        ({"bad\x00key": "good"}, "column name.*NUL"),
+    ],
+)
+def test_unencodable_tags_leave_first_write_uncommitted(tmp_path, tags, message):
+    tree = AudioTree.create(np.zeros((1, 1, 16), np.float32), 8000)
+    with AudioWriter(tmp_path) as writer:
+        with pytest.raises(ValueError, match=message):
+            writer.write(tree, tags=tags)
+        assert writer.sample_rate is None
+        assert writer.index == 0
+        assert not list(tmp_path.glob("*.wav"))
+        writer.write(tree.replace(sample_rate=16000), tags={"score": "good"})
+    source = AudioDataSource(tmp_path)
+    assert source[0].sample_rate == 16000
+    assert source.get_entry(0)["tags"] == {"score": "good"}
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_incompatible_integer_tag_dtypes_fail_before_audio(tmp_path, reverse):
+    tree = AudioTree.create(np.zeros((1, 1, 16), np.float32), 8000)
+    values = [-1, np.uint64(2**63)]
+    if reverse:
+        values.reverse()
+    with AudioWriter(tmp_path) as writer:
+        writer.write(tree, tags={"id": values[0]})
+        with pytest.raises(ValueError, match="tags_id.*signed and unsigned"):
+            writer.write(tree, tags={"id": values[1]})
+        assert writer.index == 1
+        assert not (tmp_path / "audio_0001.wav").exists()
+    assert AudioDataSource(tmp_path).get_entry(0)["tags"] == {"id": int(values[0])}
+
+
+def test_unsupported_extra_dtype_fails_before_audio(tmp_path):
+    tree = AudioTree.create(
+        np.zeros((1, 1, 16), np.float32),
+        8000,
+        extras={"embedding": jnp.ones((1, 3), dtype=jnp.float8_e5m2)},
+    )
+    with AudioWriter(tmp_path) as writer:
+        with pytest.raises(ValueError, match="extras_embedding.*float8_e5m2"):
+            writer.write(tree)
+        assert not list(tmp_path.glob("*.wav"))
+        writer.write(tree.replace(extras={"embedding": np.ones((1, 3))}))
+
+
+def test_empty_first_write_does_not_set_manifest_schema(tmp_path):
+    empty = AudioTree.create(np.zeros((0, 1, 16), np.float32), 8000)
+    tree = AudioTree.create(
+        np.zeros((1, 1, 16), np.float32), 16000, extras={"label": "recording"}
+    )
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        writer.write(empty)
+        assert writer.sample_rate is None
+        writer.write(tree)
+    item = AudioDataSource(tmp_path)[0]
+    assert item.sample_rate == 16000
+    np.testing.assert_array_equal(item.extras["label"], ["recording"])
+
+
+@pytest.mark.parametrize("shape", [(2,), (2, 2)])
+def test_bfloat16_features_roundtrip_without_pickle(tmp_path, shape):
+    features = jnp.array([1.0, -0.0, -2.25, np.inf][: np.prod(shape)], jnp.bfloat16)
+    features = features.reshape(shape)
+    tree = AudioTree.create(
+        np.zeros((2, 1, 16), np.float32), 8000, extras={"embedding": features}
+    )
+    with AudioWriter(tmp_path, write_audio=False) as writer:
+        writer.write(tree)
+
+    path = tmp_path / "manifest.npz"
+    bits = np.asarray(features).view(np.uint16)
+    data = load_manifest(path)
+    assert data["extras_embedding"].dtype == np.uint16
+    np.testing.assert_array_equal(data["extras_embedding"], bits)
+    header = _manifest.read_columns(path).header
+    assert header["format_version"] == [1, 1]
+    with pytest.raises(ValueError, match="requires a reader of at least 1.1"):
+        _format.check(header, _format.MANIFEST, source=str(path), reader_version=(1, 0))
+
+    source = AudioDataSource(path)
+    for actual, expected in (
+        (AudioTree.from_manifest(path).extras["embedding"], bits),
+        (source[1].extras["embedding"], bits[1:]),
+    ):
+        assert actual.dtype == np.dtype(jnp.bfloat16)
+        np.testing.assert_array_equal(actual.view(np.uint16), expected)
+
+
+def test_bfloat16_manifest_rejects_incompatible_payload(tmp_path):
+    path = tmp_path / "manifest.npz"
+    columns = {"extras_feature": [np.array([1], dtype=jnp.bfloat16)]}
+    payload = _manifest.encode(columns, num_entries=1)
+    payload["extras_feature"] = np.array([[1]], dtype=np.float32)
+    np.savez(path, **payload)
+    with pytest.raises(ValueError, match="bfloat16 column 'extras_feature'.*uint16"):
+        _manifest.read_columns(path)
 
 
 def test_write_snapshots_mutable_tags(tmp_path):

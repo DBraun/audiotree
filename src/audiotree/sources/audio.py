@@ -26,8 +26,9 @@ def _with_batch_axis(value) -> np.ndarray:
     of a batch-of-1 field: ``lufs`` is a scalar, ``lufs_windows`` is ``(W,)``,
     ``codes`` is ``(codebooks, frames)``. Every AudioTree field must carry the
     batch axis, or ``AudioTree.batch`` concatenates along the wrong one.
+    Copy the row so mutating a loaded item cannot affect future reads.
     """
-    return np.asarray(value)[np.newaxis, ...]
+    return np.array(value)[np.newaxis, ...]
 
 
 class AudioDataSource(grain.RandomAccessDataSource):
@@ -305,25 +306,12 @@ class AudioDataSource(grain.RandomAccessDataSource):
         """
         entry = self.entries[int(record_key)]
 
-        # Prepare extras from manifest
-        extras = {}
-
-        # Add extras arrays from manifest (these can be batched properly)
         prefix = _manifest.EXTRAS_PREFIX
-        for key, value in entry.items():
-            if key.startswith(prefix):
-                # Strip the column prefix and add to extras
-                extras_key = key[len(prefix) :]
-                # Wrap in array with batch dimension for batching
-                if isinstance(value, np.ndarray):
-                    # Add batch dimension if needed
-                    if value.ndim == 0:
-                        extras[extras_key] = np.array([value.item()])
-                    else:
-                        extras[extras_key] = value[np.newaxis, ...]  # Add batch dim
-                else:
-                    # Convert scalar to array with batch dim
-                    extras[extras_key] = np.array([value])
+        extras = {
+            key[len(prefix) :]: _with_batch_axis(value)
+            for key, value in entry.items()
+            if key.startswith(prefix)
+        }
 
         # Check if audio files were actually written
         files_written = entry.get("files_written", True)

@@ -4,7 +4,7 @@ import string
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 import soundfile
@@ -105,9 +105,17 @@ def _column_value(name: str, value: Any, batch_index: int) -> Any:
             f"Manifest column {name!r} has {len(array)} rows, too few for batch "
             f"index {batch_index}. Every per-item column must cover the batch."
         )
+    if array.dtype.kind in "US" and isinstance(value, (list, tuple)):
+        _manifest._check_array_strings(name, value[batch_index])
     # NumPy rows can be views into a reusable caller buffer. Manifest entries
     # outlive write(), so retain the accepted values rather than that view.
     return array[batch_index].copy()
+
+
+class _ColumnSchema(NamedTuple):
+    kind: str
+    shape: Optional[Tuple[int, ...]]
+    dtype: Optional[np.dtype]
 
 
 class AudioWriter:
@@ -242,11 +250,7 @@ class AudioWriter:
         # match.
         self._expected_extras_keys = None
         self._expected_provenance = None
-        # Each column's logical value kind, pinned by its first value. Kind
-        # drift (int rows, then a str row) is rejected at the offending write;
-        # see _check_entry_kinds.
-        self._column_kinds: Dict[str, str] = {}
-        self._column_shapes: Dict[str, Tuple[int, ...]] = {}
+        self._column_schema: Dict[str, _ColumnSchema] = {}
         self.manifest_every = manifest_every
         self._manifest_index = 0  # self.index as of the last manifest write
 
@@ -304,6 +308,8 @@ class AudioWriter:
                 continue
             if isinstance(value, dict):
                 continue
+            if not isinstance(key, str):
+                raise ValueError(f"AudioTree extras key {key!r} must be a string.")
             keys.add(key)
         return keys
 
@@ -333,9 +339,7 @@ class AudioWriter:
 
         # Take the sample rate from the first written tree and require every later
         # tree to match it (resample beforehand with AudioTree.resample if needed).
-        if self.sample_rate is None:
-            self.sample_rate = tree.sample_rate
-        elif tree.sample_rate != self.sample_rate:
+        if self.sample_rate is not None and tree.sample_rate != self.sample_rate:
             raise ValueError(
                 f"AudioTree sample_rate {tree.sample_rate} does not match the "
                 f"writer's sample_rate {self.sample_rate} (set by the first write). "
@@ -441,18 +445,25 @@ class AudioWriter:
         # on disk and no writer state touched. A column this writer cannot
         # store -- or a label array shorter than the batch -- fails here, at
         # its own write() call, keeping the directory free of audio no
-        # manifest row points at. Kinds are checked against a scratch copy so
-        # a rejected batch does not pin column kinds either.
+        # manifest row points at. Validate against a scratch schema so a
+        # rejected batch does not pin column types or shapes.
         entries: List[Dict] = []
         subtypes: List[Optional[str]] = []
-        column_kinds = dict(self._column_kinds)
-        column_shapes = dict(self._column_shapes)
+        column_schema = self._column_schema.copy()
         # Tags hold scalar values. Snapshot the mapping once per batch so
         # reusing it cannot change records already accepted by the writer.
         tags = dict(tags) if tags is not None else None
         for name, value in (tags or {}).items():
-            if isinstance(value, np.ndarray) and value.ndim == 0:
-                value = value.item()
+            if not isinstance(name, str):
+                raise ValueError(f"Tag name {name!r} must be a string.")
+            column = f"{_manifest.TAG_PREFIX}{name}"
+            _manifest._check_column_name(column)
+            if (
+                isinstance(value, np.ndarray)
+                and value.ndim == 0
+                and not value.dtype.hasobject
+            ):
+                value = value[()]
                 tags[name] = value
             if value is not None and _manifest._scalar_kind(value) not in (
                 "str",
@@ -466,6 +477,7 @@ class AudioWriter:
                     "float, boolean, or None. Store array-valued information "
                     "as AudioTree extras instead; this batch was not written."
                 )
+            self._check_column(column, value, column_schema)
         for i in range(batch_size):
             # Generate filename
             # todo: need a way to pass more kwargs to this formatter
@@ -477,7 +489,9 @@ class AudioWriter:
             entry = self._create_manifest_entry(
                 tree, i, filename, tags, subtype, timestamp, index=self.index + i
             )
-            self._check_entry_kinds(entry, column_kinds, column_shapes)
+            for column, value in entry.items():
+                if column != "tags":
+                    self._check_column(column, value, column_schema)
             entries.append(entry)
             subtypes.append(subtype)
             paths.append(filepath)
@@ -525,13 +539,13 @@ class AudioWriter:
         self.written_paths.extend(written)
         self.manifest_data.extend(entries)
         self.index += batch_size
-        self._column_kinds = column_kinds
-        self._column_shapes = column_shapes
-        if self._expected_fields is None:
-            self._expected_fields = present_fields
-        if self._expected_extras_keys is None:
-            self._expected_extras_keys = extras_keys
-            self._expected_provenance = provenance
+        if entries:
+            self._column_schema = column_schema
+            if self._expected_fields is None:
+                self.sample_rate = tree.sample_rate
+                self._expected_fields = present_fields
+                self._expected_extras_keys = extras_keys
+                self._expected_provenance = provenance
 
         if clipped:
             worst = max(clipped, key=lambda item: item[1])
@@ -656,67 +670,40 @@ class AudioWriter:
 
         return entry
 
-    def _check_entry_kinds(
-        self,
-        entry: Dict,
-        column_kinds: Dict[str, str],
-        column_shapes: Dict[str, Tuple[int, ...]],
-    ) -> None:
-        """Pin each column's value kind at its first value, rejecting drift here.
+    @staticmethod
+    def _check_column(name: str, value: Any, schema: Dict[str, _ColumnSchema]) -> None:
+        """Validate a cell without assembling or encoding previous rows."""
+        if value is None:
+            return  # A missing value does not pin the schema.
 
-        A column whose values change logical kind across writes (int rows, then
-        a str row) passes the schema checks in :meth:`write` -- the *keys* still
-        match -- and would otherwise only be caught by the encoder at
-        save/close, aborting with the manifest unwritten and every WAV already
-        on disk, orphaned. Checked as each entry is collected, before its audio
-        is written, so the offending ``write()`` fails at its own call. The
-        encoder's per-column homogeneity checks remain the backstop.
-
-        Args:
-            entry: A manifest entry from :meth:`_create_manifest_entry`.
-            column_kinds: The established kind per column, updated in place.
-                :meth:`write` passes a scratch copy of ``self._column_kinds``
-                and commits it only when the whole batch lands, so a rejected
-                batch pins nothing.
-            column_shapes: Scratch mapping of array column shapes, committed
-                alongside kinds only after the batch succeeds.
-
-        Raises:
-            ValueError: If a value's kind differs from the kind established by
-                the column's first value.
-        """
-
-        def cells():
-            for column, value in entry.items():
-                if column == "tags":
-                    # Pivoted into tags_* columns by _manifest_to_columns.
-                    for tag_key, tag_value in value.items():
-                        yield f"{_manifest.TAG_PREFIX}{tag_key}", tag_value
-                else:
-                    yield column, value
-
-        for column, value in cells():
-            if value is None:
-                # A missing value (masked subtype, absent tag) fixes no kind.
-                continue
-            if isinstance(value, np.ndarray):
-                expected_shape = column_shapes.setdefault(column, value.shape)
-                if value.shape != expected_shape:
-                    raise ValueError(
-                        f"Manifest column {column!r} has shape {value.shape}, "
-                        f"expected {expected_shape}. Every row of a column must "
-                        "have the same shape; this batch was not written."
-                    )
-            kind = _manifest._value_kind(value)
-            established = column_kinds.setdefault(column, kind)
-            if kind != established:
+        established = schema.get(name)
+        if established is None:
+            _manifest._check_column_name(name)
+        shape = value.shape if isinstance(value, np.ndarray) else None
+        kind = _manifest._value_kind(value)
+        dtype = _manifest._storage_dtype(name, value)
+        if established is not None:
+            if (
+                shape is not None
+                and established.shape is not None
+                and shape != established.shape
+            ):
                 raise ValueError(
-                    f"Manifest column {column!r} holds {established} values "
-                    f"from previous writes, but this write supplies a {kind} "
-                    f"value ({value!r}). A column must hold one type; rejected "
-                    f"at this write so the run's earlier audio is not orphaned "
-                    f"by a failed manifest save at close()."
+                    f"Manifest column {name!r} has shape {shape}, "
+                    f"expected {established.shape}. Every row of a column must "
+                    "have the same shape; this batch was not written."
                 )
+            if kind != established.kind:
+                raise ValueError(
+                    f"Manifest column {name!r} holds {established.kind} values "
+                    f"from previous writes, but this write supplies a {kind} "
+                    f"value ({value!r}). A column must hold one type."
+                )
+            if established.dtype is not None and dtype is not None:
+                dtype = _manifest._promote_dtype(name, established.dtype, dtype)
+            if dtype == established.dtype:
+                return
+        schema[name] = _ColumnSchema(kind, shape, dtype)
 
     def save_manifest(self) -> Optional[Path]:
         """Write ``manifest.npz`` atomically (temp file + rename).

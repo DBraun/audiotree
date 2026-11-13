@@ -43,6 +43,7 @@ from typing import (
 )
 
 import numpy as np
+from jax import numpy as jnp
 
 from . import _format
 
@@ -57,6 +58,11 @@ TAG_PREFIX = "tags_"
 
 #: Prefix of the per-item columns derived from ``AudioTree.extras``.
 EXTRAS_PREFIX = "extras_"
+
+# NPY saves bfloat16 as an untyped void dtype. Manifest 1.1 records the
+# affected columns in its header and stores their exact bits as uint16.
+_BFLOAT16 = np.dtype(jnp.bfloat16)
+_BFLOAT16_VERSION = (1, 1)
 
 #: The bookkeeping columns ``AudioWriter`` records per entry. Must stay in sync
 #: with ``AudioWriter._create_manifest_entry``, which is the only producer of
@@ -83,8 +89,8 @@ class ManifestColumns(NamedTuple):
     """A manifest as it is stored: whole columns, plus their presence masks.
 
     Attributes:
-        header: The decoded format header (``format``, ``format_version``,
-            ``min_reader_version``, ``producer``, ``num_entries``).
+        header: The decoded format header, including ``num_entries`` and
+            ``bfloat16_columns`` when the manifest encodes bfloat16 values.
         num_entries: Number of rows. Every column has this many.
         columns: One array per column, indexed by row along the first axis.
             String columns are ``<U`` arrays, bytes columns ``|S``; everything
@@ -118,6 +124,8 @@ def _scalar_kind(value: Any) -> str:
     if isinstance(value, (bool, np.bool_)):
         return "bool"
     if isinstance(value, np.generic):
+        if value.dtype == _BFLOAT16:
+            return "bfloat16"
         return {"i": "int", "u": "int", "f": "float", "U": "str", "S": "bytes"}.get(
             value.dtype.kind, value.dtype.kind
         )
@@ -147,6 +155,12 @@ _DTYPE_KIND_NAMES = {
 }
 
 
+def _array_kind(dtype: np.dtype) -> str:
+    if dtype.type is _BFLOAT16.type:
+        return "bfloat16"
+    return _DTYPE_KIND_NAMES.get(dtype.kind, dtype.kind)
+
+
 def _value_kind(value: Any) -> str:
     """The logical kind of one manifest cell value, scalar or array row.
 
@@ -158,9 +172,103 @@ def _value_kind(value: Any) -> str:
     homogeneity checks as the backstop.
     """
     if isinstance(value, np.ndarray):
-        kind = _DTYPE_KIND_NAMES.get(value.dtype.kind, value.dtype.kind)
-        return f"{kind} array"
+        return f"{_array_kind(value.dtype)} array"
     return _scalar_kind(value)
+
+
+def _check_column_name(name: str) -> None:
+    """Reject names the ZIP container cannot store verbatim."""
+    if "\x00" in name:
+        raise ValueError(f"Manifest column name {name!r} contains a NUL.")
+    try:
+        name.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"Manifest column name {name!r} is not valid UTF-8.") from exc
+
+
+def _check_trailing_nul(name: str, value: Any) -> None:
+    if (isinstance(value, str) and value.endswith("\x00")) or (
+        isinstance(value, bytes) and value.endswith(b"\x00")
+    ):
+        raise ValueError(
+            f"Manifest column {name!r} holds a value ending in a NUL ({value!r}). "
+            f"NumPy fixed-width string storage cannot distinguish it from padding."
+        )
+
+
+def _check_array_strings(name: str, value: Any) -> None:
+    """Check before converting Python strings to fixed-width array elements."""
+    for element in np.asarray(value, dtype=object).flat:
+        _check_trailing_nul(name, element)
+
+
+def _dtype_has_npy_encoding(dtype: np.dtype) -> bool:
+    if (
+        dtype.metadata is not None
+        or dtype.hasobject
+        or dtype.isbuiltin == 2
+        or dtype.kind == "T"
+    ):
+        return False
+    if dtype.subdtype is not None:
+        return _dtype_has_npy_encoding(dtype.subdtype[0])
+    if dtype.names is not None:
+        return all(_dtype_has_npy_encoding(dtype.fields[k][0]) for k in dtype.names)
+    return True
+
+
+def _check_dtype(name: str, dtype: np.dtype) -> None:
+    if dtype.type is _BFLOAT16.type and dtype.metadata is None:
+        return
+    if not _dtype_has_npy_encoding(dtype):
+        raise ValueError(
+            f"Manifest column {name!r} has dtype {dtype}, which cannot be stored "
+            "losslessly in this manifest. Cast it to a supported dtype before writing."
+        )
+
+
+def _storage_dtype(name: str, value: Any) -> Optional[np.dtype]:
+    """Validate an individual cell and return its dtype for promotion checks."""
+    if isinstance(value, (str, bytes)):
+        _check_trailing_nul(name, value)
+        return None  # Fixed-width strings already widen to fit at encoding.
+    if isinstance(value, (np.ndarray, np.generic)):
+        dtype = value.dtype
+    elif isinstance(value, int):
+        if not -(2**63) <= value < 2**63:
+            raise ValueError(
+                f"Manifest column {name!r} has integer {value!r} outside the "
+                f"int64 range. Pass an explicit np.uint64 for large unsigned values."
+            )
+        dtype = np.dtype(np.bool_ if isinstance(value, bool) else np.int64)
+    elif isinstance(value, float):
+        dtype = np.dtype(np.float64)
+    else:
+        raise ValueError(
+            f"Manifest column {name!r} holds {type(value).__name__} values, which "
+            f"cannot be stored as a manifest column."
+        )
+    _check_dtype(name, dtype)
+    return dtype
+
+
+def _promote_dtype(name: str, current: np.dtype, new: np.dtype) -> np.dtype:
+    """Find a common dtype without converting integer columns to floats."""
+    if current == new:
+        return current
+    try:
+        dtype = np.result_type(current, new)
+    except TypeError as exc:
+        raise ValueError(
+            f"Manifest column {name!r} mixes incompatible dtypes {current} and {new}."
+        ) from exc
+    if dtype.kind == "f" and current.kind in "iu" and new.kind in "iu":
+        raise ValueError(
+            f"Manifest column {name!r} mixes signed and unsigned integers "
+            f"with no common integer dtype (e.g. int64 with uint64). Cast "
+            f"the values to one integer dtype."
+        )
+    return dtype
 
 
 def _encode_column(
@@ -205,14 +313,8 @@ def _encode_column(
                 f"{type(next(v for v in provided if not isinstance(v, str))).__name__} "
                 f"values. A column must hold one type."
             )
-        offender = next((value for value in provided if value.endswith("\x00")), None)
-        if offender is not None:
-            raise ValueError(
-                f"Manifest column {name!r} holds a string ending in a NUL "
-                f"character ({offender!r}). NumPy fixed-width '<U' storage cannot "
-                f"tell a trailing NUL from padding, so it is dropped on read and "
-                f"the value would not round-trip; store it without a trailing NUL."
-            )
+        for value in provided:
+            _check_trailing_nul(name, value)
         filled = [value if value is not None else "" for value in values]
         return np.array(filled, dtype=np.str_), mask
 
@@ -223,14 +325,8 @@ def _encode_column(
                 f"{type(next(v for v in provided if not isinstance(v, bytes))).__name__} "
                 f"values. A column must hold one type."
             )
-        offender = next((value for value in provided if value.endswith(b"\x00")), None)
-        if offender is not None:
-            raise ValueError(
-                f"Manifest column {name!r} holds a bytes value ending in a NUL "
-                f"byte ({offender!r}). NumPy fixed-width '|S' storage cannot tell "
-                f"a trailing NUL from padding, so it is dropped on read and the "
-                f"value would not round-trip; store it without a trailing NUL."
-            )
+        for value in provided:
+            _check_trailing_nul(name, value)
         filled = [value if value is not None else b"" for value in values]
         return np.array(filled, dtype=np.bytes_), mask
 
@@ -246,7 +342,7 @@ def _encode_column(
 
     if isinstance(sample, np.ndarray):
         reference = np.asarray(sample)
-        kind = reference.dtype.kind
+        kind = _array_kind(reference.dtype)
         # np.stack promotes mixed dtypes to a common one instead of raising: an
         # int32 row next to a float32 row becomes float64, and an int row next
         # to a string row becomes the int's str() text. Either way the values
@@ -254,56 +350,24 @@ def _encode_column(
         # Widths *within* a kind are fine -- int32+int64 stacks to int64 and
         # <U3+<U8 to <U8, a widening with every written value intact, just as a
         # scalar string column already stores every row at the widest width.
-        offender = next(
-            (
-                array
-                for array in (np.asarray(value) for value in provided)
-                if array.dtype.kind != kind
-            ),
-            None,
-        )
-        if offender is not None:
-            raise ValueError(
-                f"Manifest column {name!r} mixes "
-                f"{_DTYPE_KIND_NAMES.get(kind, kind)} arrays with "
-                f"{_DTYPE_KIND_NAMES.get(offender.dtype.kind, offender.dtype.kind)} "
-                f"arrays. Stacking them would silently promote every row to a "
-                f"common dtype, so a column's rows must share one dtype kind."
-            )
-        if kind in ("U", "S"):
-            # Same trailing-NUL rule as the scalar branches, applied to the
-            # rows this branch converts itself. A row that is already a numpy
-            # array is exempt -- not skipped, but genuinely unable to offend:
-            # fixed-width element access strips trailing NULs, so the value the
-            # caller can observe is exactly what read_entries returns. A
-            # str/bytes leaf inside a list/tuple row, though, still holds its
-            # NUL, and np.asarray below would be what truncates it.
-            nul: Any = "\x00" if kind == "U" else b"\x00"
-            offender = next(
-                (
-                    element
-                    for value in provided
-                    if not isinstance(value, np.ndarray)
-                    for element in np.asarray(value, dtype=object).ravel()
-                    if isinstance(element, (str, bytes)) and element.endswith(nul)
-                ),
-                None,
-            )
-            if offender is not None:
+        filled = []
+        for value in values:
+            if value is None:
+                filled.append(np.zeros(reference.shape, reference.dtype))
+                continue
+            array = np.asarray(value)
+            current_kind = _array_kind(array.dtype)
+            if current_kind != kind:
                 raise ValueError(
-                    f"Manifest column {name!r} holds an array row with a value "
-                    f"ending in a NUL ({offender!r}). NumPy fixed-width "
-                    f"'{'<U' if kind == 'U' else '|S'}' storage cannot tell a "
-                    f"trailing NUL from padding, so it is dropped on read and "
-                    f"the value would not round-trip; store it without a "
-                    f"trailing NUL."
+                    f"Manifest column {name!r} mixes {kind} arrays with "
+                    f"{current_kind} arrays. A column's rows must share one dtype kind."
                 )
-        filled = [
-            np.asarray(value)
-            if value is not None
-            else np.zeros(reference.shape, reference.dtype)
-            for value in values
-        ]
+            _check_dtype(name, array.dtype)
+            # Fixed-width ndarray element access already strips trailing NULs.
+            # A Python list still holds them, so check before using its array.
+            if array.dtype.kind in "US" and not isinstance(value, np.ndarray):
+                _check_array_strings(name, value)
+            filled.append(array)
         try:
             stacked = np.stack(filled)
         except ValueError as exc:
@@ -331,23 +395,9 @@ def _encode_column(
         # int/float has no width of its own, so it counts as 64-bit rather
         # than narrowing: int32 overflows on a large byte offset or hash, and
         # float32 rounds a float64 value away.
-        widths = [
-            value.dtype
-            if isinstance(value, np.generic)
-            else np.dtype(np.int64)
-            if isinstance(value, int)
-            else np.dtype(np.float64)
-            for value in provided
-        ]
-        dtype = np.result_type(*widths)
-        if dtype.kind == "f" and all(width.kind in "iu" for width in widths):
-            # int64 next to uint64: numpy's only common type is float64, which
-            # rounds large values -- a silent corruption, so refuse instead.
-            raise ValueError(
-                f"Manifest column {name!r} mixes signed and unsigned integers "
-                f"with no common integer dtype (e.g. int64 with uint64). Cast "
-                f"the values to one integer dtype."
-            )
+        dtype = _storage_dtype(name, sample)
+        for value in provided[1:]:
+            dtype = _promote_dtype(name, dtype, _storage_dtype(name, value))
         filled = [value if value is not None else dtype.type(0) for value in values]
         return np.array(filled, dtype=dtype), mask
 
@@ -376,7 +426,9 @@ def encode(
             no NPZ representation.
     """
     payload: Dict[str, np.ndarray] = {}
+    bfloat16_columns = []
     for name, values in columns.items():
+        _check_column_name(name)
         if name.startswith(MASK_PREFIX) or name.startswith(_format.NPZ_HEADER_PREFIX):
             raise ValueError(
                 f"Manifest column {name!r} uses a reserved prefix "
@@ -397,11 +449,22 @@ def encode(
                 f"column would silently misalign labels with audio."
             )
         array, mask = _encode_column(name, values)
+        if array.dtype.type is _BFLOAT16.type:
+            bfloat16_columns.append(name)
+            array = array.view(np.dtype(np.uint16).newbyteorder(array.dtype.byteorder))
         payload[name] = array
         if mask is not None:
             payload[f"{MASK_PREFIX}{name}"] = mask
 
-    header = _format.header(_format.MANIFEST)
+    if bfloat16_columns:
+        header = _format.header(
+            _format.MANIFEST,
+            format_version=_BFLOAT16_VERSION,
+            min_reader_version=_BFLOAT16_VERSION,
+        )
+        header["bfloat16_columns"] = bfloat16_columns
+    else:
+        header = _format.header(_format.MANIFEST)
     header["num_entries"] = num_entries
     for key, value in header.items():
         # NPZ has no place for scalars, so each header value is a JSON-encoded
@@ -497,7 +560,9 @@ def read_columns(path: Union[str, Path]) -> ManifestColumns:
         for key in data
         if key.startswith(_format.NPZ_HEADER_PREFIX)
     }
-    _format.check(header, _format.MANIFEST, source=source)
+    version = _format.check(
+        header, _format.MANIFEST, source=source, reader_version=_BFLOAT16_VERSION
+    )
 
     num_entries = header.get("num_entries")
     if (
@@ -568,6 +633,23 @@ def read_columns(path: Union[str, Path]) -> ManifestColumns:
                 f"{source}: presence mask for column {name!r} must be "
                 f"{num_entries} booleans, got {mask.dtype} of shape {mask.shape}."
             )
+
+    if "bfloat16_columns" in header:
+        names = header["bfloat16_columns"]
+        if (
+            version < _BFLOAT16_VERSION
+            or not isinstance(names, list)
+            or not all(isinstance(name, str) for name in names)
+            or len(set(names)) != len(names)
+        ):
+            raise ValueError(f"{source}: invalid bfloat16_columns header.")
+        for name in names:
+            array = columns.get(name)
+            if array is None or array.dtype.type is not np.uint16:
+                raise ValueError(
+                    f"{source}: bfloat16 column {name!r} must be stored as uint16."
+                )
+            columns[name] = array.astype(np.uint16, copy=False).view(_BFLOAT16)
 
     return ManifestColumns(
         header=header, num_entries=num_entries, columns=columns, present=masks

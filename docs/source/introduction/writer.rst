@@ -816,10 +816,18 @@ predicate (evaluated per manifest entry) selects a subset at load time:
 On-Disk Format Versioning
 -------------------------
 
-``TreeWriter`` preserves explicit mini-batch grouping. Datasets containing
-grouped AudioTrees use tree format 1.1 and require a 1.1-capable reader so older
-readers cannot silently lose that state. Ordinary datasets still use format
-1.0, and existing 1.0 datasets remain readable.
+``TreeWriter`` uses format 1.0 for ordinary numeric datasets and format 1.1
+for numeric datasets that preserve explicit mini-batch grouping. String leaves
+use format 1.2 and store records and their limits in separate Bagz files so
+readers can open the dataset after ``flush()`` or a timed manifest refresh.
+Keep both files for each string leaf when moving or sharing a dataset.
+Format 1.2 also supports string extras grouped with their AudioTree mini-batch.
+Existing 1.0 and 1.1 datasets remain readable.
+
+``AudioWriter`` uses NPZ manifest format 1.1 for datasets with ``bfloat16``
+features. The manifest identifies columns whose exact bits are stored as
+``uint16`` so readers can restore the original dtype. Other AudioWriter
+manifests use format 1.0.
 
 Pre-rendered datasets outlive the code that wrote them, so all three on-disk
 formats — a ``TreeWriter`` directory, an ``AudioWriter`` NPZ manifest, and the
@@ -830,9 +838,8 @@ windowed-LUFS cache — carry a header (``format``, ``format_version``,
   ``audiotree-lufs-windows``), so pointing a reader at the wrong kind of
   directory fails by name instead of as a ``KeyError``.
 * A ``format_version`` **major** mismatch is refused in both directions; a
-  **minor** difference is accepted. Minors are additive — new fields a reader
-  may ignore — so a dataset written by any 1.x audiotree reads on any other
-  1.x audiotree.
+  **minor** difference is accepted when the reader meets the artifact's
+  ``min_reader_version``.
 * ``min_reader_version`` is what a writer raises instead of a major bump when
   it adds a field readers *must* honor: an older reader refuses rather than
   silently ignoring it.

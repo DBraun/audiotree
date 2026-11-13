@@ -12,6 +12,28 @@ from audiotree.sources import AudioDataSource
 from audiotree.sources.core import AudioReadError
 
 
+@pytest.mark.parametrize("write_audio", [False, True])
+def test_loading_arrays_does_not_alias_manifest_storage(tmp_path, write_audio):
+    tree = AudioTree.create(
+        np.zeros((1, 1, 16), np.float32),
+        8000,
+        codes=np.array([[[7, 8]]], dtype=np.int16),
+        extras={"embedding": np.array([[0.5, 1.5]], dtype=np.float32)},
+    )
+    with AudioWriter(tmp_path, write_audio=write_audio) as writer:
+        writer.write(tree)
+
+    source = AudioDataSource(tmp_path)
+    item = source[0]
+    item.codes[0, 0, 0] = 99
+    item.extras["embedding"][0, 0] = 99
+
+    np.testing.assert_array_equal(source[0].codes, tree.codes)
+    np.testing.assert_array_equal(
+        source[0].extras["embedding"], tree.extras["embedding"]
+    )
+
+
 def test_round_trip_npz_manifest():
     """Test writing with AudioWriter and reading back with AudioDataSource."""
     with tempfile.TemporaryDirectory() as tmpdir:
