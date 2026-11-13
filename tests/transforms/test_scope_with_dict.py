@@ -1,5 +1,7 @@
 """Test scope functionality with Dict[str, AudioTree] inputs."""
 
+from collections import namedtuple
+
 import numpy as np
 import pytest
 
@@ -510,6 +512,35 @@ def test_output_key_with_array_labels(backend, label_key, nested):
     np.testing.assert_array_equal(result[label_key], labels)
     np.testing.assert_allclose(result["dry"].waveform, 1.0)
     np.testing.assert_allclose(result["wet"].waveform, -1.0)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_output_key_preserves_namedtuple_labels(backend):
+    invert_phase, make_rng = _backend(backend)
+    labels = namedtuple("Labels", ["pitch", "velocity"])(np.array([60]), 90)
+    element = {"wave": _const(1.0), "z_labels": labels}
+
+    result = invert_phase(scope=["wave"], output_key="aug").random_map(
+        element, make_rng()
+    )
+
+    assert result["z_labels"] is labels
+    np.testing.assert_array_equal(result["aug"].waveform, -1.0)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_output_key_with_scope_inside_sequence(backend):
+    invert_phase, make_rng = _backend(backend)
+    first, second = _const(1.0), _const(2.0)
+    element = {"wave": (first, second)}
+    scope = {"wave": ({"scope": True}, {"scope": False})}
+
+    result = invert_phase(scope=scope, output_key="aug").random_map(element, make_rng())
+
+    assert result["wave"] is element["wave"]
+    assert isinstance(result["aug"], tuple)
+    np.testing.assert_array_equal(result["aug"][0].waveform, -1.0)
+    assert result["aug"][1] is second
 
 
 @pytest.mark.parametrize("backend", ["numpy", "jax"])

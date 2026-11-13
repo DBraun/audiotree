@@ -844,6 +844,63 @@ def test_prob_lt_one_with_output_key(backend):
     assert 0 < np.isclose(per_item, 10.0).sum() < batch_size
 
 
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+@pytest.mark.parametrize("output_key", [None, "aug"])
+def test_zero_probability_preserves_all_fields(backend, output_key):
+    xp = jnp if backend == "jax" else np
+    lib = jax_transforms if backend == "jax" else audiotree.transforms
+    tree = AudioTree.create(
+        xp.ones((2, 1, 4), dtype=xp.float32),
+        16000,
+        lufs=xp.full((2,), -20.0),
+        lufs_windows=xp.full((2, 1), -20.0),
+        codes=xp.ones((2, 1), dtype=xp.int32),
+        latents=xp.ones((2, 1), dtype=xp.float32),
+        offset=0.25,
+    )
+    rng = jax.random.key(0) if backend == "jax" else np.random.default_rng(0)
+    transform = lib.roll(prob=0, scope=["wave"], output_key=output_key)
+
+    result = transform.random_map({"wave": tree}, rng)
+
+    assert result["wave"] is tree
+    if output_key is not None:
+        assert result[output_key] is tree
+    if backend == "numpy":
+        assert rng.integers(2**32) == np.random.default_rng(0).integers(2**32)
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_zero_probability_skips_random_transform_on_mini_batches(backend):
+    lib = jax_transforms if backend == "jax" else audiotree.transforms
+    tree = _pair_element(backend, batch_size=4)["dry"].reshape_mini_batches(2)
+    rng = jax.random.key(0) if backend == "jax" else np.random.default_rng(0)
+
+    assert lib.roll(prob=0).random_map(tree, rng) is tree
+
+
+@pytest.mark.parametrize("backend", ["numpy", "jax"])
+def test_prob_mask_blends_nested_extras(backend):
+    xp = jnp if backend == "jax" else np
+    waveform = xp.ones((16, 1, 4), dtype=xp.float32)
+    scores = xp.arange(1, 17)
+    tree = AudioTree.create(waveform, 16000, extras={"nested": {"scores": scores}})
+    rng = jax.random.key(0) if backend == "jax" else np.random.default_rng(0)
+
+    @random_transform
+    def double_values(audio_tree, rng):
+        return audio_tree.replace(
+            waveform=audio_tree.waveform * 2,
+            extras={"nested": {"scores": audio_tree.extras["nested"]["scores"] * 2}},
+        )
+
+    result = double_values(prob=0.5).random_map(tree, rng)
+
+    gains = np.asarray(result.waveform[:, 0, 0])
+    assert set(gains) == {1.0, 2.0}
+    np.testing.assert_array_equal(result.extras["nested"]["scores"], scores * gains)
+
+
 # =============================================================================
 # split_seed
 # =============================================================================

@@ -6,7 +6,7 @@ from grain.transforms import Map as MapTransform, RandomMap as RandomMapTransfor
 import jax
 from jax import random
 from jax.tree import map_with_path
-from jax.tree_util import DictKey, SequenceKey
+from jax.tree_util import DictKey, GetAttrKey, SequenceKey, tree_flatten_with_path
 import numpy as np
 
 from audiotree import AudioTree
@@ -223,6 +223,12 @@ def _select_field(mask, new_value, old_value, xp, field: str):
     """
     if new_value is None or old_value is None:
         return None
+    if isinstance(new_value, dict) and isinstance(old_value, dict):
+        return {
+            key: _select_field(mask, new_value[key], value, xp, f"{field}[{key!r}]")
+            for key, value in old_value.items()
+            if key in new_value
+        }
     if not hasattr(new_value, "shape") or not hasattr(old_value, "shape"):
         # Non-array extras (e.g. a list of strings) is not per-item indexable
         # here; the transforms do not change it, so keep the original.
@@ -255,11 +261,9 @@ def _select_transformed(new_leaf, old_leaf, mask, xp):
         )
         for name in ARRAY_FIELDS
     }
-    updates["extras"] = {
-        key: _select_field(mask, new_leaf.extras[key], value, xp, f"extras[{key!r}]")
-        for key, value in old_leaf.extras.items()
-        if key in new_leaf.extras
-    }
+    updates["extras"] = _select_field(
+        mask, new_leaf.extras, old_leaf.extras, xp, "extras"
+    )
     # ``metadata`` values are never *rewritten* by a transform, but a transform
     # may *invalidate* one — ``roll`` sets ``offset`` to ``None`` because a
     # time shift makes the recorded source-file offset wrong. An entry the
@@ -272,23 +276,6 @@ def _select_transformed(new_leaf, old_leaf, mask, xp):
         for key, old_value in old_leaf._metadata.items()
     }
     return old_leaf.replace(**updates)
-
-
-def _mask_transformed(element, new_tree, rngs, draw_mask, xp, is_leaf):
-    """Blend ``new_tree`` back into ``element``, one batch item at a time.
-
-    ``element`` is flattened first so that a leaf the transform dropped (``None``,
-    which is how an out-of-scope leaf is marked when ``output_key`` is set) is
-    carried through untouched rather than exploding as a structure mismatch.
-    """
-
-    def select(old_leaf, new_leaf, leaf_rng):
-        if not isinstance(old_leaf, AudioTree) or not isinstance(new_leaf, AudioTree):
-            return new_leaf
-        mask = draw_mask(leaf_rng, _leaf_batch_size(old_leaf))
-        return _select_transformed(new_leaf, old_leaf, mask, xp)
-
-    return jax.tree.map(select, element, new_tree, rngs, is_leaf=is_leaf)
 
 
 def _spawn_numpy_rngs(
@@ -309,21 +296,19 @@ def _spawn_numpy_rngs(
     return [np.random.Generator(np.random.PCG64(seed)) for seed in seeds]
 
 
-def merge_pytree(tree1, tree2):
-    """Merge nested containers, with the second tree winning leaf collisions."""
-    # Out-of-scope AudioTrees become None, including inside lists of trees.
-    # Those placeholders must not overwrite the original elements.
-    if tree2 is None:
-        return tree1
-    if isinstance(tree1, dict) and isinstance(tree2, dict):
-        result = dict(tree1)
-        for key, value in tree2.items():
-            result[key] = merge_pytree(tree1[key], value) if key in tree1 else value
-        return result
-    if isinstance(tree1, (list, tuple)) and type(tree1) is type(tree2):
-        if len(tree1) == len(tree2):
-            return type(tree1)(merge_pytree(x, y) for x, y in zip(tree1, tree2))
-    return tree2
+def _is_audiotree(value):
+    return isinstance(value, AudioTree)
+
+
+def _output_path(path: KeyPath) -> list:
+    return [
+        key.idx
+        if isinstance(key, SequenceKey)
+        else key.name
+        if isinstance(key, GetAttrKey)
+        else getattr(key, "key", str(key))
+        for key in path
+    ]
 
 
 class _ConstantOutputKey:
@@ -347,6 +332,8 @@ class BaseTransformMixIn:
     # ``_post_process`` can reference them.
     scope: Optional[KeyLeafPairs]
     output_key: Optional[Callable[[List[str]], str]]
+    config: ConfigEntries
+    default_config: Dict[str, Any]
 
     @staticmethod
     def get_default_config() -> Dict[str, Any]:
@@ -379,6 +366,24 @@ class BaseTransformMixIn:
         """
         raise NotImplementedError("Must be implemented in subclass")
 
+    def _preprocess(self, element):
+        leaves, treedef = tree_flatten_with_path(element, is_leaf=_is_audiotree)
+        values = [
+            self._pre_transform(leaf)
+            if isinstance(leaf, AudioTree) and _is_in_scope(self.scope, path)
+            else leaf
+            for path, leaf in leaves
+        ]
+        if all(new is old for (_, old), new in zip(leaves, values)):
+            return element
+        return treedef.unflatten(values)
+
+    def _config_at(self, path: KeyPath) -> Dict[str, Any]:
+        return {
+            key: _get_config_val(self.config, path, key, default)
+            for key, default in self.default_config.items()
+        }
+
     def _post_process(self, old_tree, new_tree):
         # Capture as a local so it stays narrowed to non-None inside the closure.
         output_key = self.output_key
@@ -393,70 +398,54 @@ class BaseTransformMixIn:
                 f"{type(old_tree).__name__}, not a dict."
             )
 
-        def contains_audiotree(value) -> bool:
-            if isinstance(value, AudioTree):
-                return True
-            if isinstance(value, (list, tuple)):
-                return any(contains_audiotree(v) for v in value)
-            return False
-
-        # Use output_key to rename the nodes in the tree
-        def rename_node(path: KeyPath, leaf):
-            full_path = [k.key if isinstance(k, DictKey) else k.idx for k in path]
-            renamed = {}
+        def rename_dict(path, original, transformed):
+            updated = dict(original)
+            outputs = {}
             sources = {}  # output name -> the input key that produced it
-            for k, v in leaf.items():
-                if not contains_audiotree(v):
-                    # Non-AudioTree entries (labels, ids) pass through the
-                    # transform untouched; renaming one would duplicate it
-                    # under the new name, and counting it toward the
-                    # single-leaf rule below would make a string output_key
-                    # with one AudioTree and one label a spurious collision.
+            for key, old_value in original.items():
+                value_path = path + (DictKey(key),)
+                value, write_output = rename_value(
+                    value_path, old_value, transformed[key]
+                )
+                if not write_output:
+                    updated[key] = value
                     continue
-                if not _is_in_scope(self.scope, tuple(path) + (DictKey(k),)):
-                    continue
-                name = output_key(full_path + [k])
-                if name in renamed:
-                    # A `raise`, not a silent overwrite: a string `output_key`
-                    # meeting several in-scope leaves would keep only one
-                    # transformed result and drop the rest.
+                name = output_key(_output_path(value_path))
+                if name in outputs:
                     raise ValueError(
-                        f"output_key maps both {sources[name]!r} and {k!r} to "
+                        f"output_key maps both {sources[name]!r} and {key!r} to "
                         f"{name!r}, so all but one transformed value would be "
                         f"silently discarded. With more than one in-scope "
                         f"leaf, pass a callable output_key that returns a "
                         f"distinct name per path, e.g. "
                         f"lambda path: path[-1] + '_augmented'."
                     )
-                renamed[name] = v
-                sources[name] = k
-            return renamed
+                outputs[name] = value
+                sources[name] = key
+            return {**updated, **outputs}
 
-        def rename_tree(path, node):
-            # Inspect container types, never the truth value of an array or
-            # the first sorted key. Labels and nested dictionaries may sit
-            # alongside direct AudioTree children in the same dictionary.
-            if isinstance(node, dict):
-                nested = {
-                    key: rename_tree(path + (DictKey(key),), value)
-                    for key, value in node.items()
-                    if value is not None and not contains_audiotree(value)
-                }
-                return {**nested, **rename_node(path, node)}
-            if isinstance(node, (list, tuple)):
-                return type(node)(
-                    rename_tree(path + (SequenceKey(i),), value)
-                    for i, value in enumerate(node)
-                )
-            return node
+        def rename_value(path, original, transformed):
+            # Dicts own their output keys. An AudioTree reached through a
+            # sequence uses the containing dict key, with the other sequence
+            # entries carried over from the original.
+            leaves, treedef = tree_flatten_with_path(
+                original, is_leaf=lambda value: isinstance(value, (AudioTree, dict))
+            )
+            values = []
+            changed = write_output = False
+            for (subpath, old), new in zip(leaves, treedef.flatten_up_to(transformed)):
+                full_path = path + subpath
+                if isinstance(old, dict):
+                    new = rename_dict(full_path, old, new)
+                elif isinstance(old, AudioTree) and _is_in_scope(self.scope, full_path):
+                    write_output = True
+                else:
+                    new = old
+                changed |= new is not old
+                values.append(new)
+            return (treedef.unflatten(values) if changed else original), write_output
 
-        new_tree = rename_tree((), new_tree)
-
-        # Merge the trees. Order matters: on a key collision the second argument
-        # wins, and the only key that can collide is the one the user explicitly
-        # asked `output_key` to write, so the freshly transformed value must win.
-        new_tree = merge_pytree(old_tree, new_tree)
-        return new_tree
+        return rename_dict((), old_tree, new_tree)
 
 
 class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
@@ -512,139 +501,69 @@ class BaseRandomTransform(BaseTransformMixIn, RandomMapTransform):
         Returns:
             Any: transformed element
         Raises:
-            ValueError: If an in-scope AudioTree has multiple batch axes.
+            ValueError: If an in-scope AudioTree has multiple batch axes and
+                the transform has a nonzero probability.
                 Flatten it first, or apply the transform to rank-3 audio
                 inside scan/vmap.
         """
+        if self.prob == 0:
+            element = self._preprocess(element)
+            return self._post_process(element, element)
+
         # Per-item draws and probability masks require one active batch axis.
         # Validate before preprocessing or consuming RNG state, and only for
         # selected AudioTrees (labels and out-of-scope subtrees pass through).
-        for path, leaf in jax.tree_util.tree_flatten_with_path(
-            element, is_leaf=lambda value: isinstance(value, AudioTree)
-        )[0]:
+        for path, leaf in tree_flatten_with_path(element, is_leaf=_is_audiotree)[0]:
             if isinstance(leaf, AudioTree) and _is_in_scope(self.scope, path):
                 _require_single_batch(leaf, f"{type(self).__name__}.random_map")
 
-        # Detect if we're using numpy or JAX based on rng type
-        if isinstance(rng, np.random.Generator):
-            return self._random_map_numpy(element, rng)
+        element = self._preprocess(element)
+        leaves, treedef = tree_flatten_with_path(element, is_leaf=_is_audiotree)
+        selected = [
+            isinstance(leaf, AudioTree) and _is_in_scope(self.scope, path)
+            for path, leaf in leaves
+        ]
+        # Preserve the draw order for each backend, including one RNG slot per
+        # leaf. JAX reserves a separate key for probability before splitting.
+        use_numpy = isinstance(rng, np.random.Generator)
+        if use_numpy:
+            leaf_rngs = _spawn_numpy_rngs(rng, len(leaves), self.split_seed)
         else:
-            return self._random_map_jax(element, rng)
-
-    def _random_map_jax(self, element: Any, key: jax.Array) -> Any:
-        """JAX implementation of random_map."""
-
-        def is_leaf(leaf):
-            return isinstance(leaf, AudioTree)
-
-        def pre_transform_map_func(path: KeyPath, leaf):
-            if _is_in_scope(self.scope, path):
-                return self._pre_transform(leaf)
-            return leaf
-
-        def map_func(path: KeyPath, leaf, rng: jax.Array, *config):
-            if not is_leaf(leaf):
-                return leaf
-            if _is_in_scope(self.scope, path):
-                return self._apply_transform(leaf, rng, **config[0])
-            elif self.output_key is not None:
-                return None
-            return leaf
-
-        def map_use_default_config_val(path: KeyPath, leaf):
-            return {
-                k: _get_config_val(self.config, path, k, default)
-                for k, default in self.default_config.items()
-            }
-
-        element = map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
-
-        treedef = jax.tree.flatten(element, is_leaf=is_leaf)[1]
-        length = treedef.num_leaves
-        # Reserve the `prob` key before deriving the per-leaf keys, so it can
-        # never collide with one of them (splitting `key` twice would hand the
-        # Bernoulli draw the same bits as a leaf's transform key).
-        key, prob_key = random.split(key)
-        subkeys = random.split(key, length) if self.split_seed else [key] * length
-        subkeys = jax.tree.unflatten(treedef, subkeys)
-
-        config = map_with_path(map_use_default_config_val, element, is_leaf=is_leaf)
-
-        new_tree = map_with_path(map_func, element, subkeys, config, is_leaf=is_leaf)
-
-        if self.prob < 1:
-            # One Bernoulli draw per batch item, per leaf, so a batch is a
-            # mixture of transformed and untransformed items rather than
-            # all-or-nothing. `split_seed=False` locks the leaves together here
-            # too, otherwise a dry/wet pair would be decorrelated by the mask
-            # even though both leaves drew the same transform parameters.
-            prob_keys = (
-                random.split(prob_key, length)
+            key, prob_key = random.split(rng)
+            leaf_rngs = (
+                random.split(key, len(leaves))
                 if self.split_seed
-                else [prob_key] * length
+                else [key] * len(leaves)
             )
-            prob_keys = jax.tree.unflatten(treedef, prob_keys)
-
-            def draw_mask(leaf_key, batch_size: int):
-                return random.bernoulli(leaf_key, p=self.prob, shape=(batch_size,))
-
-            new_tree = _mask_transformed(
-                element, new_tree, prob_keys, draw_mask, jax.numpy, is_leaf
-            )
-
-        return self._post_process(element, new_tree)
-
-    def _random_map_numpy(self, element: Any, rng: np.random.Generator) -> Any:
-        """NumPy implementation of random_map."""
-
-        def is_leaf(leaf):
-            return isinstance(leaf, AudioTree)
-
-        def pre_transform_map_func(path: KeyPath, leaf):
-            if _is_in_scope(self.scope, path):
-                return self._pre_transform(leaf)
-            return leaf
-
-        def map_func(path: KeyPath, leaf, leaf_rng: np.random.Generator, *config):
-            if not is_leaf(leaf):
-                return leaf
-            if _is_in_scope(self.scope, path):
-                return self._apply_transform(leaf, leaf_rng, **config[0])
-            elif self.output_key is not None:
-                return None
-            return leaf
-
-        def map_use_default_config_val(path: KeyPath, leaf):
-            return {
-                k: _get_config_val(self.config, path, k, default)
-                for k, default in self.default_config.items()
-            }
-
-        element = map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
-
-        treedef = jax.tree.flatten(element, is_leaf=is_leaf)[1]
-        length = treedef.num_leaves
-        sub_rngs = jax.tree.unflatten(
-            treedef, _spawn_numpy_rngs(rng, length, self.split_seed)
-        )
-
-        config = map_with_path(map_use_default_config_val, element, is_leaf=is_leaf)
-
-        new_tree = map_with_path(map_func, element, sub_rngs, config, is_leaf=is_leaf)
+        values = [
+            self._apply_transform(leaf, leaf_rng, **self._config_at(path))
+            if in_scope
+            else leaf
+            for (path, leaf), leaf_rng, in_scope in zip(leaves, leaf_rngs, selected)
+        ]
 
         if self.prob < 1:
-            prob_rngs = jax.tree.unflatten(
-                treedef, _spawn_numpy_rngs(rng, length, self.split_seed)
-            )
+            if use_numpy:
+                prob_rngs = _spawn_numpy_rngs(rng, len(leaves), self.split_seed)
+            else:
+                prob_rngs = (
+                    random.split(prob_key, len(leaves))
+                    if self.split_seed
+                    else [prob_key] * len(leaves)
+                )
+            for index, ((_, old), new, in_scope, prob_rng) in enumerate(
+                zip(leaves, values, selected, prob_rngs)
+            ):
+                if in_scope and isinstance(new, AudioTree):
+                    size = _leaf_batch_size(old)
+                    if use_numpy:
+                        mask = prob_rng.random(size) < self.prob
+                        values[index] = _select_transformed(new, old, mask, np)
+                    else:
+                        mask = random.bernoulli(prob_rng, p=self.prob, shape=(size,))
+                        values[index] = _select_transformed(new, old, mask, jax.numpy)
 
-            def draw_mask(leaf_rng: np.random.Generator, batch_size: int):
-                return leaf_rng.random(batch_size) < self.prob
-
-            new_tree = _mask_transformed(
-                element, new_tree, prob_rngs, draw_mask, np, is_leaf
-            )
-
-        return self._post_process(element, new_tree)
+        return self._post_process(element, treedef.unflatten(values))
 
 
 class BaseMapTransform(BaseTransformMixIn, MapTransform):
@@ -686,33 +605,11 @@ class BaseMapTransform(BaseTransformMixIn, MapTransform):
             Any: transformed element
         """
 
-        def is_leaf(leaf):
-            return isinstance(leaf, AudioTree)
-
-        def pre_transform_map_func(path: KeyPath, leaf):
-            if not is_leaf(leaf):
-                return leaf
-            if _is_in_scope(self.scope, path):
-                return self._pre_transform(leaf)
+        def apply(path, leaf):
+            if isinstance(leaf, AudioTree) and _is_in_scope(self.scope, path):
+                return self._apply_transform(leaf, **self._config_at(path))
             return leaf
 
-        def map_func(path: KeyPath, leaf, *config):
-            if not is_leaf(leaf):
-                return leaf
-            if _is_in_scope(self.scope, path):
-                return self._apply_transform(leaf, **config[0])
-            elif self.output_key is not None:
-                return None
-            return leaf
-
-        def map_use_default_config_val(path: KeyPath, leaf):
-            return {
-                key: _get_config_val(self.config, path, key, default)
-                for key, default in self.default_config.items()
-            }
-
-        element = map_with_path(pre_transform_map_func, element, is_leaf=is_leaf)
-
-        config = map_with_path(map_use_default_config_val, element, is_leaf=is_leaf)
-        new_tree = map_with_path(map_func, element, config, is_leaf=is_leaf)
+        element = self._preprocess(element)
+        new_tree = map_with_path(apply, element, is_leaf=_is_audiotree)
         return self._post_process(element, new_tree)
