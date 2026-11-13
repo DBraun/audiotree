@@ -1,6 +1,7 @@
 """Tests for length-aware windowed audio sampling (audiotree.sources.windowed)."""
 
 import importlib.util
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -446,8 +447,41 @@ def test_save_window_lufs_temp_file_keeps_bagz_extension(tmp_path, monkeypatch):
         lufs_window_sec=1.0,
     )
     assert writer_paths and all(p.suffix == ".bagz" for p in writer_paths)
-    assert (out / "lufs.bagz").exists()
+    manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    assert (out / manifest["bagz_file"]).exists()
     assert [p.name for p in out.iterdir() if p.name.startswith(".")] == []
+
+
+@requires_bagz
+def test_failed_window_lufs_replacement_preserves_previous_cache(tmp_path, monkeypatch):
+    from audiotree.sources import windowed
+
+    initial = {"x.wav": [-40], "y.wav": [-20]}
+    replacement = {"y.wav": [-1], "x.wav": [-2]}
+    save_window_lufs(tmp_path, initial, lufs_window_sec=1.0)
+    original_files = set(tmp_path.iterdir())
+
+    with pytest.raises(KeyError, match="y.wav"):
+        save_window_lufs(
+            tmp_path, replacement, lufs_window_sec=1.0, durations={"x.wav": 1.0}
+        )
+
+    def fail_to_publish(*args, **kwargs):
+        raise OSError("manifest publication failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(windowed, "write_json_atomic", fail_to_publish)
+        with pytest.raises(OSError, match="manifest publication failed"):
+            save_window_lufs(tmp_path, replacement, lufs_window_sec=1.0)
+
+    assert set(tmp_path.iterdir()) == original_files
+    for path, values in initial.items():
+        np.testing.assert_array_equal(load_window_lufs(tmp_path).lufs[path], values)
+
+    save_window_lufs(tmp_path, replacement, lufs_window_sec=1.0)
+    assert original_files <= set(tmp_path.iterdir())
+    for path, values in replacement.items():
+        np.testing.assert_array_equal(load_window_lufs(tmp_path).lufs[path], values)
 
 
 @requires_bagz

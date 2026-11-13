@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+from uuid import uuid4
 
 
 def safe_join(base: Path, relative: str, *, description: str = "path") -> Path:
@@ -64,14 +65,14 @@ def refuse_to_clobber(directory: Path, patterns: tuple[str, ...]) -> None:
             )
 
 
-def write_json_atomic(path: Path, payload: Any, *, indent: int = 2) -> None:
+def write_json_atomic(path: Path, payload: Any, *, indent: int | None = 2) -> None:
     """Write JSON to *path* via a temp file and a rename.
 
     A reader either sees the previous file or the new one, never a partial
     write — which matters because these manifests are refreshed while the
     dataset they describe is still being written.
     """
-    tmp = path.with_name(f".{path.name}.tmp")
+    tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=indent)

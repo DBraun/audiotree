@@ -28,6 +28,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Literal, Mapping, Optional
+from uuid import uuid4
 
 import grain
 import librosa
@@ -46,7 +47,6 @@ from .core import (
     find_audio_files,
 )
 
-_LUFS_BAGZ = "lufs.bagz"
 _LUFS_MANIFEST = "manifest.json"
 
 # Keys ``load_window_lufs`` reads without a fallback. Missing any of them is a
@@ -252,7 +252,7 @@ def save_window_lufs(
     """Persist a windowed-loudness cache to ``out_dir`` as bagz + JSON manifest.
 
     The ragged per-file LUFS arrays are stored as one ``float32`` record each in
-    a single ``lufs.bagz`` file (no padding), in the order of
+    a single Bagz file (no padding), in the order of
     ``lufs_per_file``. A ``manifest.json`` records the filepaths (parallel to
     the bagz records), the analysis window, optional durations, the
     ``sample_rate``/``mono`` the loudness was measured at (so the dataset can
@@ -261,6 +261,9 @@ def save_window_lufs(
     construction rather than silently keeping stale durations and loudness.
     A rewrite that keeps the byte size identical is not detectable this way
     (see :class:`WindowLufsCache`).
+
+    Replacing a cache publishes a new manifest and keeps its previous Bagz
+    file available for readers that have already opened the previous manifest.
 
     Args:
         out_dir: Directory to write the cache into (created if missing).
@@ -279,22 +282,6 @@ def save_window_lufs(
     out_dir.mkdir(parents=True, exist_ok=True)
     filepaths = list(lufs_per_file.keys())
 
-    # Write to a temp file and rename into place (mirroring write_json_atomic)
-    # so a failed write can't leave a partial lufs.bagz paired with the manifest,
-    # and always close the writer even if a record raises. bagz selects
-    # compression from the file extension, so the temp name must keep ".bagz"
-    # or the renamed file would hold uncompressed records under a name readers
-    # decompress.
-    bagz_path = out_dir / _LUFS_BAGZ
-    tmp_bagz = bagz_path.with_name(f".{bagz_path.stem}.tmp{bagz_path.suffix}")
-    writer = require_bagz("writing windowed-LUFS caches").Writer(str(tmp_bagz))
-    try:
-        for fp in filepaths:
-            writer.write(np.asarray(lufs_per_file[fp], dtype=np.float32).tobytes())
-    finally:
-        writer.close()
-    os.replace(tmp_bagz, bagz_path)
-
     # Record each file's byte size so a file re-rendered in place after the
     # cache was built names itself at load time instead of silently keeping
     # the old durations and loudness. A file that vanished between analysis
@@ -306,6 +293,7 @@ def save_window_lufs(
         except OSError:
             file_sizes.append(None)
 
+    bagz_path = out_dir / f"lufs-{uuid4().hex}.bagz"
     manifest = {
         **_format.header(_format.LUFS_WINDOWS_CACHE),
         "lufs_window_sec": float(lufs_window_sec),
@@ -318,9 +306,22 @@ def save_window_lufs(
             else None
         ),
         "file_sizes": file_sizes,
-        "bagz_file": _LUFS_BAGZ,
+        "bagz_file": bagz_path.name,
     }
-    write_json_atomic(out_dir / _LUFS_MANIFEST, manifest, indent=None)
+    # Only the manifest is published in place. Its payload has a unique name
+    # so overlapping writes and readers of an earlier manifest remain safe.
+    bagz = require_bagz("writing windowed-LUFS caches")
+    try:
+        writer = bagz.Writer(str(bagz_path))
+        try:
+            for fp in filepaths:
+                writer.write(np.asarray(lufs_per_file[fp], dtype=np.float32).tobytes())
+        finally:
+            writer.close()
+        write_json_atomic(out_dir / _LUFS_MANIFEST, manifest, indent=None)
+    except Exception:
+        bagz_path.unlink(missing_ok=True)
+        raise
     return out_dir
 
 
@@ -328,7 +329,7 @@ def load_window_lufs(cache_dir: str | Path) -> WindowLufsCache:
     """Load a windowed-loudness cache written by :func:`save_window_lufs`.
 
     Args:
-        cache_dir: Directory containing ``lufs.bagz`` and ``manifest.json``.
+        cache_dir: Directory containing ``manifest.json`` and its Bagz file.
 
     Returns:
         A :class:`WindowLufsCache` with the per-file LUFS arrays, optional
