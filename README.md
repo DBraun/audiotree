@@ -89,7 +89,7 @@ syntactic classification. Breaking changes are documented in the
    author = {Braun, David},
    title = {{AudioTree}},
    url = {https://github.com/DBraun/audiotree},
-   version = {1.0.0},
+   version = {1.1.0},
    year = {2026}
 }
 ```

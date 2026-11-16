@@ -6,6 +6,8 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-16
+
 ### Added
 
 - Add `AudioTree.resample(engine=...)` to choose the resampling algorithm
@@ -29,9 +31,11 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
   `[0, ceil(T * new_sr / old_sr)]` range, matching the JAX engine.
 - Require Python 3.12 or newer to match JAX 0.11.1, and run CI on supported
   Python versions. This also fixes universal dependency resolution in `uv sync`.
-- Raise the dependency minimums to audioread 3.0.1, which builds on Python 3.12,
-  JAX 0.11.1, and Flax 0.12.10, which supports the JAX 0.11 NNX API without the
+- Raise the dependency minimums to JAX 0.11.1 and Flax 0.12.10. Flax 0.12.10
+  supports the JAX 0.11 NNX API without the
   `HiPrimitive` import that JAX 0.11.2 removed.
+- Install Bagz 0.3.8+ as a base dependency on macOS and Linux, replacing the
+  `bagz` extra. The `all` extra now adds only progress reporting.
 
 ### Fixed
 
@@ -75,8 +79,8 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 - Track mini-batch grouping explicitly as static pytree metadata, allowing
   token-only trees of any payload rank to reshape and flatten safely. Flattening
   ungrouped tokens and grouping an already grouped tree now raise. `TreeWriter`
-  preserves this state using tree format 1.1 with a 1.1 reader requirement;
-  ordinary datasets retain format 1.0.
+  preserves this state in numeric datasets using tree format 1.1. Ordinary
+  numeric datasets retain format 1.0.
 - Invalidate integrated loudness after circular `roll` in both backends: moving
   audio across analysis blocks can change measured LUFS even at equal energy.
 - Read enough source frames for `AudioTree.from_file(duration=...)` before
@@ -104,11 +108,6 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
   `AudioDataSource` to read individual items.
 - Fix `flatten_mini_batches()` for token-only trees with label fields and for
   trees with zero-width array leaves, preserving batch sizes and feature shapes.
-
-### Changed
-
-- Install Bagz 0.3.8+ as a base dependency on macOS and Linux, replacing the
-  `bagz` extra. The `all` extra now adds only progress reporting.
 
 ## [1.0.0] - 2026-08-11
 
