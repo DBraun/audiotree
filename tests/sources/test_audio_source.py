@@ -859,8 +859,6 @@ def test_getitem_warn_names_the_file_and_skip_stays_quiet(tmp_path):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         quiet_source[1]
-    # librosa warns on its own when it falls back to audioread; what must be
-    # absent is *our* drop notice.
     assert not [w for w in caught if "Skipping unreadable" in str(w.message)]
 
 

@@ -212,12 +212,8 @@ instead. It is accepted by :func:`~audiotree.sources.create_audio_dataset`,
 Failing loudly, by name
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Under the default policy, every read failure surfaces as ``AudioReadError``
-regardless of which layer of the decoding stack noticed. That matters because
-the underlying exception frequently does not identify the file: a truncated
-header sends librosa down its ``audioread`` fallback, whose ``EOFError`` or
-``NoBackendError`` has an empty ``str()`` — a blank traceback line at the end of
-a long run.
+Under the default policy, a file read failure surfaces as ``AudioReadError``
+with the file path and the original decoder error in its message.
 
 ``AudioReadError`` subclasses :class:`OSError`, carries the path as
 ``file_path``, and keeps whatever the decoder raised as ``__cause__``:

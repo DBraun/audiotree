@@ -1,5 +1,6 @@
 from itertools import product
 
+import jax
 from jax import numpy as jnp
 from jax import random
 import librosax
@@ -136,47 +137,45 @@ def test_shift_phase_keeps_a_stereo_image_coherent(seed: int):
 
 
 @pytest.mark.parametrize("hop_factor", [0.25, 0.5])
+@pytest.mark.parametrize("frame_length", [2048, 2049])
 @pytest.mark.parametrize(
     "transform_jax,transform_np",
     [(_shift_phase_jax, _shift_phase_np), (_corrupt_phase_jax, _corrupt_phase_np)],
 )
 def test_phase_transforms_reconstruct_the_tail(
-    hop_factor: float, transform_jax, transform_np
+    hop_factor: float, frame_length: int, transform_jax, transform_np
 ):
-    """With ``amount=0`` the STFT round trip must return the whole signal.
-
-    ``librosax.istft`` reconstructs only ``(n_frames - 1) * hop_length``
-    samples and zero-fills the rest of the requested ``length``, so the JAX
-    backend used to silence the last ``length % hop_length`` samples -- 68
-    samples of this 1 s @ 44.1 kHz clip at either hop below, an audible drop
-    out. The helpers now pad up to a whole number of hops before the STFT and
-    trim afterwards.
-    """
+    """The compiled JAX round trip preserves every sample and the input dtype."""
     length = 44100  # 44100 % 1024 == 44100 % 512 == 68
-    hop_length = int(2048 * hop_factor)
+    hop_length = int(frame_length * hop_factor)
     assert length % hop_length != 0, "this test is only meaningful for a ragged tail"
 
     waveform = _dual_mono(length, seed=1)
     sample_rate = 44100
 
-    jax_out = np.asarray(
-        transform_jax(
+    compiled = jax.jit(
+        transform_jax, static_argnames=("amount", "hop_factor", "frame_length")
+    )
+    with jax.enable_x64():
+        jax_out = compiled(
             AudioTree(waveform=jnp.asarray(waveform), sample_rate=sample_rate),
             random.key(0),
             amount=0.0,
             hop_factor=hop_factor,
+            frame_length=frame_length,
         ).waveform
-    )
     np_out = np.asarray(
         transform_np(
             AudioTree(waveform=waveform, sample_rate=sample_rate),
             np.random.default_rng(0),
             amount=0.0,
             hop_factor=hop_factor,
+            frame_length=frame_length,
         ).waveform
     )
 
     tail = slice(-2 * hop_length, None)
     assert np.abs(jax_out[..., tail]).max() > 0.0
+    assert jax_out.dtype == waveform.dtype
     np.testing.assert_allclose(jax_out, waveform, atol=1e-5)
     np.testing.assert_allclose(np_out, waveform, atol=1e-5)

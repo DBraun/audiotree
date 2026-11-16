@@ -18,6 +18,10 @@ follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
 
 ### Changed
 
+- Require librosax 0.2.0 and librosa 1.0.1. JAX phase transforms use the
+  corrected inverse STFT to reconstruct clip tails without an extra analysis
+  frame. Audio decoding now uses SoundFile, following librosa's removal of
+  the audioread fallback.
 - `AudioTree.resample` raises when `zeros`, `rolloff`, or `full=True` is passed
   and soxr runs (including the default for NumPy waveforms), instead of silently
   ignoring these JAX-only options. Pass `engine="jax"` to use them. soxr now

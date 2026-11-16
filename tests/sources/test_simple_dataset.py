@@ -1,6 +1,5 @@
 """Tests for create_audio_dataset function."""
 
-import gc
 import os
 import stat
 import sys
@@ -33,8 +32,6 @@ def _write_truncated_header(path: Path, valid_bytes: bytes) -> None:
 
 
 def _write_garbage(path: Path, valid_bytes: bytes) -> None:
-    # No backend recognizes this, which is what raises audioread's
-    # NoBackendError (whose str() is empty) on librosa's fallback path.
     path.write_bytes(np.random.default_rng(0).bytes(4096))
 
 
@@ -510,15 +507,7 @@ ALL_STRATEGIES = ("start", "random", "loudest")
 @pytest.mark.parametrize("kind", sorted(CORRUPT_FILE_KINDS))
 @pytest.mark.parametrize("strategy", ALL_STRATEGIES)
 def test_on_read_error_raise_always_names_the_path(kind, strategy, restore_permissions):
-    """The default policy raises AudioReadError, and the path is in the message.
-
-    This is the regression: with ``strategy="start"`` a zero-byte or otherwise
-    unparseable file reaches librosa's audioread fallback, which raises an
-    ``EOFError`` or an ``audioread.exceptions.NoBackendError`` whose ``str()``
-    is *empty* -- a blank line at the end of a long run, naming nothing. (The
-    ``soundfile`` errors that ``"random"``/``"loudest"`` hit do name the path;
-    they are checked here so every strategy is known to behave the same.)
-    """
+    """Keep the path and decoder error across all excerpt strategies."""
     if kind == "unreadable":
         if sys.platform == "win32":
             pytest.skip("chmod(0) does not deny the owner a read on Windows")
@@ -544,15 +533,6 @@ def test_on_read_error_raise_always_names_the_path(kind, strategy, restore_permi
         # The original exception is preserved, not swallowed, and its type is
         # named even when its message is empty.
         cause_name = type(error.__cause__).__name__ if error.__cause__ else None
-
-        # Then let the exception go before the tmpdir is removed. Its traceback
-        # holds the frames of librosa's audioread fallback, which holds an open
-        # handle on the file, and Windows refuses to delete a file that is still
-        # open. Measured on a zero-byte file: 1 handle while the exception is
-        # alive, 0 after. Exception and traceback reference each other, so the
-        # collect is doing real work rather than being superstitious.
-        del error, excinfo
-        gc.collect()
 
         assert str(path) in message
         assert file_path == str(path)
@@ -624,8 +604,6 @@ def test_on_read_error_warn_names_the_file_and_skip_stays_quiet():
                 duration=0.5,
                 on_read_error="skip",
             )
-        # librosa may warn on its own when it falls back to audioread; what
-        # must be absent is *our* drop notice.
         assert not [w for w in caught if "Skipping unreadable" in str(w.message)]
 
 

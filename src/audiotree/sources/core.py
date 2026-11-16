@@ -7,7 +7,6 @@ import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Literal, Mapping, Optional
 
-import audioread.exceptions
 import grain
 import numpy as np
 import soundfile
@@ -34,22 +33,6 @@ class AudioReadError(OSError):
     so that a corrupt file in a large corpus always names itself. The original
     exception is kept as ``__cause__`` and the path as :attr:`file_path`.
 
-    The wrapping exists because the underlying exception frequently does *not*
-    identify the file. ``soundfile`` puts the path in its message, but a
-    truncated header sends ``librosa`` down its ``audioread`` fallback, which
-    surfaces an :class:`EOFError` or an
-    :class:`audioread.exceptions.NoBackendError` whose ``str()`` is empty --
-    a blank traceback line at the end of a multi-hour run.
-
-    .. note::
-       On Windows, *holding* one of these keeps the offending file open. The
-       traceback references librosa's ``audioread`` fallback frames, which hold
-       a file handle, and Windows will not delete or replace an open file. It
-       matters only if you accumulate errors rather than handling them --
-       collect ``err.file_path`` and ``str(err)`` and let the exception go, or
-       call :func:`gc.collect` after dropping it (exception and traceback
-       reference each other, so refcounting alone does not free it).
-
     Attributes:
         file_path: The file that could not be read.
     """
@@ -65,23 +48,11 @@ class AudioReadError(OSError):
 #: Exceptions that mean "this file could not be read", as opposed to "this
 #: dataset is misconfigured".
 #:
-#: The tuple is explicit rather than a bare ``Exception`` so that real bugs
-#: still crash. Three of the entries are easy to get wrong:
-#:
-#: * ``audioread.exceptions.DecodeError`` (the base of ``NoBackendError``) is
-#:   **not** a :class:`RuntimeError`, so an ``except RuntimeError`` misses every
-#:   file that falls through to the ``audioread`` fallback.
-#: * :class:`EOFError` is what ``audioread``'s stdlib backends raise on a
-#:   header truncated mid-chunk, and it is not an :class:`OSError` either.
-#: * :class:`soundfile.LibsndfileError` is listed instead of its
-#:   :class:`RuntimeError` base on purpose: ``ExcerptConfig.on_failure="raise"``
-#:   also raises a ``RuntimeError``, and that is a *policy* decision the caller
-#:   already made, not a read failure to be papered over.
+#: Catch ``LibsndfileError`` specifically so policy failures such as
+#: ``ExcerptConfig.on_failure="raise"`` still propagate as ``RuntimeError``.
 _READ_ERRORS: tuple[type[BaseException], ...] = (
     OSError,  # FileNotFoundError, IsADirectoryError, PermissionError, ...
-    EOFError,
     soundfile.LibsndfileError,
-    audioread.exceptions.DecodeError,
 )
 
 

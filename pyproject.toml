@@ -45,10 +45,6 @@ dependencies = [
     # the `test_lowest_direct` CI job. Declaring a lower one is fiction: the
     # resolver can never pick it.
     "absl-py>=2.0",
-    # Imported directly by sources/core.py to name the exception librosa's
-    # fallback decoder raises. It arrives transitively via librosa, but a
-    # direct import needs a direct declaration.
-    "audioread>=3.0.1",  # 3.0.0's build imports imp, removed in Python 3.12
     "bagz>=0.3.8; sys_platform == 'darwin' or sys_platform == 'linux'",
     "einops>=0.8.1",
     "flax>=0.12.10",
@@ -58,8 +54,8 @@ dependencies = [
     "grain>=0.2.15,<0.3",
     "jax>=0.11.1",
     "jaxloudnorm>=0.3.2",
-    "librosa>=0.11.0",
-    "librosax>=0.1.2",
+    "librosa>=1.0.1",
+    "librosax>=0.2.0",
     "loudness>=0.2.0",
     "numpy>=2.1.3",
     "scipy>=1.16.2",
@@ -143,9 +139,6 @@ filterwarnings = [
     "ignore::EncodingWarning",
     "error::EncodingWarning:audiotree",
     "error::EncodingWarning:tests",
-    "ignore:.*aifc.*:DeprecationWarning:audioread.rawread",
-    "ignore:.*audioop.*:DeprecationWarning:audioread.rawread",
-    "ignore:.*sunau.*:DeprecationWarning:audioread.rawread",
 ]
 
 [tool.ruff]
