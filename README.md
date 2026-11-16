@@ -3,16 +3,10 @@
 [![PyPI](https://img.shields.io/pypi/v/audiotree.svg)](https://pypi.org/project/audiotree/)
 [![Docs](https://img.shields.io/badge/docs-dirt.design%2Faudiotree-blue)](https://dirt.design/audiotree)
 
-AudioTree is an audio data loading and augmentation library supporting PyTorch
-and with extra features for [JAX](https://jax.readthedocs.io/en/latest/). Its
-central type, `AudioTree`, holds a batch of audio as a
-[pytree](https://jax.readthedocs.io/en/latest/pytrees.html): waveform, sample
-rate, loudness, and more, including your own per-item arrays. Augmentations come
-in matched NumPy and JAX backends (NumPy for CPU data-loader workers, JAX for
-jitted training steps).
-
-The [documentation](https://dirt.design/audiotree) carries the full guides,
-tested examples, and the API reference; start there.
+AudioTree loads audio files, samples excerpts, and applies augmentations. An
+`AudioTree` holds batched waveforms, a sample rate, and optional per-item data
+such as loudness or labels. Use the NumPy transforms in CPU data loaders,
+including PyTorch pipelines, or the JAX transforms inside `jax.jit`.
 
 ## Install
 
@@ -35,13 +29,11 @@ from audiotree import AudioTree
 from audiotree.sources import create_audio_dataset
 from audiotree.transforms import stereo, volume_norm
 
-# One file in, one AudioTree out. Even a single file is a batch (of 1).
+# A single file still has a batch axis.
 audio = AudioTree.from_file("/data/audio/song.wav", sample_rate=44_100)
 print(audio.waveform.shape)   # (1, channels, samples)
 
-# The same idea for a whole directory: a shuffled, infinite stream of 5-second
-# excerpts. num_epochs=None repeats forever; an integer gives that many passes
-# over the files.
+# Sample five-second excerpts. num_epochs=None repeats indefinitely.
 ds = create_audio_dataset(
     sources=["/data/audio"],
     sample_rate=44_100,
@@ -50,37 +42,30 @@ ds = create_audio_dataset(
     num_epochs=None,
 )
 
-# Augment. One .seed() call: each random_map derives its own stream from it.
+# Grain derives a separate random stream for each random_map call.
 ds = ds.seed(42)
 ds = ds.map(stereo())
 ds = ds.random_map(volume_norm(min_db=-20, max_db=-15))
 
-# Batch. AudioTree.batch concatenates along the leading axis items already have,
-# rather than stacking a new one.
+# Concatenate along the existing batch axis.
 it = iter(ds.to_iter_dataset().batch(8, batch_fn=AudioTree.batch))
 
 batch: AudioTree = next(it)
-print(batch.waveform.shape)   # (8, 2, 220500) == (batch, channels, samples)
-print(batch.sample_rate)      # 44100, one scalar for the whole batch
-print(batch.lufs.shape)       # (8,): volume_norm leaves the achieved loudness behind
-print(batch.filepath[0])      # the source file item 0 was drawn from
+print(batch.waveform.shape)   # (8, 2, 220500), ordered by batch, channel, and sample
+print(batch.sample_rate)      # 44100 for the whole batch
+print(batch.lufs.shape)       # (8,), one measured LUFS value per item
+print(batch.filepath[0])      # Source file for the first excerpt
 ```
 
-The same transforms exist in two backends: `audiotree.transforms` (NumPy, for CPU
-Grain workers) and `audiotree.transforms.jax` (JAX, for jitted training steps),
-bindable from YAML or the command line with DBraun's
-[ArgBind fork](https://github.com/DBraun/argbind/). Beyond the quickstart: balanced
-sampling across source groups, length-aware *windowed* sampling, loudness-gated
-excerpt search, per-dataset read-error policies, two on-disk dataset writers, and
-neural-codec protocols. The [guides](https://dirt.design/audiotree) cover all of
-it, including how AudioTree compares to audiotools and torchaudio.
+- [Mix datasets with sampling weights](https://dirt.design/audiotree/introduction/balanced_datasets.html)
+- [Sample windows from long recordings](https://dirt.design/audiotree/introduction/windowed_datasets.html)
+- [Write datasets to disk](https://dirt.design/audiotree/introduction/writer.html)
 
 ## Versioning
 
-AudioTree follows [Effort-based Versioning](https://jacobtomlinson.dev/effver/):
-the version communicates the effort a change is likely to cost you, not a
-syntactic classification. Breaking changes are documented in the
-[changelog](https://dirt.design/audiotree/changelog.html).
+AudioTree uses [Effort-based Versioning](https://jacobtomlinson.dev/effver/).
+See the [changelog](https://dirt.design/audiotree/changelog.html) for changes
+that may require updates to your code.
 
 ## Citation
 
